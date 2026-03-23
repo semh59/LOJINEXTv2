@@ -1,0 +1,29 @@
+# LOJINEXTv2 Agent Directives
+
+You are an AI agent operating in the LOJINEXTv2 repository.
+This project strictly follows an Agent-Driven Development Framework.
+You are assumed to have NO memory between sessions. Every assumption must be verified against the project's markdown records.
+
+**YOUR MANDATORY FIRST STEP:**
+Before writing any code or answering any request, you MUST silently read the following files in this exact order:
+
+1. `.agents/docs/AGENTS.md`
+2. `.agents/docs/WORKFLOW.md`
+3. `.agents/docs/RULES.md`
+4. `MEMORY/PROJECT_STATE.md`
+5. `MEMORY/DECISIONS.md`
+6. `MEMORY/KNOWN_ISSUES.md`
+
+If there is an active task in the `TASKS/` folder, you must also read: 7. `TASKS/<active-task>/BRIEF.md` 8. `TASKS/<active-task>/PLAN.md` 9. `TASKS/<active-task>/STATE.md` 10. `TASKS/<active-task>/NEXT_AGENT.md`
+
+**CRITICAL RULES SUMMARY:**
+
+- **Never skip the 7-Phase Workflow:** (READ → UNDERSTAND → PLAN → BUILD → PROVE → RECORD → HAND OFF).
+- **No Code Without a Plan:** A `PLAN.md` must be written/updated before code changes.
+- **One Task, One Purpose:** Do not fix out-of-scope bugs (log them in `MEMORY/KNOWN_ISSUES.md`).
+- **Record Everything:** Update `STATE.md`, `CHANGED_FILES.md`, and `TEST_EVIDENCE.md` as you make progress. Do not skip testing. Provide real terminal test output.
+- **Always Leave a Handoff:** Before your session ends (even if tokens run out), you MUST write/update `TASKS/<active-task>/NEXT_AGENT.md` for the next agent session.
+- **English Only:** All source code, comments, config names, commits, and internal docs are strictly in English.
+
+Failure to follow these directives means your code will be rejected.
+Now, proceed to read `.agents/docs/AGENTS.md` to begin your session correctly.
