@@ -13,7 +13,7 @@ Update it at the end of any session that changes project state.
 ## Next Task ID
 
 ```
-TASK-0002
+TASK-0005
 ```
 
 Use this when creating the next task. Then increment this counter.
@@ -65,32 +65,35 @@ Phase 6   Testing
 | Task ID   | Description                                 | Status   | Last Updated     | Last Agent  |
 | --------- | ------------------------------------------- | -------- | ---------------- | ----------- |
 | TASK-0001 | Trip Service Greenfield Implementation (V8) | planning | 2026-03-23T22:23 | Antigravity |
+| TASK-0005 | Location Service API Endpoints (Phase 4)    | planning | 2026-03-24T23:25 | Antigravity |
 
 ---
 
 ## Recently Completed
 
-| Task ID   | Description                      | Status   | Last Updated | Last Agent  |
-| --------- | -------------------------------- | -------- | ------------ | ----------- |
-| TASK-0001 | Fix Code Lint and Quality Issues | planning | 2026-03-24   | Antigravity |
+| Task ID   | Description             | Status    | Last Updated | Last Agent  |
+| --------- | ----------------------- | --------- | ------------ | ----------- |
+| TASK-0004 | Location Service Domain | completed | 2026-03-24   | Antigravity |
+| TASK-0003 | Location Service Scaffo | completed | 2026-03-24   | Antigravity |
+| TASK-0002 | Weather Service Removal | completed | 2026-03-24   | Antigravity |
 
 ---
 
 ## What Comes Next
 
 ```
-Task:   TASK-0001 — Phase 1: Foundation & Data Model
-Why:    All subsequent phases depend on database schema and shared middleware
-Brief:  Initialize project, create migrations for 9 tables, implement shared middleware
+Task:   TASK-0006 — <New Task Description>
+Why:    <Reason for new task>
+Brief:  <Brief description of new task>
 ```
 
 ---
 
 ## Current Blockers
 
-| Blocker                     | Impact                                          | Resolution Needed                   |
-| --------------------------- | ----------------------------------------------- | ----------------------------------- |
-| Technology stack not chosen | Cannot begin scaffolding or write concrete code | User must choose language/framework |
+| Blocker | Impact | Resolution Needed |
+| ------- | ------ | ----------------- |
+| —       | —      | —                 |
 
 ---
 
