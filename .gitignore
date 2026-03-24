@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+.toast
+.lucid
+.cache
+.pytest_cache/
+.coverage
+.htmlcov
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.mypy_cache/
+.pdm-python
+.python-version
+
+# Distribution / packaging
+bin/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Storage / Data
+services/trip-service/storage/imports/*
+!services/trip-service/storage/imports/.gitkeep
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

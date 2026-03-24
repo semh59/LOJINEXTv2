@@ -13,7 +13,7 @@ Update it at the end of any session that changes project state.
 ## Next Task ID
 
 ```
-TASK-0001
+TASK-0002
 ```
 
 Use this when creating the next task. Then increment this counter.
@@ -24,59 +24,73 @@ Never reuse a retired ID.
 ## Current Phase
 
 ```
-Phase: —
-Status: not started
+Phase: Phase 1 — Foundation
+Status: planning
 ```
 
 ---
 
 ## Phase Map
 
-Define phases here as the project is planned.
-Each phase entry must include:
-
-- what the phase produces
-- the gate condition that closes it
-
 ```
-Phase X   [Name]
-          Produces: [what working software exists after this phase]
-          Gate: [specific, verifiable condition — not "it works"]
+Phase 1   Foundation & Data Model
+          Produces: Project scaffold, 9 database tables, shared middleware (error handler, ETag, pagination, request ID)
+          Gate: All migrations run, health endpoint returns 200, middleware unit tests pass
+
+Phase 2   Core Trip Endpoints
+          Produces: 8 core trip endpoints (ingest, create, list, detail, edit, approve, cancel, hard delete, empty return)
+          Gate: All endpoint contract tests pass, all mandatory unit tests for Section 23 pass
+
+Phase 3   Enrichment Worker & Events
+          Produces: Enrichment worker with claim algorithm, retry policy, outbox relay, domain events
+          Gate: Worker processes enrichment, recovers orphaned claims, outbox publishes events
+
+Phase 4   Import/Export & Driver Statement
+          Produces: File upload, import/export job lifecycle, driver statement with field mapping
+          Gate: Import STRICT/PARTIAL modes work, export generates .xlsx, statement renders correctly
+
+Phase 5   Idempotency & Observability
+          Produces: Admin idempotency, health/readiness, structured logging, metrics
+          Gate: Idempotency tests pass, readiness reports correct dependency status
+
+Phase 6   Testing
+          Produces: All 44 mandatory tests from V8 spec Section 23
+          Gate: All unit, integration, and contract tests pass
 ```
 
 ---
 
 ## Active Tasks
 
-| Task ID | Description | Status | Last Updated | Last Agent |
-| ------- | ----------- | ------ | ------------ | ---------- |
-| —       | —           | —      | —            | —          |
+| Task ID   | Description                                 | Status   | Last Updated     | Last Agent  |
+| --------- | ------------------------------------------- | -------- | ---------------- | ----------- |
+| TASK-0001 | Trip Service Greenfield Implementation (V8) | planning | 2026-03-23T22:23 | Antigravity |
 
 ---
 
 ## Recently Completed
 
-| Task ID | Description | Completed | Merged |
-| ------- | ----------- | --------- | ------ |
-| —       | —           | —         | —      |
+| Task ID   | Description                      | Status   | Last Updated | Last Agent  |
+| --------- | -------------------------------- | -------- | ------------ | ----------- |
+| TASK-0001 | Fix Code Lint and Quality Issues | planning | 2026-03-24   | Antigravity |
 
 ---
 
 ## What Comes Next
 
 ```
-Task:   —
-Why:    —
-Brief:  —
+Task:   TASK-0001 — Phase 1: Foundation & Data Model
+Why:    All subsequent phases depend on database schema and shared middleware
+Brief:  Initialize project, create migrations for 9 tables, implement shared middleware
 ```
 
 ---
 
 ## Current Blockers
 
-| Blocker | Impact | Resolution Needed |
-| ------- | ------ | ----------------- |
-| —       | —      | —                 |
+| Blocker                     | Impact                                          | Resolution Needed                   |
+| --------------------------- | ----------------------------------------------- | ----------------------------------- |
+| Technology stack not chosen | Cannot begin scaffolding or write concrete code | User must choose language/framework |
 
 ---
 
