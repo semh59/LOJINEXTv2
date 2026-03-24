@@ -47,29 +47,13 @@ async def test_route_enrichment_retry(client: AsyncClient):
 
 
 # ---------------------------------------------------------------------------
-# IT-03: weather enrichment retry path
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_weather_enrichment_retry(client: AsyncClient):
-    """Same as IT-02 — retry path triggers re-queue."""
-    payload = make_slip_payload(source_slip_no="SLIP-IT03-WEATHER")
-    r1 = await client.post("/internal/v1/trips/slips/ingest", json=payload)
-    trip_id = r1.json()["id"]
-
-    r2 = await client.post(f"/api/v1/trips/{trip_id}/retry-enrichment")
-    assert r2.status_code == 202
-
-
-# ---------------------------------------------------------------------------
-# IT-04: approve succeeds only when route and weather are ready
+# IT-04: approve succeeds only when route is ready
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_approve_succeeds_with_enrichment_ready(client: AsyncClient, test_session):
-    """Approve → 200 when both route and weather are READY."""
+    """Approve → 200 when route is READY."""
 
     payload = make_slip_payload(source_slip_no="SLIP-IT04-APPROVE")
     r1 = await client.post("/internal/v1/trips/slips/ingest", json=payload)
@@ -77,9 +61,7 @@ async def test_approve_succeeds_with_enrichment_ready(client: AsyncClient, test_
     etag = r1.headers.get("etag")
 
     await test_session.execute(
-        update(TripTripEnrichment)
-        .where(TripTripEnrichment.trip_id == trip_id)
-        .values(route_status="READY", weather_status="READY")
+        update(TripTripEnrichment).where(TripTripEnrichment.trip_id == trip_id).values(route_status="READY")
     )
     await test_session.commit()
 

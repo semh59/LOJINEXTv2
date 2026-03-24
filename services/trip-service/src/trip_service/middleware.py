@@ -18,7 +18,6 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from trip_service.errors import trip_if_match_required, trip_version_mismatch
 
-
 # ---------------------------------------------------------------------------
 # V8 Section 8.2 — X-Request-Id Correlation
 # Pure ASGI middleware — avoids BaseHTTPMiddleware asyncpg conflicts

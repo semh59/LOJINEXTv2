@@ -159,7 +159,6 @@ class TripTripEnrichment(Base):
     )
     enrichment_status: Mapped[str] = mapped_column(String(10), nullable=False)
     route_status: Mapped[str] = mapped_column(String(10), nullable=False)
-    weather_status: Mapped[str] = mapped_column(String(10), nullable=False)
     data_quality_flag: Mapped[str] = mapped_column(String(10), nullable=False)
     enrichment_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_enrichment_error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -176,7 +175,6 @@ class TripTripEnrichment(Base):
     __table_args__ = (
         Index("ix_enrichment_status_retry", "enrichment_status", "next_retry_at_utc"),
         Index("ix_enrichment_route", "route_status"),
-        Index("ix_enrichment_weather", "weather_status"),
         Index("ix_enrichment_claim_exp", "claim_expires_at_utc"),
     )
 
@@ -223,7 +221,6 @@ class TripImportJob(Base):
     file_key: Mapped[str] = mapped_column(String(500), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     import_mode: Mapped[str] = mapped_column(String(10), nullable=False)
-    skip_weather_enrichment: Mapped[bool] = mapped_column(Boolean, nullable=False)
     created_by_admin_id: Mapped[str] = mapped_column(String(50), nullable=False)
     imported_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     rejected_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

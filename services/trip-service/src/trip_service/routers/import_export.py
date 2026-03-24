@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -25,9 +24,6 @@ from trip_service.database import get_session
 from trip_service.enums import (
     ExportJobStatus,
     ImportJobStatus,
-    ImportMode,
-    ImportRowStatus,
-    OutboxPublishStatus,
     TripStatus,
 )
 from trip_service.errors import (
@@ -45,16 +41,11 @@ from trip_service.models import (
     TripExportJob,
     TripIdempotencyRecord,
     TripImportJob,
-    TripImportJobRow,
     TripTrip,
-    TripTripEnrichment,
-    TripTripEvidence,
 )
 from trip_service.schemas import (
     CreateExportJobRequest,
     CreateImportJobRequest,
-    DriverStatementResponse,
-    DriverStatementRow,
     ExportJobResource,
     FileUploadResponse,
     ImportJobResource,
@@ -99,7 +90,7 @@ async def upload_import_file(
         full_path.parent.mkdir(parents=True, exist_ok=True)
         content = await file.read()
         full_path.write_bytes(content)
-    except Exception as e:
+    except Exception:
         raise storage_unavailable()
 
     return FileUploadResponse(file_key=file_key)
@@ -191,7 +182,6 @@ async def create_import_job(
         file_key=body.file_key,
         status=ImportJobStatus.PENDING,
         import_mode=body.import_mode,
-        skip_weather_enrichment=body.skip_weather_enrichment,
         created_by_admin_id=x_actor_id,
         imported_count=0,
         rejected_count=0,

@@ -154,34 +154,6 @@ async def test_approve_blocked_without_route(client: AsyncClient):
 
 
 # ---------------------------------------------------------------------------
-# UT-06: approval gate on missing weather
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_approve_blocked_without_weather(client: AsyncClient, test_session):
-    """Approve → 409 if weather_status != READY (even if route is READY)."""
-
-    payload = make_slip_payload(source_slip_no="SLIP-WEATHER-GATE")
-    r1 = await client.post("/internal/v1/trips/slips/ingest", json=payload)
-    trip_id = r1.json()["id"]
-    etag = r1.headers.get("etag")
-
-    await test_session.execute(
-        update(TripTripEnrichment).where(TripTripEnrichment.trip_id == trip_id).values(route_status="READY")
-    )
-    await test_session.commit()
-
-    r2 = await client.post(
-        f"/api/v1/trips/{trip_id}/approve",
-        json={"note": "test"},
-        headers={**ADMIN_HEADERS, "If-Match": etag},
-    )
-    assert r2.status_code == 409
-    assert r2.json()["code"] == "TRIP_WEATHER_REQUIRED_FOR_COMPLETION"
-
-
-# ---------------------------------------------------------------------------
 # UT-07: ETag parsing and mismatch handling
 # ---------------------------------------------------------------------------
 
@@ -397,19 +369,6 @@ async def test_enrichment_claim_recovery():
 
 
 # ---------------------------------------------------------------------------
-# UT-17: weather_status set to SKIPPED when route_id is null
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_weather_skipped_when_route_null():
-    """V8 Foundational Decision 30: route_id=null → weather_status=SKIPPED."""
-
-    assert _derive_final_enrichment_status("FAILED", "SKIPPED") == "FAILED"
-    assert _derive_final_enrichment_status("SKIPPED", "SKIPPED") == "SKIPPED"
-
-
-# ---------------------------------------------------------------------------
 # UT-18: is_empty_return field in manual create request body causes 422
 # ---------------------------------------------------------------------------
 
@@ -452,13 +411,9 @@ async def test_etag_present_in_responses(client: AsyncClient):
 async def test_enrichment_final_state_skipped_combinations():
     """Verify all SKIPPED combinations per V8 Section 13.8."""
 
-    assert _derive_final_enrichment_status("READY", "SKIPPED") == "READY"
-    assert _derive_final_enrichment_status("SKIPPED", "READY") == "READY"
-    assert _derive_final_enrichment_status("SKIPPED", "FAILED") == "FAILED"
-    assert _derive_final_enrichment_status("FAILED", "SKIPPED") == "FAILED"
-    assert _derive_final_enrichment_status("SKIPPED", "SKIPPED") == "SKIPPED"
-    assert _derive_final_enrichment_status("READY", "READY") == "READY"
-    assert _derive_final_enrichment_status("FAILED", "FAILED") == "FAILED"
+    assert _derive_final_enrichment_status("READY") == "READY"
+    assert _derive_final_enrichment_status("SKIPPED") == "SKIPPED"
+    assert _derive_final_enrichment_status("FAILED") == "FAILED"
 
 
 # ---------------------------------------------------------------------------

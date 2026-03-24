@@ -22,7 +22,7 @@ async def readiness() -> dict[str, object]:
     """V8 Section 18.5 — Readiness with hard and soft dependencies.
 
     Hard dependencies (must pass): DB, internal auth.
-    Soft dependencies (may degrade): object storage, Weather, Location, Fleet.
+    Soft dependencies (may degrade): object storage, Location, Fleet.
     """
     checks: dict[str, str] = {}
     overall = True
@@ -41,7 +41,6 @@ async def readiness() -> dict[str, object]:
 
     # Soft dependencies — not blocking startup
     checks["object_storage"] = "ok"  # checked lazily on use
-    checks["weather_service"] = "degraded"  # soft
     checks["location_service"] = "degraded"  # soft
     checks["fleet_service"] = "degraded"  # soft
 

@@ -29,7 +29,6 @@ from trip_service.enums import (
     RouteStatus,
     SourceType,
     TripStatus,
-    WeatherStatus,
 )
 from trip_service.errors import (
     empty_return_already_exists,
@@ -43,7 +42,6 @@ from trip_service.errors import (
     trip_no_conflict,
     trip_not_found,
     trip_version_mismatch,
-    weather_required_for_completion,
 )
 from trip_service.middleware import (
     date_range_to_utc,
@@ -64,6 +62,8 @@ from trip_service.schemas import (
     ApproveRequest,
     EditTripRequest,
     EmptyReturnRequest,
+    EnrichmentSummary,
+    EvidenceSummary,
     IngestSlipRequest,
     ManualCreateRequest,
     RetryEnrichmentResponse,
@@ -106,23 +106,22 @@ def _trip_to_resource(trip: TripTrip) -> TripResource:
     """Map ORM model to API resource."""
     enrichment_summary = None
     if trip.enrichment:
-        enrichment_summary = {
-            "enrichment_status": trip.enrichment.enrichment_status,
-            "route_status": trip.enrichment.route_status,
-            "weather_status": trip.enrichment.weather_status,
-            "data_quality_flag": trip.enrichment.data_quality_flag,
-        }
+        enrichment_summary = EnrichmentSummary(
+            enrichment_status=trip.enrichment.enrichment_status,
+            route_status=trip.enrichment.route_status,
+            data_quality_flag=trip.enrichment.data_quality_flag,
+        )
 
     # Latest evidence for summary
     evidence_summary = None
     if trip.evidence:
         ev = trip.evidence[-1]  # latest evidence row
-        evidence_summary = {
-            "normalized_truck_plate": ev.normalized_truck_plate,
-            "normalized_trailer_plate": ev.normalized_trailer_plate,
-            "origin_name_raw": ev.origin_name_raw,
-            "destination_name_raw": ev.destination_name_raw,
-        }
+        evidence_summary = EvidenceSummary(
+            normalized_truck_plate=ev.normalized_truck_plate,
+            normalized_trailer_plate=ev.normalized_trailer_plate,
+            origin_name_raw=ev.origin_name_raw,
+            destination_name_raw=ev.destination_name_raw,
+        )
 
     return TripResource(
         id=trip.id,
@@ -357,7 +356,6 @@ async def ingest_trip_slip(
         trip_id=trip_id,
         enrichment_status=EnrichmentStatus.PENDING,
         route_status=RouteStatus.PENDING,
-        weather_status=WeatherStatus.PENDING,
         data_quality_flag=data_quality,
         enrichment_attempt_count=0,
         created_at_utc=now,
@@ -463,13 +461,12 @@ async def create_manual_trip(
     )
     session.add(trip)
 
-    # Enrichment row: route READY (provided), weather PENDING
+    # Enrichment row: route READY (provided)
     enrichment = TripTripEnrichment(
         id=_generate_id(),
         trip_id=trip_id,
         enrichment_status=EnrichmentStatus.PENDING,
         route_status=RouteStatus.READY,
-        weather_status=WeatherStatus.PENDING,
         data_quality_flag=DataQualityFlag.HIGH,
         enrichment_attempt_count=0,
         created_at_utc=now,
@@ -522,7 +519,6 @@ async def create_manual_trip(
                 "net_weight_kg": trip.net_weight_kg,
                 "is_empty_return": trip.is_empty_return,
                 "route_status": enrichment.route_status,
-                "weather_status": enrichment.weather_status,
             },
         )
         session.add(outbox)
@@ -733,10 +729,8 @@ async def edit_trip(
     # V8 Section 10.6: Route-sensitive field changes → reset enrichment
     if route_sensitive_changed and trip.enrichment:
         enrichment = trip.enrichment
-        # If route_id is the same non-null value, only reset weather
         if "route_id" in changed_fields or enrichment.route_status != RouteStatus.READY:
             enrichment.route_status = RouteStatus.PENDING
-        enrichment.weather_status = WeatherStatus.PENDING
         enrichment.enrichment_status = EnrichmentStatus.PENDING
         enrichment.claim_token = None
         enrichment.claim_expires_at_utc = None
@@ -814,11 +808,8 @@ async def approve_trip(
     if trip.status != TripStatus.PENDING_REVIEW:
         raise invalid_status_transition("Only PENDING_REVIEW trips can be approved.")
 
-    # V8: Preconditions — enrichment gates
     if not trip.enrichment or trip.enrichment.route_status != RouteStatus.READY:
         raise route_required_for_completion()
-    if trip.enrichment.weather_status != WeatherStatus.READY:
-        raise weather_required_for_completion()
 
     now = _now_utc()
     trip.status = TripStatus.COMPLETED
@@ -856,7 +847,6 @@ async def approve_trip(
             "net_weight_kg": trip.net_weight_kg,
             "is_empty_return": trip.is_empty_return,
             "route_status": trip.enrichment.route_status,
-            "weather_status": trip.enrichment.weather_status,
             "enrichment_status": trip.enrichment.enrichment_status,
         },
     )
@@ -943,13 +933,12 @@ async def create_empty_return(
     )
     session.add(trip)
 
-    # Enrichment: route READY, weather PENDING
+    # Enrichment: route READY
     enrichment = TripTripEnrichment(
         id=_generate_id(),
         trip_id=trip_id,
         enrichment_status=EnrichmentStatus.PENDING,
         route_status=RouteStatus.READY,
-        weather_status=WeatherStatus.PENDING,
         data_quality_flag=DataQualityFlag.HIGH,
         enrichment_attempt_count=0,
         created_at_utc=now,
@@ -990,7 +979,6 @@ async def create_empty_return(
                 "net_weight_kg": trip.net_weight_kg,
                 "is_empty_return": trip.is_empty_return,
                 "route_status": enrichment.route_status,
-                "weather_status": enrichment.weather_status,
             },
         )
         session.add(outbox)

@@ -3,8 +3,7 @@
 Implements the claim-based enrichment processing with:
 - Claim algorithm using SELECT ... FOR UPDATE SKIP LOCKED (Section 13.6)
 - Orphaned claim recovery (RUNNING + expired claim_expires_at_utc)
-- Route resolution via Location Service
-- Weather enrichment via Weather Service (with route_id null guard)
+- Route enrichment via Location Service (with geocoding fallback)
 - data_quality_flag recomputation after enrichment
 - Retry policy with backoff + jitter (Section 13.7)
 - Final state derivation (Section 13.8)
@@ -23,8 +22,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx
-from sqlalchemy import and_, or_, select, text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import and_, or_, select
 
 from trip_service.config import settings
 from trip_service.database import async_session_factory
@@ -33,7 +31,6 @@ from trip_service.enums import (
     EnrichmentStatus,
     RouteStatus,
     SourceType,
-    WeatherStatus,
 )
 from trip_service.models import TripTrip, TripTripEnrichment, TripTripEvidence
 
@@ -103,44 +100,21 @@ def _compute_data_quality_flag(
 # ---------------------------------------------------------------------------
 
 
-def _derive_final_enrichment_status(route_status: str, weather_status: str) -> str:
+def _derive_final_enrichment_status(route_status: str) -> str:
     """Derive final enrichment_status from sub-statuses per V8 Section 13.8.
 
     Rules (priority order):
-    - if both terminal and success → READY
-    - if any still pending → PENDING
-    - if terminal failed and no retries → FAILED
-    - if intentionally bypassed (SKIPPED) → SKIPPED
-    - if one SKIPPED and other READY → READY
-    - if one SKIPPED and other FAILED → FAILED
+    - if terminal success -> READY
+    - if intentionally bypassed (SKIPPED) -> SKIPPED
+    - if PENDING -> PENDING
+    - if FAILED -> FAILED
     """
-    statuses = {route_status, weather_status}
-
-    # Both ready
-    if statuses == {RouteStatus.READY}:
+    if route_status == RouteStatus.READY:
         return EnrichmentStatus.READY
-
-    # One READY + one SKIPPED → READY
-    if statuses == {RouteStatus.READY, WeatherStatus.SKIPPED}:
-        return EnrichmentStatus.READY
-    if statuses == {RouteStatus.SKIPPED, WeatherStatus.READY}:
-        return EnrichmentStatus.READY
-
-    # Both SKIPPED
-    if statuses == {RouteStatus.SKIPPED}:
+    if route_status == RouteStatus.SKIPPED:
         return EnrichmentStatus.SKIPPED
-
-    # Any PENDING → PENDING
-    if RouteStatus.PENDING in statuses or WeatherStatus.PENDING in statuses:
-        return EnrichmentStatus.PENDING
-
-    # Any FAILED
-    if RouteStatus.FAILED in statuses or WeatherStatus.FAILED in statuses:
-        # One SKIPPED + one FAILED → FAILED
-        if RouteStatus.SKIPPED in statuses or WeatherStatus.SKIPPED in statuses:
-            return EnrichmentStatus.FAILED
+    if route_status == RouteStatus.FAILED:
         return EnrichmentStatus.FAILED
-
     return EnrichmentStatus.PENDING
 
 
@@ -174,36 +148,6 @@ async def _resolve_route(origin_name: str, destination_name: str) -> tuple[str |
     except Exception as e:
         logger.error("Route resolution error: %s", e)
         return None, RouteStatus.FAILED
-
-
-async def _fetch_weather(route_id: str, trip_datetime_utc: datetime) -> str:
-    """Call Weather Service for historical weather.
-
-    V8 Section 7.3: GET /internal/v1/weather/historical-route-summary
-    CRITICAL: Caller MUST NOT call this when route_id is null (Section 7.3 pre-call guard).
-    Returns weather_status (READY/FAILED).
-    """
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(
-                f"{settings.weather_service_url}/internal/v1/weather/historical-route-summary",
-                params={
-                    "route_id": route_id,
-                    "trip_datetime_utc": trip_datetime_utc.isoformat(),
-                },
-            )
-            if resp.status_code == 200:
-                return WeatherStatus.READY
-            else:
-                logger.warning(
-                    "Weather fetch failed: status=%d body=%s",
-                    resp.status_code,
-                    resp.text,
-                )
-                return WeatherStatus.FAILED
-    except Exception as e:
-        logger.error("Weather fetch error: %s", e)
-        return WeatherStatus.FAILED
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +235,7 @@ async def _process_single_enrichment(
 ) -> None:
     """Process a single enrichment row.
 
-    Handles route resolution → weather fetch → final status derivation.
+    Handles route resolution → final status derivation.
     """
     async with async_session_factory() as session:
         # Reload enrichment row with trip
@@ -344,20 +288,8 @@ async def _process_single_enrichment(
             elif enrichment.route_status == RouteStatus.READY:
                 route_resolved = True
 
-            # --- Weather enrichment ---
-            # V8 Foundational Decision 30 + Section 7.3:
-            # If route_id is null, weather MUST be SKIPPED immediately
-            if trip.route_id is None:
-                enrichment.weather_status = WeatherStatus.SKIPPED
-            elif enrichment.weather_status in (WeatherStatus.PENDING, WeatherStatus.FAILED):
-                weather_status = await _fetch_weather(trip.route_id, trip.trip_datetime_utc)
-                enrichment.weather_status = weather_status
-
             # --- Derive final enrichment status (V8 Section 13.8) ---
-            enrichment.enrichment_status = _derive_final_enrichment_status(
-                enrichment.route_status,
-                enrichment.weather_status,
-            )
+            enrichment.enrichment_status = _derive_final_enrichment_status(enrichment.route_status)
 
             # --- Recompute data_quality_flag (V8 Section 6.3) ---
             enrichment.data_quality_flag = _compute_data_quality_flag(
@@ -388,10 +320,9 @@ async def _process_single_enrichment(
             await session.commit()
 
             logger.info(
-                "Enrichment %s: completed — route=%s weather=%s enrichment=%s quality=%s",
+                "Enrichment %s: completed — route=%s enrichment=%s quality=%s",
                 enrichment_id,
                 enrichment.route_status,
-                enrichment.weather_status,
                 enrichment.enrichment_status,
                 enrichment.data_quality_flag,
             )

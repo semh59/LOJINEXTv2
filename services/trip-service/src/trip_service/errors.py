@@ -115,16 +115,6 @@ def route_required_for_completion() -> ProblemDetailError:
     )
 
 
-def weather_required_for_completion() -> ProblemDetailError:
-    """V8: TRIP_WEATHER_REQUIRED_FOR_COMPLETION."""
-    return ProblemDetailError(
-        409,
-        "TRIP_WEATHER_REQUIRED_FOR_COMPLETION",
-        "Weather required",
-        "Weather must be READY before trip can be approved.",
-    )
-
-
 def empty_return_already_exists() -> ProblemDetailError:
     """V8: TRIP_EMPTY_RETURN_ALREADY_EXISTS."""
     return ProblemDetailError(

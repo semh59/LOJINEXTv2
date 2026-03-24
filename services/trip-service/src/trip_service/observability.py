@@ -13,10 +13,11 @@ import asyncio
 import logging
 import sys
 from datetime import datetime, timedelta
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 from prometheus_client import Counter, Histogram, Info
-from sqlalchemy import delete
+from sqlalchemy import CursorResult, delete
 
 from trip_service.config import settings
 from trip_service.database import async_session_factory
@@ -110,7 +111,7 @@ async def cleanup_idempotency_records() -> int:
     async with async_session_factory() as session:
         stmt = delete(TripIdempotencyRecord).where(TripIdempotencyRecord.expires_at_utc < now)
         result = await session.execute(stmt)
-        deleted = result.rowcount
+        deleted = int(cast(CursorResult[Any], result).rowcount)
         await session.commit()
 
     if deleted > 0:
@@ -135,7 +136,7 @@ async def cleanup_outbox_records() -> int:
             TripOutbox.published_at_utc < published_cutoff,
         )
         result1 = await session.execute(stmt1)
-        total_deleted += result1.rowcount
+        total_deleted += int(cast(CursorResult[Any], result1).rowcount)
 
         # DEAD_LETTER older than 90 days
         dl_cutoff = now - timedelta(days=90)
@@ -144,7 +145,7 @@ async def cleanup_outbox_records() -> int:
             TripOutbox.created_at_utc < dl_cutoff,
         )
         result2 = await session.execute(stmt2)
-        total_deleted += result2.rowcount
+        total_deleted += int(cast(CursorResult[Any], result2).rowcount)
 
         await session.commit()
 

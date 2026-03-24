@@ -10,7 +10,6 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
-
 # ---------------------------------------------------------------------------
 # V8 Section 9.1 — Trip Resource (response)
 # ---------------------------------------------------------------------------
@@ -21,7 +20,6 @@ class EnrichmentSummary(BaseModel):
 
     enrichment_status: str
     route_status: str
-    weather_status: str
     data_quality_flag: str
 
 
@@ -204,7 +202,6 @@ class CreateImportJobRequest(BaseModel):
 
     file_key: str
     import_mode: str = "PARTIAL"
-    skip_weather_enrichment: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -219,7 +216,6 @@ class ImportJobResource(BaseModel):
     file_key: str
     status: str
     import_mode: str
-    skip_weather_enrichment: bool
     imported_count: int
     rejected_count: int
     enrichment_pending_count: int

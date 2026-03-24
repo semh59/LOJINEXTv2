@@ -16,7 +16,6 @@ import logging
 from datetime import date as date_type
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
 from zoneinfo import ZoneInfo
 
 import openpyxl
@@ -126,7 +125,6 @@ async def process_export_job(job_id: str) -> None:
             "status",
             "enrichment_status",
             "route_status",
-            "weather_status",
             "created_at_utc",
         ]
         ws.append(headers)
@@ -142,7 +140,6 @@ async def process_export_job(job_id: str) -> None:
 
             enrichment_status = trip.enrichment.enrichment_status if trip.enrichment else ""
             route_status = trip.enrichment.route_status if trip.enrichment else ""
-            weather_status = trip.enrichment.weather_status if trip.enrichment else ""
 
             ws.append(
                 [
@@ -164,7 +161,6 @@ async def process_export_job(job_id: str) -> None:
                     trip.status,
                     enrichment_status,
                     route_status,
-                    weather_status,
                     str(trip.created_at_utc),
                 ]
             )

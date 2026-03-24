@@ -14,7 +14,6 @@ V8 Section 12.6 — PARTIAL mode:
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from datetime import datetime
@@ -40,7 +39,6 @@ from trip_service.enums import (
     RouteStatus,
     SourceType,
     TripStatus,
-    WeatherStatus,
 )
 from trip_service.models import (
     TripImportJob,
@@ -114,7 +112,7 @@ async def process_import_job(job_id: str) -> None:
         data_rows = rows_data[1:]
 
         # Validate all rows first (for both STRICT and PARTIAL)
-        validated: list[tuple[int, dict[str, Any] | None, str | None, str | None]] = []
+        validated: list[tuple[int, dict[str, Any], str | None, str | None]] = []
 
         for idx, row_values in enumerate(data_rows, start=2):
             row_dict = dict(zip(headers, row_values, strict=False))
@@ -138,7 +136,6 @@ async def process_import_job(job_id: str) -> None:
             if import_mode == ImportMode.STRICT and has_errors:
                 # STRICT: Record ALL errors but create NO trips
                 for row_num, row_dict, err_code, err_detail in validated:
-                    status = ImportRowStatus.REJECTED if err_code else ImportRowStatus.REJECTED
                     import_row = TripImportJobRow(
                         id=_generate_id(),
                         job_id=job_id,
@@ -254,7 +251,6 @@ async def process_import_job(job_id: str) -> None:
                     trip_id=trip_id,
                     enrichment_status=EnrichmentStatus.PENDING,
                     route_status=RouteStatus.READY if row_dict.get("route_id") else RouteStatus.PENDING,
-                    weather_status=WeatherStatus.PENDING if not job.skip_weather_enrichment else WeatherStatus.SKIPPED,
                     data_quality_flag=DataQualityFlag.HIGH,
                     enrichment_attempt_count=0,
                     created_at_utc=now,

@@ -33,15 +33,6 @@ class RouteStatus(str, enum.Enum):
     SKIPPED = "SKIPPED"
 
 
-class WeatherStatus(str, enum.Enum):
-    """V8 Section 5.4 — Weather status."""
-
-    PENDING = "PENDING"
-    READY = "READY"
-    FAILED = "FAILED"
-    SKIPPED = "SKIPPED"
-
-
 class SourceType(str, enum.Enum):
     """V8 Section 5.5 — Source type."""
 

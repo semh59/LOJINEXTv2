@@ -20,7 +20,6 @@ class Settings(BaseSettings):
     # --- External Service URLs (V8 Section 7) ---
     fleet_service_url: str = "http://localhost:8102"
     location_service_url: str = "http://localhost:8103"
-    weather_service_url: str = "http://localhost:8104"
 
     # --- Object Storage ---
     storage_backend: str = "local"  # "local" or "s3"
