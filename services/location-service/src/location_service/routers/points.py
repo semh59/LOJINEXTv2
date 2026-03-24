@@ -24,8 +24,8 @@ async def create_point(payload: PointCreate, session: Annotated[AsyncSession, De
     existing = (await session.execute(stmt)).scalar_one_or_none()
     if existing:
         raise ProblemDetailError(
-            status_code=409,
-            type_url="https://api.lojinext.com/errors/conflict",
+            status=409,
+            code="LOCATION_POINT_CODE_CONFLICT",
             title="Conflict",
             detail=f"Point with code '{payload.code}' already exists.",
         )
@@ -56,8 +56,8 @@ async def get_point(location_id: UUID, session: Annotated[AsyncSession, Depends(
 
     if not point:
         raise ProblemDetailError(
-            status_code=404,
-            type_url="https://api.lojinext.com/errors/not-found",
+            status=404,
+            code="LOCATION_POINT_NOT_FOUND",
             title="Not Found",
             detail=f"Point {location_id} not found.",
         )
@@ -120,8 +120,8 @@ async def update_point(
 
     if not point:
         raise ProblemDetailError(
-            status_code=404,
-            type_url="https://api.lojinext.com/errors/not-found",
+            status=404,
+            code="LOCATION_POINT_NOT_FOUND",
             title="Not Found",
             detail=f"Point {location_id} not found.",
         )
@@ -154,8 +154,8 @@ async def update_point(
     except Exception as e:
         await session.rollback()
         raise ProblemDetailError(
-            status_code=400,
-            type_url="https://api.lojinext.com/errors/bad-request",
+            status=400,
+            code="LOCATION_UPDATE_FAILED",
             title="Update Failed",
             detail=str(e),
         )

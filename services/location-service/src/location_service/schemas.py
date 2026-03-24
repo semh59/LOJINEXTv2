@@ -130,7 +130,6 @@ class PairResponse(TimestampMixin, LocationBaseModel):
     destination_location_id: UUID
 
     @computed_field
-    @property
     def is_active(self) -> bool:
         return self.status == "ACTIVE"
 

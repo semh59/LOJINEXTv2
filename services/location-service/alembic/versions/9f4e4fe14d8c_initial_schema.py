@@ -132,7 +132,8 @@ def upgrade() -> None:
         sa.Column("updated_at_utc", sa.DateTime(timezone=True), nullable=False),
         sa.CheckConstraint("pair_code ~ '^RP_[0-9A-Z]{26}$'", name="chk_route_pairs_pair_code_format"),
         sa.CheckConstraint(
-            "\n            (pending_forward_version_no IS NULL AND pending_reverse_version_no IS NULL) OR\n            (pending_forward_version_no IS NOT NULL AND pending_reverse_version_no IS NOT NULL)\n            ",
+            "(pending_forward_version_no IS NULL AND pending_reverse_version_no IS NULL) OR "
+            "(pending_forward_version_no IS NOT NULL AND pending_reverse_version_no IS NOT NULL)",
             name="chk_route_pairs_pending_pointers_atomic",
         ),
         sa.CheckConstraint("origin_location_id != destination_location_id", name="chk_route_pairs_origin_neq_dest"),

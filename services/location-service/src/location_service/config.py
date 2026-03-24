@@ -71,6 +71,9 @@ class Settings(BaseSettings):
     # --- Stuck Run Recovery (Section 4.7) ---
     run_stuck_sla_minutes: int = 30
 
+    # --- Environment ---
+    env_name: str = "dev"
+
     model_config = {"env_prefix": "LOCATION_", "env_file": ".env", "extra": "ignore"}
 
 

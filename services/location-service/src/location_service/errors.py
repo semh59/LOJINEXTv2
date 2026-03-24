@@ -33,8 +33,12 @@ class ProblemDetailError(Exception):
         super().__init__(detail)
 
 
-async def problem_detail_handler(request: Request, exc: ProblemDetailError) -> JSONResponse:
+async def problem_detail_handler(request: Request, exc: Exception) -> JSONResponse:
     """Convert ProblemDetail exceptions into RFC 9457 problem+json responses."""
+    if not isinstance(exc, ProblemDetailError):
+        # Fallback for unexpected exceptions if registered as handler
+        return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
+
     request_id = getattr(request.state, "request_id", "unknown")
     body: dict[str, Any] = {
         "type": f"https://location-service/errors/{exc.code}",

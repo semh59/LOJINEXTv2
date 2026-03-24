@@ -88,8 +88,8 @@ async def get_pair(pair_id: UUID, session: Annotated[AsyncSession, Depends(get_d
 
     if not pair:
         raise ProblemDetailError(
-            status_code=404,
-            type_url="https://api.lojinext.com/errors/not-found",
+            status=404,
+            code="LOCATION_ROUTE_PAIR_NOT_FOUND",
             title="Not Found",
             detail=f"Pair {pair_id} not found.",
         )
@@ -138,8 +138,8 @@ async def calculate_pair(pair_id: UUID, session: Annotated[AsyncSession, Depends
 
     if not pair:
         raise ProblemDetailError(
-            status_code=404,
-            type_url="https://api.lojinext.com/errors/not-found",
+            status=404,
+            code="LOCATION_ROUTE_PAIR_NOT_FOUND",
             title="Not Found",
             detail=f"Pair {pair_id} not found.",
         )

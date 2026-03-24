@@ -91,7 +91,11 @@ class MapboxTerrainClient:
         px = min(int(pixel_x), self.TILE_SIZE - 1)
         py = min(int(pixel_y), self.TILE_SIZE - 1)
 
-        r, g, b = img.getpixel((px, py))
+        pixel = img.getpixel((px, py))
+        if not isinstance(pixel, (tuple, list)) or len(pixel) < 3:
+            raise internal_error("Invalid pixel format from terrain tile.")
+
+        r, g, b = pixel[:3]
         return self._decode_elevation(r, g, b)
 
     async def enrich_coordinates(self, coords: list[tuple[float, float]]) -> list[tuple[float, float, float]]:
