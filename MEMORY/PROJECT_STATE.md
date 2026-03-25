@@ -13,7 +13,7 @@ Update it at the end of any session that changes project state.
 ## Next Task ID
 
 ```
-TASK-0005
+TASK-0007
 ```
 
 Use this when creating the next task. Then increment this counter.
@@ -62,20 +62,21 @@ Phase 6   Testing
 
 ## Active Tasks
 
-| Task ID   | Description                                 | Status   | Last Updated     | Last Agent  |
-| --------- | ------------------------------------------- | -------- | ---------------- | ----------- |
-| TASK-0001 | Trip Service Greenfield Implementation (V8) | planning | 2026-03-23T22:23 | Antigravity |
-| TASK-0005 | Location Service API Endpoints (Phase 4)    | planning | 2026-03-24T23:25 | Antigravity |
+| Task ID   | Description                                 | Status      | Last Updated     | Last Agent  |
+| --------- | ------------------------------------------- | ----------- | ---------------- | ----------- |
+| TASK-0001 | Trip Service Greenfield Implementation (V8) | planning    | 2026-03-23T22:23 | Antigravity |
+| TASK-0006 | Provider Adapters & Pipeline (Phase 5)      | in-progress | 2026-03-25T22:50 | Antigravity |
 
 ---
 
 ## Recently Completed
 
-| Task ID   | Description             | Status    | Last Updated | Last Agent  |
-| --------- | ----------------------- | --------- | ------------ | ----------- |
-| TASK-0004 | Location Service Domain | completed | 2026-03-24   | Antigravity |
-| TASK-0003 | Location Service Scaffo | completed | 2026-03-24   | Antigravity |
-| TASK-0002 | Weather Service Removal | completed | 2026-03-24   | Antigravity |
+| Task ID   | Description               | Status    | Last Updated | Last Agent  |
+| --------- | ------------------------- | --------- | ------------ | ----------- |
+| TASK-0005 | Location Service API Endp | completed | 2026-03-25   | Antigravity |
+| TASK-0004 | Location Service Domain   | completed | 2026-03-24   | Antigravity |
+| TASK-0003 | Location Service Scaffo   | completed | 2026-03-24   | Antigravity |
+| TASK-0002 | Weather Service Removal   | completed | 2026-03-24   | Antigravity |
 
 ---
 

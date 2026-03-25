@@ -145,3 +145,26 @@ class PairListResponse(PaginatedResponse):
     """Paginated list of pairs."""
 
     data: list[PairResponse]
+
+
+# ---------------------------------------------------------------------------
+# Processing Schemas (Section 7.10)
+# ---------------------------------------------------------------------------
+
+
+class CalculateRequest(LocationBaseModel):
+    """Payload for POST /v1/pairs/{id}/calculate."""
+
+    force_refresh: bool = False
+
+
+class ProcessingRunResponse(TimestampMixin, LocationBaseModel):
+    """Response shape for Processing Run endpoints."""
+
+    run_id: UUID
+    pair_id: UUID
+    trigger_type: str
+    run_status: str
+    error_message: str | None = None
+    started_at_utc: datetime | None = None
+    completed_at_utc: datetime | None = None

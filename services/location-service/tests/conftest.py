@@ -20,7 +20,7 @@ from location_service.config import settings
 from location_service.errors import ProblemDetailError, problem_detail_handler
 from location_service.middleware import RequestIdMiddleware
 from location_service.models import Base
-from location_service.routers import health, pairs, points
+from location_service.routers import health, pairs, points, processing
 
 # ---------------------------------------------------------------------------
 # PostgreSQL container (session-scoped sync fixture)
@@ -30,7 +30,7 @@ _pg_url: str = ""
 _tables_created: bool = False
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def postgres_container():
     """Start a PostgreSQL 16 container for the entire test session."""
     global _pg_url
@@ -89,16 +89,19 @@ async def client(db_engine) -> AsyncGenerator[AsyncClient, None]:
     test_app.include_router(health.router)
     test_app.include_router(points.router)
     test_app.include_router(pairs.router)
+    test_app.include_router(processing.router)
 
     session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
 
     # Patch the global session factory so direct users get test DB
     import location_service.database
+    import location_service.processing.pipeline
     import location_service.routers.health
 
     original_factory = location_service.database.async_session_factory
     location_service.database.async_session_factory = session_factory
     location_service.routers.health.async_session_factory = session_factory
+    location_service.processing.pipeline.async_session_factory = session_factory
 
     transport = ASGITransport(app=test_app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -107,3 +110,4 @@ async def client(db_engine) -> AsyncGenerator[AsyncClient, None]:
     # Restore original
     location_service.database.async_session_factory = original_factory
     location_service.routers.health.async_session_factory = original_factory
+    location_service.processing.pipeline.async_session_factory = original_factory

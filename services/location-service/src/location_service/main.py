@@ -7,7 +7,15 @@ from location_service.config import settings
 from location_service.database import engine
 from location_service.errors import ProblemDetailError, problem_detail_handler
 from location_service.middleware import RequestIdMiddleware
-from location_service.routers import health, pairs, points
+from location_service.routers import (
+    approval,
+    bulk_refresh,
+    health,
+    import_export,
+    pairs,
+    points,
+    processing,
+)
 
 
 @asynccontextmanager
@@ -46,6 +54,10 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(points.router)
     app.include_router(pairs.router)
+    app.include_router(processing.router)
+    app.include_router(approval.router)
+    app.include_router(bulk_refresh.router)
+    app.include_router(import_export.router)
 
     return app
 
