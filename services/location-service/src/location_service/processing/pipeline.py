@@ -50,8 +50,8 @@ async def trigger_processing(pair_id: UUID, trigger_type: str = "MANUAL", run_id
 
     async with async_session_factory() as session:
         run = ProcessingRun(
-            run_id=run_uuid,
-            pair_id=pair_id,
+            processing_run_id=run_uuid,
+            route_pair_id=pair_id,
             trigger_type=trigger_type,
             run_status=RunStatus.QUEUED,
         )
@@ -76,7 +76,7 @@ async def _process_route_pair_safe(run_id: UUID, pair_id: UUID) -> None:
             # Mark run as failed
             await session.execute(
                 update(ProcessingRun)
-                .where(ProcessingRun.run_id == run_id)
+                .where(ProcessingRun.processing_run_id == run_id)
                 .values(run_status=RunStatus.FAILED, error_message=str(e)[:1024])
             )
             await session.commit()
@@ -221,6 +221,7 @@ async def _process_route_pair(run_id: UUID, pair_id: UUID) -> None:
         if not pair:
             return
 
+        pending_versions = {}
         for res in results:
             dir_code = res["direction"]
             mb_resp = res["mb_resp"]
@@ -255,9 +256,9 @@ async def _process_route_pair(run_id: UUID, pair_id: UUID) -> None:
 
             version_no = counter.next_version_no
             counter.next_version_no += 1
+            pending_versions[dir_code] = version_no
 
             # 3. Create Version
-            # Payload for hashing (simplified version of segments + summary)
             version_payload = {
                 "distance": mb_resp.distance,
                 "duration": mb_resp.duration,
@@ -279,7 +280,7 @@ async def _process_route_pair(run_id: UUID, pair_id: UUID) -> None:
                 road_type_distribution_json=dist_meta["road_type_distribution_json"],
                 speed_limit_distribution_json=dist_meta["speed_limit_distribution_json"],
                 urban_distribution_json=dist_meta["urban_distribution_json"],
-                known_speed_limit_ratio=0.0,  # Placeholder
+                known_speed_limit_ratio=0.0,
                 processing_algorithm_version="1.0",
                 warnings_json=[],
             )
@@ -292,11 +293,9 @@ async def _process_route_pair(run_id: UUID, pair_id: UUID) -> None:
                 s.version_no = version_no
                 session.add(s)
 
-            # 5. Link to Pair (Pending Draft)
-            if dir_code == DirectionCode.FORWARD:
-                pair.pending_forward_version_no = version_no
-            else:
-                pair.pending_reverse_version_no = version_no
+        # 5. Link to Pair (Pending Draft) ATOMICALLY
+        pair.pending_forward_version_no = pending_versions.get(DirectionCode.FORWARD)
+        pair.pending_reverse_version_no = pending_versions.get(DirectionCode.REVERSE)
 
         # Update run status
         run = await session.get(ProcessingRun, run_id)

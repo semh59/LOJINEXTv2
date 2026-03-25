@@ -247,6 +247,7 @@ class ProcessingRun(Base):
     run_status: Mapped[RunStatus] = mapped_column(String(50), nullable=False)
     trigger_type: Mapped[TriggerType] = mapped_column(String(50), nullable=False)
     attempt_no: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    error_message: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
 
     provider_mapbox_status: Mapped[str] = mapped_column(String(20), default="PENDING", nullable=False)
     provider_ors_status: Mapped[str] = mapped_column(String(20), default="PENDING", nullable=False)

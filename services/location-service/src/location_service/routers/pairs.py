@@ -130,27 +130,6 @@ async def list_pairs(
     }
 
 
-@router.post("/{pair_id}/calculate", status_code=202)
-async def calculate_pair(pair_id: UUID, session: Annotated[AsyncSession, Depends(get_db)]) -> dict[str, str]:
-    """Trigger processing for a pair (Section 7.8)."""
-    stmt = select(RoutePair).where(RoutePair.route_pair_id == pair_id)
-    pair = (await session.execute(stmt)).scalar_one_or_none()
-
-    if not pair:
-        raise ProblemDetailError(
-            status=404,
-            code="LOCATION_ROUTE_PAIR_NOT_FOUND",
-            title="Not Found",
-            detail=f"Pair {pair_id} not found.",
-        )
-
-    if pair.pair_status == PairStatus.SOFT_DELETED:
-        raise route_pair_soft_deleted()
-
-    # TODO: In Phase 5, this creates a ProcessingRun and dispatches to queue.
-    return {"status": "accepted", "message": "Calculation queued."}
-
-
 @router.patch("/{pair_id}", response_model=PairResponse)
 async def update_pair(
     pair_id: UUID, payload: PairUpdateRequest, session: Annotated[AsyncSession, Depends(get_db)]

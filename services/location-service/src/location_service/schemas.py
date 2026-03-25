@@ -161,8 +161,8 @@ class CalculateRequest(LocationBaseModel):
 class ProcessingRunResponse(TimestampMixin, LocationBaseModel):
     """Response shape for Processing Run endpoints."""
 
-    run_id: UUID
-    pair_id: UUID
+    run_id: UUID = Field(validation_alias="processing_run_id")
+    pair_id: UUID = Field(validation_alias="route_pair_id")
     trigger_type: str
     run_status: str
     error_message: str | None = None

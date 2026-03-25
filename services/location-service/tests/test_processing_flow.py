@@ -13,7 +13,7 @@ from location_service.models import LocationPoint, RoutePair, RouteSegment, Rout
 async def test_calculate_workflow_success(client: AsyncClient, test_session):
     # 1. Setup Data
     p1 = LocationPoint(
-        location_id="01HGWZ7TRD7X9J1Z9J1Z9J1Z01",
+        location_id="00000000-0000-0000-0000-000000000001",
         code="IST_HLP",
         name_tr="İstanbul Havalimanı",
         name_en="Istanbul Airport",
@@ -23,7 +23,7 @@ async def test_calculate_workflow_success(client: AsyncClient, test_session):
         normalized_name_en="istanbul airport",
     )
     p2 = LocationPoint(
-        location_id="01HGWZ7TRD7X9J1Z9J1Z9J1Z02",
+        location_id="00000000-0000-0000-0000-000000000002",
         code="SAW_HLP",
         name_tr="Sabiha Gökçen",
         name_en="Sabiha Gokcen",
@@ -33,8 +33,8 @@ async def test_calculate_workflow_success(client: AsyncClient, test_session):
         normalized_name_en="sabiha gokcen",
     )
     pair = RoutePair(
-        route_pair_id="01HGWZ7TRD7X9J1Z9J1Z9J1Z11",
-        pair_code="RP_BASE",
+        route_pair_id="00000000-0000-0000-0000-000000000011",
+        pair_code="RP_" + "A" * 26,
         origin_location_id=p1.location_id,
         destination_location_id=p2.location_id,
         pair_status="DRAFT",

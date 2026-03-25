@@ -164,6 +164,7 @@ def upgrade() -> None:
         sa.Column("run_status", sa.String(length=50), nullable=False),
         sa.Column("trigger_type", sa.String(length=50), nullable=False),
         sa.Column("attempt_no", sa.Integer(), nullable=False),
+        sa.Column("error_message", sa.String(length=1024), nullable=True),
         sa.Column("provider_mapbox_status", sa.String(length=20), nullable=False),
         sa.Column("provider_ors_status", sa.String(length=20), nullable=False),
         sa.Column("expected_forward_version_no", sa.Integer(), nullable=True),
