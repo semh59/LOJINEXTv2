@@ -18,6 +18,7 @@ from location_service.errors import (
     route_pair_soft_deleted,
 )
 from location_service.models import LocationPoint, RoutePair
+from location_service.processing.approval import approve_route_versions
 from location_service.schemas import (
     PaginationMeta,
     PairCreateRequest,
@@ -166,3 +167,14 @@ async def update_pair(
 
     await session.refresh(pair)
     return pair  # type: ignore[return-value]
+
+
+@router.post("/{pair_id}/approve", status_code=204)
+async def approve_pair(pair_id: UUID) -> None:
+    """Promote pending drafts to ACTIVE (Section 6.10)."""
+    try:
+        await approve_route_versions(pair_id)
+    except ValueError as e:
+        raise ProblemDetailError(400, "LOCATION_APPROVAL_ERROR", "Validation error", str(e))
+    except Exception as e:
+        raise internal_error(str(e))

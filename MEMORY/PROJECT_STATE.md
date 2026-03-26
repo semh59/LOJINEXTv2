@@ -13,7 +13,7 @@ Update it at the end of any session that changes project state.
 ## Next Task ID
 
 ```
-TASK-0007
+TASK-0010
 ```
 
 Use this when creating the next task. Then increment this counter.
@@ -73,6 +73,9 @@ Phase 6   Testing
 
 | Task ID   | Description               | Status    | Last Updated | Last Agent  |
 | --------- | ------------------------- | --------- | ------------ | ----------- |
+| TASK-0009 | Location Service Imp/Exp  | completed | 2026-03-26   | Antigravity |
+| TASK-0008 | Location Service Bulk     | completed | 2026-03-26   | Antigravity |
+| TASK-0007 | Location Service Approval | completed | 2026-03-26   | Antigravity |
 | TASK-0005 | Location Service API Endp | completed | 2026-03-25   | Antigravity |
 | TASK-0004 | Location Service Domain   | completed | 2026-03-24   | Antigravity |
 | TASK-0003 | Location Service Scaffo   | completed | 2026-03-24   | Antigravity |
