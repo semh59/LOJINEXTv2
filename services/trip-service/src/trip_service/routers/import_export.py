@@ -171,8 +171,12 @@ async def create_import_job(
     if replay is not None:
         return replay  # type: ignore
 
-    # Verify file exists
-    full_path = _storage_path() / body.file_key
+    # BUG-08: Prevent path traversal via user-supplied file_key
+    storage_root = _storage_path().resolve()
+    full_path = (storage_root / body.file_key).resolve()
+    # Ensure full_path is inside storage_root
+    if storage_root not in full_path.parents and full_path != storage_root:
+        raise import_unsupported_file_type()
     if not full_path.exists():
         raise storage_unavailable()
 

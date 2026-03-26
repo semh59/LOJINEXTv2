@@ -3,6 +3,7 @@
 Implements the 30-step algorithm for calculating and enriching route pairs.
 """
 
+import asyncio
 import logging
 import uuid
 from typing import Any
@@ -58,12 +59,24 @@ async def trigger_processing(pair_id: UUID, trigger_type: str = "MANUAL", run_id
         session.add(run)
         await session.commit()
 
-    # Ideally async task dispatch here. We'll simulate background by yielding to asyncio
-    import asyncio
-
-    asyncio.create_task(_process_route_pair_safe(run_uuid, pair_id))
+    # FINDING-14: Keep a strong reference to the task so it cannot be silently
+    # garbage-collected by the event loop before it completes.
+    task = asyncio.create_task(_process_route_pair_safe(run_uuid, pair_id))
+    task.add_done_callback(_task_done_callback)
+    _background_tasks.add(task)
 
     return run_uuid
+
+
+# Module-level set keeps strong references to background tasks (FINDING-14)
+_background_tasks: set = set()
+
+
+def _task_done_callback(task: asyncio.Task) -> None:  # type: ignore[type-arg]
+    """Remove completed task from registry; log unhandled exceptions."""
+    _background_tasks.discard(task)
+    if not task.cancelled() and (exc := task.exception()):
+        logger.error(f"Unhandled background task exception: {exc}", exc_info=exc)
 
 
 async def _process_route_pair_safe(run_id: UUID, pair_id: UUID) -> None:

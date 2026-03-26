@@ -85,7 +85,12 @@ def _compute_data_quality_flag(
     """
     if source_type in (SourceType.ADMIN_MANUAL, SourceType.EMPTY_RETURN_ADMIN, SourceType.EXCEL_IMPORT):
         return DataQualityFlag.HIGH
-    # TELEGRAM_TRIP_SLIP
+    # TELEGRAM_TRIP_SLIP truth table (V8 Section 6.3):
+    # ocr>=0.90 AND route_resolved → HIGH
+    # ocr>=0.70                    → MEDIUM (regardless of route)
+    # not route_resolved           → MEDIUM (regardless of confidence)
+    # ocr<0.70 AND route_resolved  → LOW
+    # ocr=None AND route_resolved  → LOW (no confidence signal)
     if ocr_confidence is not None and ocr_confidence >= 0.90 and route_resolved:
         return DataQualityFlag.HIGH
     if ocr_confidence is not None and ocr_confidence >= 0.70:
@@ -302,11 +307,12 @@ async def _process_single_enrichment(
             enrichment.claim_token = None
             enrichment.claim_expires_at_utc = None
             enrichment.claimed_by_worker = None
-            enrichment.enrichment_attempt_count += 1
             enrichment.last_enrichment_error_code = None
             enrichment.updated_at_utc = now
 
             # If still need retries (PENDING or FAILED with attempts left)
+            # BUG-07 fix: compute retry time BEFORE incrementing attempt_count so
+            # attempt 0 → index 0 → 60s (V8 Section 13.7: first retry = 1 minute).
             if enrichment.enrichment_status in (EnrichmentStatus.PENDING, EnrichmentStatus.FAILED):
                 if enrichment.enrichment_attempt_count < settings.enrichment_max_attempts:
                     enrichment.next_retry_at_utc = _enrichment_next_retry_at(enrichment.enrichment_attempt_count)
@@ -316,6 +322,7 @@ async def _process_single_enrichment(
                     enrichment.next_retry_at_utc = None
             else:
                 enrichment.next_retry_at_utc = None
+            enrichment.enrichment_attempt_count += 1
 
             await session.commit()
 
@@ -334,14 +341,15 @@ async def _process_single_enrichment(
             enrichment.claim_token = None
             enrichment.claim_expires_at_utc = None
             enrichment.claimed_by_worker = None
-            enrichment.enrichment_attempt_count += 1
             enrichment.last_enrichment_error_code = str(e)[:100]
             enrichment.updated_at_utc = now
 
+            # BUG-07 fix: compute retry using current count (before increment)
             if enrichment.enrichment_attempt_count < settings.enrichment_max_attempts:
                 enrichment.next_retry_at_utc = _enrichment_next_retry_at(enrichment.enrichment_attempt_count)
             else:
                 enrichment.next_retry_at_utc = None
+            enrichment.enrichment_attempt_count += 1
 
             await session.commit()
 

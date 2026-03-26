@@ -74,7 +74,11 @@ def parse_if_match(request: Request) -> tuple[str, int] | None:
     if not if_match:
         return None
     # Strip surrounding quotes if present
-    raw = if_match.strip().strip('"')
+    iv = if_match.strip()
+    if iv.startswith('"') and iv.endswith('"') and len(iv) >= 2:
+        raw = iv[1:-1]
+    else:
+        raw = iv
     match = re.match(r"^trip-(.+)-v(\d+)$", raw)
     if not match:
         return None
@@ -132,7 +136,7 @@ def make_pagination_meta(
     sort: str = "trip_datetime_utc_desc,id_desc",
 ) -> dict[str, Any]:
     """Build the pagination meta object per V8 Section 8.3."""
-    total_pages = max(1, (total_items + per_page - 1) // per_page) if total_items > 0 else 0
+    total_pages = max(1, (total_items + per_page - 1) // per_page)
     return {
         "page": page,
         "per_page": per_page,

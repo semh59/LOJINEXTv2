@@ -75,12 +75,13 @@ class PointCreate(LocationBaseModel):
 
 
 class PointUpdate(LocationBaseModel):
-    """Payload for PATCH /v1/location/points/{id}."""
+    """Payload for PATCH /v1/location/points/{id}.
+
+    NOTE: latitude_6dp, longitude_6dp, and code are immutable per V8 spec.
+    """
 
     name_tr: str | None = None
     name_en: str | None = None
-    latitude_6dp: float | None = None
-    longitude_6dp: float | None = None
     is_active: bool | None = None
 
 
@@ -109,8 +110,7 @@ class PairCreateRequest(LocationBaseModel):
 
     origin_code: str
     destination_code: str
-    language_hint: str = "auto"
-    is_active: bool = True
+    profile_code: str = "TIR"
 
 
 class PairUpdateRequest(LocationBaseModel):

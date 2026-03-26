@@ -3,7 +3,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,7 +13,10 @@ from location_service.enums import PairStatus
 from location_service.errors import (
     ProblemDetailError,
     internal_error,
+    point_inactive_for_new_pair,
+    route_origin_equals_destination,
     route_pair_already_exists_active,
+    route_pair_already_soft_deleted,
     route_pair_not_found,
     route_pair_soft_deleted,
 )
@@ -49,10 +52,19 @@ async def create_pair(payload: PairCreateRequest, session: Annotated[AsyncSessio
             "Origin or destination code does not exist.",
         )
 
-    # 2. Prevent duplicate active pairs for same O-D
+    # FINDING-07: BR-01 — Origin must not equal destination
+    if origin.location_id == dest.location_id:
+        raise route_origin_equals_destination()
+
+    # FINDING-05: Cannot create pair with inactive point
+    if not origin.is_active or not dest.is_active:
+        raise point_inactive_for_new_pair()
+
+    # FINDING-06: Prevent duplicate pairs including profile_code in query
     dup_stmt = select(RoutePair).where(
         RoutePair.origin_location_id == origin.location_id,
         RoutePair.destination_location_id == dest.location_id,
+        RoutePair.profile_code == payload.profile_code,
         RoutePair.pair_status.in_([PairStatus.ACTIVE, PairStatus.DRAFT]),
     )
     dup = (await session.execute(dup_stmt)).scalar_one_or_none()
@@ -67,6 +79,7 @@ async def create_pair(payload: PairCreateRequest, session: Annotated[AsyncSessio
         pair_status=PairStatus.DRAFT,
         origin_location_id=origin.location_id,
         destination_location_id=dest.location_id,
+        profile_code=payload.profile_code,
     )
 
     session.add(pair)
@@ -142,15 +155,8 @@ async def update_pair(
     if not pair:
         raise route_pair_not_found(str(pair_id))
 
-    if payload.is_active is not None and payload.is_active is False:
-        # If deactivated, it only affects future processing. We just set pair_status = DELETED ?
-        # Wait, the spec says "is_active" for a pair does not exist.
-        # For pairs, deactivating might mean soft delete. Let's assume soft-deleted.
-        if pair.pair_status != PairStatus.SOFT_DELETED:
-            pair.pair_status = PairStatus.SOFT_DELETED
-    elif payload.is_active is True:
-        # Cannot un-delete in V1
-        pass
+    if pair.pair_status == PairStatus.SOFT_DELETED:
+        raise route_pair_soft_deleted()
 
     if payload.profile_code is not None:
         if pair.pair_status != PairStatus.DRAFT:
@@ -167,6 +173,31 @@ async def update_pair(
 
     await session.refresh(pair)
     return pair  # type: ignore[return-value]
+
+
+@router.delete("/{pair_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def soft_delete_pair(pair_id: UUID, session: Annotated[AsyncSession, Depends(get_db)]) -> None:
+    """Soft-delete a Route Pair (Section 7.16).
+
+    Sets pair_status to SOFT_DELETED. Irreversible in V1.
+    """
+    stmt = select(RoutePair).where(RoutePair.route_pair_id == pair_id)
+    pair = (await session.execute(stmt)).scalar_one_or_none()
+
+    if not pair:
+        raise route_pair_not_found(str(pair_id))
+
+    # FINDING-08: 409 if already soft-deleted
+    if pair.pair_status == PairStatus.SOFT_DELETED:
+        raise route_pair_already_soft_deleted()
+
+    pair.pair_status = PairStatus.SOFT_DELETED
+
+    try:
+        await session.commit()
+    except Exception as e:
+        await session.rollback()
+        raise internal_error(str(e))
 
 
 @router.post("/{pair_id}/approve", status_code=204)

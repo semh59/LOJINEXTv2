@@ -112,10 +112,11 @@ def _trip_to_resource(trip: TripTrip) -> TripResource:
             data_quality_flag=trip.enrichment.data_quality_flag,
         )
 
-    # Latest evidence for summary
+    # BUG-05: Use max(created_at_utc) instead of [-1] which is load-order
+    # dependent (undefined for eagerly-loaded collections).
     evidence_summary = None
     if trip.evidence:
-        ev = trip.evidence[-1]  # latest evidence row
+        ev = max(trip.evidence, key=lambda e: e.created_at_utc)
         evidence_summary = EvidenceSummary(
             normalized_truck_plate=ev.normalized_truck_plate,
             normalized_trailer_plate=ev.normalized_trailer_plate,
@@ -677,12 +678,11 @@ async def edit_trip(
     x_actor_id: str = Header(..., alias="X-Actor-Id"),
 ) -> Any:
     """V8 Section 10.6 — Edit trip with optimistic locking."""
-    # Validate If-Match header is present (428 if missing)
-    require_if_match(request)
+    # BUG-01: Check header ONCE, store result; avoids redundant parse and
+    # ensures 428 fires before any DB read when header is absent.
+    parsed = require_if_match(request)
     trip = await _get_trip_or_404(session, trip_id)
 
-    # Check version against actual
-    parsed = require_if_match(request)
     if parsed[1] != trip.version:
         raise trip_version_mismatch()
 
@@ -695,20 +695,35 @@ async def edit_trip(
     route_sensitive_changed = False
 
     update_data = body.model_dump(exclude_unset=True)
+
+    # BUG-02: Handle trip_datetime_local + trip_timezone as a unit BEFORE the
+    # generic field loop so they are not double-processed.
+    if "trip_datetime_local" in update_data or "trip_timezone" in update_data:
+        tz = update_data.get("trip_timezone", trip.trip_timezone)
+        if "trip_datetime_local" in update_data:
+            new_utc = _local_to_utc(update_data["trip_datetime_local"], tz)
+            if new_utc != trip.trip_datetime_utc:
+                trip.trip_datetime_utc = new_utc
+                changed_fields.append("trip_datetime_utc")
+                route_sensitive_changed = True
+        if "trip_timezone" in update_data and update_data["trip_timezone"] != trip.trip_timezone:
+            trip.trip_timezone = update_data["trip_timezone"]
+            changed_fields.append("trip_timezone")
+            route_sensitive_changed = True
+
+    # BUG-03: Fields that should reset enrichment on change.
+    _enrichment_sensitive = {
+        "driver_id",
+        "vehicle_id",
+        "trailer_id",
+        "tare_weight_kg",
+        "gross_weight_kg",
+        "net_weight_kg",
+    }
+
     for field_name, value in update_data.items():
         if field_name in ("trip_datetime_local", "trip_timezone"):
-            # Handle datetime conversion
-            if "trip_datetime_local" in update_data:
-                tz = update_data.get("trip_timezone", trip.trip_timezone)
-                new_utc = _local_to_utc(update_data["trip_datetime_local"], tz)
-                if new_utc != trip.trip_datetime_utc:
-                    trip.trip_datetime_utc = new_utc
-                    changed_fields.append("trip_datetime_utc")
-                    route_sensitive_changed = True
-            if "trip_timezone" in update_data and update_data["trip_timezone"] != trip.trip_timezone:
-                trip.trip_timezone = update_data["trip_timezone"]
-                changed_fields.append("trip_timezone")
-                route_sensitive_changed = True
+            continue  # already handled above
         elif field_name == "route_id":
             if value != trip.route_id:
                 trip.route_id = value
@@ -719,6 +734,8 @@ async def edit_trip(
             if old_val != value:
                 setattr(trip, field_name, value)
                 changed_fields.append(field_name)
+                if field_name in _enrichment_sensitive:
+                    route_sensitive_changed = True
 
     if not changed_fields:
         resource = _trip_to_resource(trip)
@@ -729,14 +746,14 @@ async def edit_trip(
     # V8 Section 10.6: Route-sensitive field changes → reset enrichment
     if route_sensitive_changed and trip.enrichment:
         enrichment = trip.enrichment
-        if "route_id" in changed_fields or enrichment.route_status != RouteStatus.READY:
-            enrichment.route_status = RouteStatus.PENDING
+        enrichment.route_status = RouteStatus.PENDING  # BUG-03 fix: always reset
         enrichment.enrichment_status = EnrichmentStatus.PENDING
         enrichment.claim_token = None
         enrichment.claim_expires_at_utc = None
         enrichment.claimed_by_worker = None
         enrichment.next_retry_at_utc = None
         enrichment.updated_at_utc = now
+        session.add(enrichment)
 
     trip.version += 1
     trip.updated_at_utc = now
@@ -800,8 +817,10 @@ async def approve_trip(
     x_actor_id: str = Header(..., alias="X-Actor-Id"),
 ) -> Any:
     """V8 Section 10.7 — Approve PENDING_REVIEW → COMPLETED."""
-    trip = await _get_trip_or_404(session, trip_id)
+    # BUG-11: Check If-Match header before DB load so 428 fires without a
+    # wasted query when the header is missing.
     parsed = require_if_match(request)
+    trip = await _get_trip_or_404(session, trip_id)
     if parsed[1] != trip.version:
         raise trip_version_mismatch()
 
@@ -895,9 +914,11 @@ async def create_empty_return(
         raise empty_return_already_exists()
 
     # Idempotency check
+    # BUG-12: Include base_trip_id in fingerprint so the same actor can create
+    # empty-returns for different base trips without collision.
     request_body = body.model_dump(exclude_none=True)
     request_hash = _canonicalize_body(request_body)
-    endpoint_fp = f"empty_return:{x_actor_id}"
+    endpoint_fp = f"empty_return:{x_actor_id}:{base_trip_id}"
     replay = await _check_idempotency_key(session, idempotency_key, endpoint_fp, request_hash)
     if replay is not None:
         return replay
@@ -1130,7 +1151,11 @@ async def retry_enrichment(
     trip = await _get_trip_or_404(session, trip_id)
 
     if not trip.enrichment:
-        raise trip_not_found(trip_id)
+        # BUG-04: The trip exists; missing enrichment = data integrity error.
+        # trip_not_found is misleading here.
+        from trip_service.errors import internal_error
+
+        raise internal_error(f"Trip {trip_id} has no enrichment record (data integrity error).")
 
     # V8: If RUNNING, return 409
     if trip.enrichment.enrichment_status == EnrichmentStatus.RUNNING:

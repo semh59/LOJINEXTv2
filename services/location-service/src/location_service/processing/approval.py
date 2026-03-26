@@ -9,7 +9,7 @@ from uuid import UUID
 from sqlalchemy import select, update
 
 from location_service.database import async_session_factory
-from location_service.enums import DirectionCode, ProcessingStatus
+from location_service.enums import DirectionCode, PairStatus, ProcessingStatus
 from location_service.models import Route, RoutePair, RouteVersion
 
 logger = logging.getLogger(__name__)
@@ -27,6 +27,10 @@ async def approve_route_versions(pair_id: UUID) -> None:
         pair = await session.get(RoutePair, pair_id, with_for_update=True)
         if not pair:
             raise ValueError(f"Route pair {pair_id} not found")
+
+        # FINDING-11: Cannot approve a soft-deleted pair
+        if pair.pair_status == PairStatus.SOFT_DELETED:
+            raise ValueError(f"Route pair {pair_id} is soft-deleted and cannot be approved")
 
         if pair.pending_forward_version_no is None or pair.pending_reverse_version_no is None:
             raise ValueError(f"Route pair {pair_id} has no pending versions to approve")

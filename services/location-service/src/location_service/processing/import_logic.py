@@ -9,7 +9,7 @@ import logging
 from dataclasses import dataclass
 from typing import List, Tuple
 
-from sqlalchemy import func, insert, select
+from sqlalchemy import func, insert, select, tuple_
 
 from location_service.database import async_session_factory
 from location_service.domain.codes import generate_pair_code
@@ -58,16 +58,35 @@ async def process_import_csv(file_content: bytes) -> ImportResult:
             unique_codes.add(row[0].strip().upper())
             unique_codes.add(row[1].strip().upper())
 
-    # Batch fetch location IDs
     async with async_session_factory() as session:
+        # Batch fetch location IDs
         stmt = select(LocationPoint.code, LocationPoint.location_id).where(
             func.upper(LocationPoint.code).in_(list(unique_codes))
         )
         location_map = {row.code.upper(): row.location_id for row in (await session.execute(stmt)).all()}
 
+        # FINDING-12: Pre-check for existing ACTIVE/DRAFT pairs to produce per-row errors
+        # Build (origin_id, dest_id) pairs to check against DB
+        valid_pairs_for_check = []
+        for row in rows:
+            if len(row) >= 2:
+                orig_id = location_map.get(row[0].strip().upper())
+                dest_id = location_map.get(row[1].strip().upper())
+                if orig_id and dest_id:
+                    valid_pairs_for_check.append((orig_id, dest_id))
+
+        existing_pairs: set = set()
+        if valid_pairs_for_check:
+            existing_stmt = select(RoutePair.origin_location_id, RoutePair.destination_location_id).where(
+                tuple_(RoutePair.origin_location_id, RoutePair.destination_location_id).in_(valid_pairs_for_check),
+                RoutePair.pair_status.in_([PairStatus.ACTIVE, PairStatus.DRAFT]),
+            )
+            results = (await session.execute(existing_stmt)).all()
+            existing_pairs = {(r.origin_location_id, r.destination_location_id) for r in results}
+
         # Prepare bulk insert values
         to_insert = []
-        errors = []
+        errors: List[Tuple[int, str]] = []
         success_count = 0
 
         for i, row in enumerate(rows, start=1):
@@ -88,6 +107,11 @@ async def process_import_csv(file_content: bytes) -> ImportResult:
                 if not dest_id:
                     missing.append(dest_code)
                 errors.append((i, f"Missing points: {', '.join(missing)}"))
+                continue
+
+            # FINDING-12: Per-row duplicate error instead of DB constraint failure
+            if (orig_id, dest_id) in existing_pairs:
+                errors.append((i, f"Pair {orig_code}→{dest_code} already exists (ACTIVE or DRAFT)"))
                 continue
 
             to_insert.append(
