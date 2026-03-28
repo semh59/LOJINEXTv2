@@ -1,0 +1,95 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./sql/init:/docker-entrypoint-initdb.d
+      - ./sql/seed:/seed
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.1.2
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - "512M"
+      - --reserve-memory
+      - "0M"
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - "0.0.0.0:9092"
+      - --advertise-kafka-addr
+      - "redpanda:9092"
+    ports:
+      - "9092:9092"
+
+  location-service:
+    build:
+      context: ../../services/location-service
+    environment:
+      LOCATION_DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/location_service
+      LOCATION_ENV_NAME: dev
+      LOCATION_ENABLE_ORS_VALIDATION: "false"
+    ports:
+      - "8103:8103"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  fleet-stub:
+    build:
+      context: ./stubs/service_stub
+    ports:
+      - "8110:8110"
+
+  telegram-stub:
+    build:
+      context: ./stubs/service_stub
+    ports:
+      - "8111:8110"
+
+  excel-stub:
+    build:
+      context: ./stubs/service_stub
+    ports:
+      - "8112:8110"
+
+  trip-service:
+    build:
+      context: ../../services/trip-service
+    environment:
+      TRIP_DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/trip_service
+      TRIP_FLEET_SERVICE_URL: http://fleet-stub:8110
+      TRIP_LOCATION_SERVICE_URL: http://location-service:8103
+      TRIP_AUTH_JWT_SECRET: trip-service-smoke-secret-please-change-me-32b
+      TRIP_AUTH_JWT_ALGORITHM: HS256
+      TRIP_ALLOW_LEGACY_ACTOR_HEADERS: "false"
+      TRIP_ENVIRONMENT: dev
+      TRIP_BROKER_TYPE: kafka
+      TRIP_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      TRIP_KAFKA_TOPIC: trip.events.v1
+    ports:
+      - "8101:8101"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_started
+      location-service:
+        condition: service_started
+      fleet-stub:
+        condition: service_started

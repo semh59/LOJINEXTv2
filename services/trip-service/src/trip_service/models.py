@@ -1,12 +1,11 @@
-"""SQLAlchemy models for all 9 Trip Service tables.
+"""SQLAlchemy models for Trip Service."""
 
-Implements V8 Sections 6.1–6.9 exactly.
-All columns, constraints, and indexes match the specification.
-"""
+from __future__ import annotations
 
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -16,31 +15,43 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+_COMPLETE_TRIP_SQL = """
+vehicle_id IS NOT NULL AND
+route_pair_id IS NOT NULL AND
+route_id IS NOT NULL AND
+origin_location_id IS NOT NULL AND
+origin_name_snapshot IS NOT NULL AND
+destination_location_id IS NOT NULL AND
+destination_name_snapshot IS NOT NULL AND
+tare_weight_kg IS NOT NULL AND
+gross_weight_kg IS NOT NULL AND
+net_weight_kg IS NOT NULL AND
+planned_duration_s IS NOT NULL AND
+planned_end_utc IS NOT NULL
+"""
 
 
 class Base(DeclarativeBase):
     """Base class for all Trip Service models."""
 
-    pass
-
-
-# ---------------------------------------------------------------------------
-# 6.1 trip_trips
-# ---------------------------------------------------------------------------
-
 
 class TripTrip(Base):
-    """V8 Section 6.1 — Canonical trip record."""
+    """Canonical trip aggregate record."""
 
     __tablename__ = "trip_trips"
 
-    id: Mapped[str] = mapped_column(String(26), primary_key=True)  # ULID
-    trip_no: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    trip_no: Mapped[str] = mapped_column(String(100), nullable=False)
     source_type: Mapped[str] = mapped_column(String(30), nullable=False)
     source_slip_no: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    source_reference_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
     source_payload_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    review_reason_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     base_trip_id: Mapped[str | None] = mapped_column(
         String(26),
         ForeignKey("trip_trips.id", ondelete="RESTRICT"),
@@ -49,13 +60,20 @@ class TripTrip(Base):
     driver_id: Mapped[str] = mapped_column(String(50), nullable=False)
     vehicle_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     trailer_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    route_pair_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     route_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    origin_location_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    origin_name_snapshot: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    destination_location_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    destination_name_snapshot: Mapped[str | None] = mapped_column(String(200), nullable=True)
     trip_datetime_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     trip_timezone: Mapped[str] = mapped_column(String(50), nullable=False)
-    tare_weight_kg: Mapped[int] = mapped_column(Integer, nullable=False)
-    gross_weight_kg: Mapped[int] = mapped_column(Integer, nullable=False)
-    net_weight_kg: Mapped[int] = mapped_column(Integer, nullable=False)
-    is_empty_return: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    planned_duration_s: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    planned_end_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    tare_weight_kg: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    gross_weight_kg: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    net_weight_kg: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_empty_return: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_by_actor_type: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -65,53 +83,105 @@ class TripTrip(Base):
     soft_deleted_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     soft_deleted_by_actor_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
-    # Relationships
     evidence: Mapped[list["TripTripEvidence"]] = relationship(
-        back_populates="trip", cascade="all, delete-orphan", passive_deletes=True
+        back_populates="trip",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     enrichment: Mapped["TripTripEnrichment | None"] = relationship(
-        back_populates="trip", cascade="all, delete-orphan", passive_deletes=True, uselist=False
+        back_populates="trip",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        uselist=False,
     )
     timeline: Mapped[list["TripTripTimeline"]] = relationship(
-        back_populates="trip", cascade="all, delete-orphan", passive_deletes=True
+        back_populates="trip",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     empty_return_children: Mapped[list["TripTrip"]] = relationship(
-        back_populates="base_trip", foreign_keys="TripTrip.base_trip_id"
+        back_populates="base_trip",
+        foreign_keys="TripTrip.base_trip_id",
     )
     base_trip: Mapped["TripTrip | None"] = relationship(
-        back_populates="empty_return_children", remote_side="TripTrip.id"
+        back_populates="empty_return_children",
+        remote_side="TripTrip.id",
     )
 
     __table_args__ = (
-        # V8 Section 6.1 — Check constraints
-        CheckConstraint("gross_weight_kg >= 0", name="ck_trips_gross_positive"),
-        CheckConstraint("tare_weight_kg >= 0", name="ck_trips_tare_positive"),
-        CheckConstraint("net_weight_kg >= 0", name="ck_trips_net_positive"),
-        CheckConstraint("gross_weight_kg >= tare_weight_kg", name="ck_trips_gross_gte_tare"),
-        CheckConstraint("net_weight_kg = gross_weight_kg - tare_weight_kg", name="ck_trips_net_eq_diff"),
-        # V8 Section 6.1 — Indexes
+        UniqueConstraint("trip_no", name="uq_trip_trips_trip_no"),
+        CheckConstraint("planned_duration_s IS NULL OR planned_duration_s >= 0", name="ck_trips_duration_non_negative"),
+        CheckConstraint("tare_weight_kg IS NULL OR tare_weight_kg >= 0", name="ck_trips_tare_positive"),
+        CheckConstraint("gross_weight_kg IS NULL OR gross_weight_kg >= 0", name="ck_trips_gross_positive"),
+        CheckConstraint("net_weight_kg IS NULL OR net_weight_kg >= 0", name="ck_trips_net_positive"),
+        CheckConstraint(
+            "gross_weight_kg IS NULL OR tare_weight_kg IS NULL OR gross_weight_kg >= tare_weight_kg",
+            name="ck_trips_gross_gte_tare",
+        ),
+        CheckConstraint(
+            """
+            net_weight_kg IS NULL OR gross_weight_kg IS NULL OR tare_weight_kg IS NULL OR
+            net_weight_kg = gross_weight_kg - tare_weight_kg
+            """,
+            name="ck_trips_net_eq_diff",
+        ),
+        CheckConstraint(
+            f"status <> 'COMPLETED' OR ({_COMPLETE_TRIP_SQL})",
+            name="ck_trips_completed_complete",
+        ),
+        CheckConstraint(
+            f"source_type NOT IN ('ADMIN_MANUAL', 'EMPTY_RETURN_ADMIN', 'EXCEL_IMPORT') OR ({_COMPLETE_TRIP_SQL})",
+            name="ck_trips_strict_sources_complete",
+        ),
+        CheckConstraint(
+            f"review_reason_code <> 'FALLBACK_MINIMAL' OR status = 'PENDING_REVIEW' OR ({_COMPLETE_TRIP_SQL})",
+            name="ck_trips_fallback_pending_only",
+        ),
+        CheckConstraint(
+            "source_type NOT IN ('TELEGRAM_TRIP_SLIP', 'EXCEL_IMPORT') OR source_reference_key IS NOT NULL",
+            name="ck_trips_imported_source_reference_key",
+        ),
         Index("ix_trips_status_datetime", "status", "trip_datetime_utc", "id", postgresql_using="btree"),
-        Index("ix_trips_driver_datetime", "driver_id", "trip_datetime_utc", "id", postgresql_using="btree"),
-        Index("ix_trips_vehicle_datetime", "vehicle_id", "trip_datetime_utc", "id", postgresql_using="btree"),
-        Index("ix_trips_route_datetime", "route_id", "trip_datetime_utc", "id", postgresql_using="btree"),
+        Index("ix_trips_driver_window", "driver_id", "trip_datetime_utc", "planned_end_utc", postgresql_using="btree"),
+        Index(
+            "ix_trips_vehicle_window",
+            "vehicle_id",
+            "trip_datetime_utc",
+            "planned_end_utc",
+            postgresql_using="btree",
+        ),
+        Index(
+            "ix_trips_trailer_window",
+            "trailer_id",
+            "trip_datetime_utc",
+            "planned_end_utc",
+            postgresql_using="btree",
+        ),
+        Index("ix_trips_route_pair_datetime", "route_pair_id", "trip_datetime_utc", "id", postgresql_using="btree"),
         Index("ix_trips_base_trip", "base_trip_id"),
-        # V8 Section 6.1 — Partial unique index for source_slip_no
+        Index(
+            "uq_trips_empty_return_base_trip",
+            "base_trip_id",
+            unique=True,
+            postgresql_where=text("is_empty_return = true"),
+        ),
         Index(
             "uq_trips_source_slip_no_telegram",
             "source_slip_no",
             unique=True,
-            postgresql_where="source_type = 'TELEGRAM_TRIP_SLIP'",
+            postgresql_where=text("source_type = 'TELEGRAM_TRIP_SLIP' AND source_slip_no IS NOT NULL"),
+        ),
+        Index(
+            "uq_trips_source_reference_key",
+            "source_reference_key",
+            unique=True,
+            postgresql_where=text("source_reference_key IS NOT NULL"),
         ),
     )
 
 
-# ---------------------------------------------------------------------------
-# 6.2 trip_trip_evidence
-# ---------------------------------------------------------------------------
-
-
 class TripTripEvidence(Base):
-    """V8 Section 6.2 — Non-canonical source evidence."""
+    """Non-canonical source evidence."""
 
     __tablename__ = "trip_trip_evidence"
 
@@ -132,7 +202,6 @@ class TripTripEvidence(Base):
     raw_payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    # Relationship
     trip: Mapped["TripTrip"] = relationship(back_populates="evidence")
 
     __table_args__ = (
@@ -143,19 +212,17 @@ class TripTripEvidence(Base):
     )
 
 
-# ---------------------------------------------------------------------------
-# 6.3 trip_trip_enrichment
-# ---------------------------------------------------------------------------
-
-
 class TripTripEnrichment(Base):
-    """V8 Section 6.3 — Enrichment state and worker claim state."""
+    """Enrichment state and worker claim state."""
 
     __tablename__ = "trip_trip_enrichment"
 
     id: Mapped[str] = mapped_column(String(26), primary_key=True)
     trip_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("trip_trips.id", ondelete="CASCADE"), unique=True, nullable=False
+        String(26),
+        ForeignKey("trip_trips.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
     )
     enrichment_status: Mapped[str] = mapped_column(String(10), nullable=False)
     route_status: Mapped[str] = mapped_column(String(10), nullable=False)
@@ -169,7 +236,6 @@ class TripTripEnrichment(Base):
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    # Relationship
     trip: Mapped["TripTrip"] = relationship(back_populates="enrichment")
 
     __table_args__ = (
@@ -179,13 +245,8 @@ class TripTripEnrichment(Base):
     )
 
 
-# ---------------------------------------------------------------------------
-# 6.4 trip_trip_timeline
-# ---------------------------------------------------------------------------
-
-
 class TripTripTimeline(Base):
-    """V8 Section 6.4 — Immutable business timeline events."""
+    """Immutable business timeline events."""
 
     __tablename__ = "trip_trip_timeline"
 
@@ -198,7 +259,6 @@ class TripTripTimeline(Base):
     payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    # Relationship
     trip: Mapped["TripTrip"] = relationship(back_populates="timeline")
 
     __table_args__ = (
@@ -207,111 +267,33 @@ class TripTripTimeline(Base):
     )
 
 
-# ---------------------------------------------------------------------------
-# 6.5 trip_import_jobs
-# ---------------------------------------------------------------------------
+class TripTripDeleteAudit(Base):
+    """Immutable audit record captured before a hard delete."""
 
+    __tablename__ = "trip_trip_delete_audit"
 
-class TripImportJob(Base):
-    """V8 Section 6.5 — Async Excel import job metadata."""
-
-    __tablename__ = "trip_import_jobs"
-
-    id: Mapped[str] = mapped_column(String(26), primary_key=True)
-    file_key: Mapped[str] = mapped_column(String(500), nullable=False)
-    status: Mapped[str] = mapped_column(String(20), nullable=False)
-    import_mode: Mapped[str] = mapped_column(String(10), nullable=False)
-    created_by_admin_id: Mapped[str] = mapped_column(String(50), nullable=False)
-    imported_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    rejected_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    enrichment_pending_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    enrichment_failed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    error_summary_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    audit_id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    trip_id: Mapped[str] = mapped_column(String(26), nullable=False)
+    trip_no: Mapped[str] = mapped_column(String(100), nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(50), nullable=False)
+    actor_role: Mapped[str] = mapped_column(String(20), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    snapshot_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    deleted_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    completed_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-    # Relationships
-    rows: Mapped[list["TripImportJobRow"]] = relationship(
-        back_populates="job", cascade="all, delete-orphan", passive_deletes=True
-    )
 
     __table_args__ = (
-        Index("ix_import_jobs_status_created", "status", "created_at_utc"),
-        Index("ix_import_jobs_admin_created", "created_by_admin_id", "created_at_utc"),
+        Index("ix_trip_delete_audit_trip", "trip_id", "deleted_at_utc"),
+        Index("ix_trip_delete_audit_actor", "actor_id", "deleted_at_utc"),
     )
-
-
-# ---------------------------------------------------------------------------
-# 6.6 trip_import_job_rows
-# ---------------------------------------------------------------------------
-
-
-class TripImportJobRow(Base):
-    """V8 Section 6.6 — Per-row diagnostics for import jobs."""
-
-    __tablename__ = "trip_import_job_rows"
-
-    id: Mapped[str] = mapped_column(String(26), primary_key=True)
-    job_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("trip_import_jobs.id", ondelete="CASCADE"), nullable=False
-    )
-    row_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    row_status: Mapped[str] = mapped_column(String(10), nullable=False)
-    created_trip_id: Mapped[str | None] = mapped_column(String(26), ForeignKey("trip_trips.id"), nullable=True)
-    driver_code_raw: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    raw_row_json: Mapped[str] = mapped_column(Text, nullable=False)
-    error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-    # Relationship
-    job: Mapped["TripImportJob"] = relationship(back_populates="rows")
-
-    __table_args__ = (
-        Index("ix_import_rows_job_number", "job_id", "row_number"),
-        Index("ix_import_rows_job_status", "job_id", "row_status"),
-    )
-
-
-# ---------------------------------------------------------------------------
-# 6.7 trip_export_jobs
-# ---------------------------------------------------------------------------
-
-
-class TripExportJob(Base):
-    """V8 Section 6.7 — Async export job metadata."""
-
-    __tablename__ = "trip_export_jobs"
-
-    id: Mapped[str] = mapped_column(String(26), primary_key=True)
-    status: Mapped[str] = mapped_column(String(20), nullable=False)
-    requested_filters_json: Mapped[str] = mapped_column(Text, nullable=False)
-    result_file_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    result_file_expires_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_by_admin_id: Mapped[str] = mapped_column(String(50), nullable=False)
-    created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    completed_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-    __table_args__ = (
-        Index("ix_export_jobs_status_created", "status", "created_at_utc"),
-        Index("ix_export_jobs_admin_created", "created_by_admin_id", "created_at_utc"),
-    )
-
-
-# ---------------------------------------------------------------------------
-# 6.8 trip_outbox
-# ---------------------------------------------------------------------------
 
 
 class TripOutbox(Base):
-    """V8 Section 6.8 — Transactional outbox for reliable event publish."""
+    """Transactional outbox for reliable event publish."""
 
     __tablename__ = "trip_outbox"
 
-    event_id: Mapped[str] = mapped_column(String(26), primary_key=True)  # ULID
+    event_id: Mapped[str] = mapped_column(String(26), primary_key=True)
     aggregate_type: Mapped[str] = mapped_column(String(10), nullable=False, default="TRIP")
     aggregate_id: Mapped[str] = mapped_column(String(26), nullable=False)
     aggregate_version: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -327,24 +309,14 @@ class TripOutbox(Base):
     published_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
-        Index(
-            "ix_outbox_status_attempt_created",
-            "publish_status",
-            "next_attempt_at_utc",
-            "created_at_utc",
-        ),
+        Index("ix_outbox_status_attempt_created", "publish_status", "next_attempt_at_utc", "created_at_utc"),
         Index("ix_outbox_aggregate", "aggregate_type", "aggregate_id", "created_at_utc"),
         Index("ix_outbox_event_name", "event_name", "created_at_utc"),
     )
 
 
-# ---------------------------------------------------------------------------
-# 6.9 trip_idempotency_records
-# ---------------------------------------------------------------------------
-
-
 class TripIdempotencyRecord(Base):
-    """V8 Section 6.9 — Persisted idempotency fingerprints for admin POST endpoints."""
+    """Persisted idempotency fingerprints for POST endpoints."""
 
     __tablename__ = "trip_idempotency_records"
 
@@ -352,6 +324,7 @@ class TripIdempotencyRecord(Base):
     endpoint_fingerprint: Mapped[str] = mapped_column(Text, primary_key=True)
     request_hash: Mapped[str] = mapped_column(Text, nullable=False)
     response_status: Mapped[int] = mapped_column(Integer, nullable=False)
+    response_headers_json: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
     response_body_json: Mapped[str] = mapped_column(Text, nullable=False)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

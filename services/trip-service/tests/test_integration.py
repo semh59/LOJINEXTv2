@@ -1,408 +1,368 @@
-"""18 Mandatory Integration Tests — V8 Section 23.
-
-Integration tests exercise full request cycles through the ASGI app
-backed by a real PostgreSQL container.
-"""
+"""Trip Service integration tests."""
 
 from __future__ import annotations
 
-import openpyxl
+from datetime import datetime, timedelta
+
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import update
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from tests.conftest import ADMIN_HEADERS, make_manual_trip_payload, make_slip_payload
-from trip_service.models import TripTripEnrichment
-
-# ---------------------------------------------------------------------------
-# IT-01: Telegram-derived ingestion creates PENDING_REVIEW
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_slip_ingest_creates_pending_review(client: AsyncClient):
-    """Slip ingest → 201 with status=PENDING_REVIEW."""
-    payload = make_slip_payload(source_slip_no="SLIP-IT01")
-    r = await client.post("/internal/v1/trips/slips/ingest", json=payload)
-    assert r.status_code == 201
-    assert r.json()["status"] == "PENDING_REVIEW"
-    assert r.json()["source_type"] == "TELEGRAM_TRIP_SLIP"
-
-
-# ---------------------------------------------------------------------------
-# IT-02: route enrichment retry path
-# ---------------------------------------------------------------------------
+from tests.conftest import (
+    ADMIN_HEADERS,
+    EXCEL_SERVICE_HEADERS,
+    SUPER_ADMIN_HEADERS,
+    TELEGRAM_SERVICE_HEADERS,
+    make_excel_payload,
+    make_fallback_payload,
+    make_manual_trip_payload,
+    make_slip_payload,
+)
+from trip_service.models import TripTrip, TripTripDeleteAudit
 
 
 @pytest.mark.asyncio
-async def test_route_enrichment_retry(client: AsyncClient):
-    """Retry enrichment → 202 when status is not RUNNING."""
-    payload = make_slip_payload(source_slip_no="SLIP-IT02-ROUTE")
-    r1 = await client.post("/internal/v1/trips/slips/ingest", json=payload)
-    trip_id = r1.json()["id"]
-
-    r2 = await client.post(f"/api/v1/trips/{trip_id}/retry-enrichment")
-    assert r2.status_code == 202
-    assert r2.json()["queued"] is True
-
-
-# ---------------------------------------------------------------------------
-# IT-04: approve succeeds only when route is ready
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_approve_succeeds_with_enrichment_ready(client: AsyncClient, test_session):
-    """Approve → 200 when route is READY."""
-
-    payload = make_slip_payload(source_slip_no="SLIP-IT04-APPROVE")
-    r1 = await client.post("/internal/v1/trips/slips/ingest", json=payload)
-    trip_id = r1.json()["id"]
-    etag = r1.headers.get("etag")
-
-    await test_session.execute(
-        update(TripTripEnrichment).where(TripTripEnrichment.trip_id == trip_id).values(route_status="READY")
-    )
-    await test_session.commit()
-
-    r2 = await client.post(
-        f"/api/v1/trips/{trip_id}/approve",
-        json={"note": "approved"},
-        headers={**ADMIN_HEADERS, "If-Match": etag},
-    )
-    assert r2.status_code == 200
-    assert r2.json()["status"] == "COMPLETED"
-
-
-# ---------------------------------------------------------------------------
-# IT-05: cancel soft deletes trip
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_cancel_soft_deletes(client: AsyncClient):
-    """Cancel → status=SOFT_DELETED, soft_deleted_at_utc set."""
-    payload = make_manual_trip_payload(trip_no="TR-IT05-CANCEL")
-    r1 = await client.post("/api/v1/trips", json=payload, headers=ADMIN_HEADERS)
-    trip_id = r1.json()["id"]
-    etag = r1.headers.get("etag")
-
-    r2 = await client.post(
-        f"/api/v1/trips/{trip_id}/cancel",
-        headers={**ADMIN_HEADERS, "If-Match": etag},
-    )
-    assert r2.status_code == 200
-    assert r2.json()["status"] == "SOFT_DELETED"
-    assert r2.json()["soft_deleted_at_utc"] is not None
-
-
-# ---------------------------------------------------------------------------
-# IT-06: hard delete removes trip
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_hard_delete_removes_trip(client: AsyncClient):
-    """Hard delete → 204, trip no longer accessible."""
-    payload = make_manual_trip_payload(trip_no="TR-IT06-HARD")
-    r1 = await client.post("/api/v1/trips", json=payload, headers=ADMIN_HEADERS)
-    trip_id = r1.json()["id"]
-    etag = r1.headers.get("etag")
-
-    r2 = await client.delete(
-        f"/api/v1/trips/{trip_id}/hard",
-        headers={**ADMIN_HEADERS, "If-Match": etag},
-    )
-    assert r2.status_code == 204
-
-    r3 = await client.get(f"/api/v1/trips/{trip_id}")
-    assert r3.status_code == 404
-
-
-# ---------------------------------------------------------------------------
-# IT-07: hard delete blocked when child empty return exists
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_hard_delete_blocked_by_child(client: AsyncClient):
-    """Hard delete → 409 when empty-return children exist."""
-    base = make_manual_trip_payload(trip_no="TR-IT07-BLOCK")
-    r1 = await client.post("/api/v1/trips", json=base, headers=ADMIN_HEADERS)
-    base_id = r1.json()["id"]
-    etag = r1.headers.get("etag")
-
-    er = {
-        "driver_id": "driver-001",
-        "trip_datetime_local": "2025-06-15T14:00:00",
-        "trip_timezone": "Europe/Istanbul",
-        "tare_weight_kg": 5000,
-        "gross_weight_kg": 5000,
-        "net_weight_kg": 0,
-    }
-    await client.post(
-        f"/api/v1/trips/{base_id}/empty-return",
-        json=er,
-        headers={**ADMIN_HEADERS, "If-Match": etag},
-    )
-
-    r3 = await client.delete(
-        f"/api/v1/trips/{base_id}/hard",
-        headers={**ADMIN_HEADERS, "If-Match": etag},
-    )
-    assert r3.status_code == 409
-
-
-# ---------------------------------------------------------------------------
-# IT-08: import file upload then import job creation
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_import_file_upload_and_job_creation(client: AsyncClient, tmp_path):
-    """Upload .xlsx → create import job → 201."""
-
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.append(["driver_id", "trip_datetime_local", "tare_weight_kg", "gross_weight_kg", "net_weight_kg"])
-    ws.append(["driver-001", "2025-06-15T10:00:00", 10000, 25000, 15000])
-
-    file_path = tmp_path / "test_import.xlsx"
-    wb.save(str(file_path))
-
-    with open(file_path, "rb") as f:
-        r1 = await client.post(
-            "/api/v1/trips/import-files",
-            files={
-                "file": ("test_import.xlsx", f, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-            },
-        )
-    assert r1.status_code == 201
-    file_key = r1.json()["file_key"]
-
-    r2 = await client.post(
-        "/api/v1/trips/import-jobs",
-        json={"file_key": file_key, "import_mode": "PARTIAL"},
-        headers={**ADMIN_HEADERS, "Idempotency-Key": "imp-test-001"},
-    )
-    assert r2.status_code == 201
-
-
-# ---------------------------------------------------------------------------
-# IT-09: export job creation
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_export_job_creation(client: AsyncClient):
-    """Create export job → 201."""
-    r = await client.post(
-        "/api/v1/trips/export-jobs",
-        json={"filters": {"driver_id": "driver-001"}},
-        headers={**ADMIN_HEADERS, "Idempotency-Key": "exp-test-001"},
-    )
-    assert r.status_code == 201
-    assert r.json()["status"] == "PENDING"
-
-
-# ---------------------------------------------------------------------------
-# IT-10: list endpoint pagination meta correctness
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_list_trips_pagination_meta(client: AsyncClient):
-    """List trips returns correct pagination meta."""
-    for i in range(3):
-        p = make_manual_trip_payload(trip_no=f"TR-PAGE-{i}")
-        await client.post("/api/v1/trips", json=p, headers=ADMIN_HEADERS)
-
-    r = await client.get("/api/v1/trips", params={"page": 1, "per_page": 2})
-    assert r.status_code == 200
-    meta = r.json()["meta"]
-    assert meta["page"] == 1
-    assert meta["per_page"] == 2
-    assert meta["total_items"] >= 3
-    assert meta["total_pages"] >= 2
-
-
-# ---------------------------------------------------------------------------
-# IT-11: date filter timezone correctness
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_date_filter_timezone_correctness(client: AsyncClient):
-    """Date filter uses timezone-aware conversion."""
-    payload = make_manual_trip_payload(
-        trip_no="TR-TZ-FILTER",
-        trip_datetime_local="2025-06-15T23:30:00",
-        trip_timezone="Europe/Istanbul",
-    )
-    await client.post("/api/v1/trips", json=payload, headers=ADMIN_HEADERS)
-
-    r = await client.get(
+async def test_manual_create_uses_route_pair_and_snapshots_locations(client: AsyncClient):
+    response = await client.post(
         "/api/v1/trips",
-        params={
-            "date_from": "2025-06-15",
-            "date_to": "2025-06-15",
-            "timezone": "Europe/Istanbul",
+        json=make_manual_trip_payload(trip_no="TR-MANUAL-SNAPSHOT"),
+        headers=ADMIN_HEADERS,
+    )
+    body = response.json()
+    assert response.status_code == 201
+    assert body["status"] == "COMPLETED"
+    assert body["route_pair_id"] == "pair-001"
+    assert body["route_id"] == "route-ist-ank"
+    assert body["origin_name_snapshot"] == "Istanbul"
+    assert body["destination_name_snapshot"] == "Ankara"
+    assert body["planned_duration_s"] == 21600
+
+
+@pytest.mark.asyncio
+async def test_normal_admin_cannot_create_future_manual_trip(client: AsyncClient):
+    future_local = (datetime.now().astimezone().replace(microsecond=0) + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
+    response = await client.post(
+        "/api/v1/trips",
+        json=make_manual_trip_payload(trip_no="TR-FUTURE-ADMIN", trip_start_local=future_local),
+        headers=ADMIN_HEADERS,
+    )
+    assert response.status_code == 422
+    assert response.json()["code"] == "TRIP_INVALID_DATE_WINDOW"
+
+
+@pytest.mark.asyncio
+async def test_super_admin_future_manual_trip_becomes_pending_review(client: AsyncClient):
+    future_local = (datetime.now().astimezone().replace(microsecond=0) + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
+    response = await client.post(
+        "/api/v1/trips",
+        json=make_manual_trip_payload(trip_no="TR-FUTURE-SA", trip_start_local=future_local),
+        headers=SUPER_ADMIN_HEADERS,
+    )
+    assert response.status_code == 201
+    assert response.json()["status"] == "PENDING_REVIEW"
+    assert response.json()["review_reason_code"] == "FUTURE_MANUAL"
+
+
+@pytest.mark.asyncio
+async def test_empty_return_derives_reverse_context_and_suffix(client: AsyncClient):
+    base_start = (datetime.now().astimezone().replace(microsecond=0) - timedelta(hours=7)).strftime("%Y-%m-%dT%H:%M")
+    return_start = (
+        datetime.now().astimezone().replace(microsecond=0) - timedelta(minutes=10)
+    ).strftime("%Y-%m-%dT%H:%M")
+    base = await client.post(
+        "/api/v1/trips",
+        json=make_manual_trip_payload(trip_no="TR-BASE-ER", route_pair_id="pair-001", trip_start_local=base_start),
+        headers=SUPER_ADMIN_HEADERS,
+    )
+    empty_return = await client.post(
+        f"/api/v1/trips/{base.json()['id']}/empty-return",
+        json={
+            "trip_start_local": return_start,
+            "trip_timezone": "Europe/Istanbul",
+            "driver_id": "driver-001",
+            "vehicle_id": "vehicle-001",
+            "tare_weight_kg": 14000,
+            "gross_weight_kg": 14000,
+            "net_weight_kg": 0,
         },
+        headers={**SUPER_ADMIN_HEADERS, "If-Match": base.headers["etag"]},
     )
-    assert r.status_code == 200
-    assert r.json()["meta"]["total_items"] >= 1
-
-
-# ---------------------------------------------------------------------------
-# IT-12: multi-worker claim algorithm (FOR UPDATE SKIP LOCKED)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_claim_algorithm_for_update_skip_locked():
-    """FOR UPDATE SKIP LOCKED query is valid PostgreSQL syntax.
-
-    Actual multi-process contention tested manually. This test
-    validates the claim function is structured correctly.
-    """
-    from trip_service.workers.enrichment_worker import _claim_and_process_batch
-
-    assert callable(_claim_and_process_batch)
-
-
-# ---------------------------------------------------------------------------
-# IT-13: crashed worker claim recovery
-# ---------------------------------------------------------------------------
+    body = empty_return.json()
+    assert empty_return.status_code == 201
+    assert body["trip_no"] == "TR-BASE-ER-B"
+    assert body["route_id"] == "route-ank-ist"
+    assert body["origin_name_snapshot"] == "Ankara"
+    assert body["destination_name_snapshot"] == "Istanbul"
 
 
 @pytest.mark.asyncio
-async def test_crashed_worker_claim_recovery():
-    """Orphaned RUNNING row is re-claimed after TTL expiry.
-
-    The claim query includes:
-    enrichment_status = RUNNING AND claim_expires_at_utc < now()
-    """
-    from trip_service.enums import EnrichmentStatus
-
-    assert EnrichmentStatus.RUNNING.value == "RUNNING"
-
-
-# ---------------------------------------------------------------------------
-# IT-14: admin idempotency — same key + same body returns original
-# ---------------------------------------------------------------------------
+async def test_imported_trip_reject_flow(client: AsyncClient):
+    created = await client.post(
+        "/internal/v1/trips/slips/ingest",
+        json=make_slip_payload(source_slip_no="SLIP-REJECT-01"),
+        headers=TELEGRAM_SERVICE_HEADERS,
+    )
+    response = await client.post(
+        f"/api/v1/trips/{created.json()['id']}/reject",
+        json={"reason": "bad data"},
+        headers={**ADMIN_HEADERS, "If-Match": created.headers["etag"]},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "REJECTED"
 
 
 @pytest.mark.asyncio
-async def test_admin_idempotency_replay(client: AsyncClient):
-    """Same Idempotency-Key + same body → replay original response."""
-    payload = make_manual_trip_payload(trip_no="TR-IDEMP-REPLAY")
+async def test_hard_delete_requires_soft_delete_and_persists_audit(client: AsyncClient, db_engine):
+    created = await client.post(
+        "/api/v1/trips",
+        json=make_manual_trip_payload(trip_no="TR-HARD-AUDIT"),
+        headers=SUPER_ADMIN_HEADERS,
+    )
+    cancelled = await client.post(
+        f"/api/v1/trips/{created.json()['id']}/cancel",
+        headers={**SUPER_ADMIN_HEADERS, "If-Match": created.headers["etag"]},
+    )
+    deleted = await client.post(
+        f"/api/v1/trips/{created.json()['id']}/hard-delete",
+        json={"reason": "duplicate correction"},
+        headers={**SUPER_ADMIN_HEADERS, "If-Match": cancelled.headers["etag"]},
+    )
+    assert deleted.status_code == 204
 
-    r1 = await client.post(
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with session_factory() as session:
+        remaining = await session.execute(select(TripTrip).where(TripTrip.id == created.json()["id"]))
+        audit = await session.execute(
+            select(TripTripDeleteAudit).where(TripTripDeleteAudit.trip_id == created.json()["id"])
+        )
+    assert remaining.scalar_one_or_none() is None
+    audit_row = audit.scalar_one()
+    assert audit_row.reason == "duplicate correction"
+    assert audit_row.snapshot_json["trip"]["trip_no"] == "TR-HARD-AUDIT"
+
+
+@pytest.mark.asyncio
+async def test_full_telegram_ingest_creates_pending_review(client: AsyncClient):
+    response = await client.post(
+        "/internal/v1/trips/slips/ingest",
+        json=make_slip_payload(source_slip_no="SLIP-PENDING-01"),
+        headers=TELEGRAM_SERVICE_HEADERS,
+    )
+    body = response.json()
+    assert response.status_code == 201
+    assert body["status"] == "PENDING_REVIEW"
+    assert body["review_reason_code"] == "SOURCE_IMPORT"
+    assert body["route_pair_id"] == "pair-001"
+
+
+@pytest.mark.asyncio
+async def test_fallback_ingest_creates_incomplete_pending_review(client: AsyncClient):
+    response = await client.post(
+        "/internal/v1/trips/slips/ingest-fallback",
+        json=make_fallback_payload(),
+        headers=TELEGRAM_SERVICE_HEADERS,
+    )
+    body = response.json()
+    assert response.status_code == 201
+    assert body["status"] == "PENDING_REVIEW"
+    assert body["review_reason_code"] == "FALLBACK_MINIMAL"
+    assert body["vehicle_id"] is None
+    assert body["route_pair_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_fallback_trip_cannot_be_approved_until_completed(client: AsyncClient):
+    created = await client.post(
+        "/internal/v1/trips/slips/ingest-fallback",
+        json=make_fallback_payload(source_reference_key="telegram-message-fallback-approve"),
+        headers=TELEGRAM_SERVICE_HEADERS,
+    )
+    response = await client.post(
+        f"/api/v1/trips/{created.json()['id']}/approve",
+        json={"note": "approve"},
+        headers={**ADMIN_HEADERS, "If-Match": created.headers["etag"]},
+    )
+    assert response.status_code == 409
+    assert response.json()["code"] == "TRIP_COMPLETION_REQUIREMENTS_MISSING"
+
+
+@pytest.mark.asyncio
+async def test_excel_ingest_creates_pending_review(client: AsyncClient):
+    response = await client.post(
+        "/internal/v1/trips/excel/ingest",
+        json=make_excel_payload(source_reference_key="excel-row-001", trip_no="EXCEL-001"),
+        headers=EXCEL_SERVICE_HEADERS,
+    )
+    assert response.status_code == 201
+    assert response.json()["status"] == "PENDING_REVIEW"
+    assert response.json()["review_reason_code"] == "EXCEL_IMPORT"
+
+
+@pytest.mark.asyncio
+async def test_export_feed_includes_empty_returns(client: AsyncClient):
+    base_start = (datetime.now().astimezone().replace(microsecond=0) - timedelta(hours=7)).strftime("%Y-%m-%dT%H:%M")
+    return_start = (
+        datetime.now().astimezone().replace(microsecond=0) - timedelta(minutes=10)
+    ).strftime("%Y-%m-%dT%H:%M")
+    base = await client.post(
+        "/api/v1/trips",
+        json=make_manual_trip_payload(trip_no="TR-EXPORT-BASE", trip_start_local=base_start),
+        headers=SUPER_ADMIN_HEADERS,
+    )
+    await client.post(
+        f"/api/v1/trips/{base.json()['id']}/empty-return",
+        json={
+            "trip_start_local": return_start,
+            "trip_timezone": "Europe/Istanbul",
+            "driver_id": "driver-001",
+            "vehicle_id": "vehicle-001",
+            "tare_weight_kg": 15000,
+            "gross_weight_kg": 15000,
+            "net_weight_kg": 0,
+        },
+        headers={**SUPER_ADMIN_HEADERS, "If-Match": base.headers["etag"]},
+    )
+    response = await client.get("/internal/v1/trips/excel/export-feed", headers=EXCEL_SERVICE_HEADERS)
+    trip_numbers = {item["trip_no"] for item in response.json()["items"]}
+    assert response.status_code == 200
+    assert "TR-EXPORT-BASE" in trip_numbers
+    assert "TR-EXPORT-BASE-B" in trip_numbers
+
+
+@pytest.mark.asyncio
+async def test_imported_driver_change_is_locked_for_admin_but_allowed_for_super_admin(client: AsyncClient):
+    created = await client.post(
+        "/internal/v1/trips/excel/ingest",
+        json=make_excel_payload(source_reference_key="excel-row-driver-lock", trip_no="EXCEL-DRIVER-LOCK"),
+        headers=EXCEL_SERVICE_HEADERS,
+    )
+    admin_attempt = await client.patch(
+        f"/api/v1/trips/{created.json()['id']}",
+        json={"driver_id": "driver-002"},
+        headers={**ADMIN_HEADERS, "If-Match": created.headers["etag"]},
+    )
+    assert admin_attempt.status_code == 409
+    assert admin_attempt.json()["code"] == "TRIP_SOURCE_LOCKED_FIELD"
+
+    super_attempt = await client.patch(
+        f"/api/v1/trips/{created.json()['id']}",
+        json={"driver_id": "driver-002", "change_reason": "manual correction"},
+        headers={**SUPER_ADMIN_HEADERS, "If-Match": created.headers["etag"]},
+    )
+    assert super_attempt.status_code == 200
+    assert super_attempt.json()["driver_id"] == "driver-002"
+
+
+@pytest.mark.asyncio
+async def test_overlap_conflict_returns_stable_driver_code(client: AsyncClient):
+    first = await client.post(
+        "/api/v1/trips",
+        json=make_manual_trip_payload(trip_no="TR-OVERLAP-1", route_pair_id="pair-001"),
+        headers=ADMIN_HEADERS,
+    )
+    second = await client.post(
+        "/api/v1/trips",
+        json=make_manual_trip_payload(trip_no="TR-OVERLAP-2", route_pair_id="pair-001"),
+        headers=ADMIN_HEADERS,
+    )
+    assert first.status_code == 201
+    assert second.status_code == 409
+    assert second.json()["code"] == "TRIP_DRIVER_OVERLAP"
+
+
+@pytest.mark.asyncio
+async def test_manual_idempotency_replays_full_response(client: AsyncClient):
+    payload = make_manual_trip_payload(trip_no="TR-IDEMP-FULL")
+    created = await client.post(
         "/api/v1/trips",
         json=payload,
-        headers={**ADMIN_HEADERS, "Idempotency-Key": "key-replay-001"},
+        headers={**ADMIN_HEADERS, "Idempotency-Key": "manual-idemp-001"},
     )
-    assert r1.status_code == 201
-    trip_id = r1.json()["id"]
-
-    r2 = await client.post(
+    replay = await client.post(
         "/api/v1/trips",
         json=payload,
-        headers={**ADMIN_HEADERS, "Idempotency-Key": "key-replay-001"},
+        headers={**ADMIN_HEADERS, "Idempotency-Key": "manual-idemp-001"},
     )
-    assert r2.status_code == 201
-    assert r2.json()["id"] == trip_id
-
-
-# ---------------------------------------------------------------------------
-# IT-15: admin idempotency — same key + different body returns 409
-# ---------------------------------------------------------------------------
+    assert created.status_code == 201
+    assert replay.status_code == 201
+    assert replay.json()["id"] == created.json()["id"]
+    assert replay.headers["etag"] == created.headers["etag"]
 
 
 @pytest.mark.asyncio
-async def test_admin_idempotency_conflict(client: AsyncClient):
-    """Same Idempotency-Key + different body → 409."""
-    payload1 = make_manual_trip_payload(trip_no="TR-IDEMP-CONF1")
-    payload2 = make_manual_trip_payload(trip_no="TR-IDEMP-CONF2")
+async def test_telegram_slip_dedupe_and_conflict(client: AsyncClient):
+    payload = make_slip_payload(source_slip_no="SLIP-IDEMP-001", source_reference_key="telegram-message-idemp-001")
+    created = await client.post("/internal/v1/trips/slips/ingest", json=payload, headers=TELEGRAM_SERVICE_HEADERS)
+    replay = await client.post("/internal/v1/trips/slips/ingest", json=payload, headers=TELEGRAM_SERVICE_HEADERS)
+    conflict = await client.post(
+        "/internal/v1/trips/slips/ingest",
+        json={**payload, "net_weight_kg": 14000, "gross_weight_kg": 24000},
+        headers=TELEGRAM_SERVICE_HEADERS,
+    )
+    assert created.status_code == 201
+    assert replay.status_code == 200
+    assert replay.json()["id"] == created.json()["id"]
+    assert conflict.status_code == 409
+    assert conflict.json()["code"] == "TRIP_IDEMPOTENCY_PAYLOAD_MISMATCH"
 
-    r1 = await client.post(
+
+@pytest.mark.asyncio
+async def test_driver_statement_shows_completed_only_and_hides_empty_returns(client: AsyncClient):
+    first_start = (
+        datetime.now().astimezone().replace(microsecond=0) - timedelta(minutes=25)
+    ).strftime("%Y-%m-%dT%H:%M")
+    second_start = (datetime.now().astimezone().replace(microsecond=0) - timedelta(hours=7)).strftime("%Y-%m-%dT%H:%M")
+    empty_return_start = (datetime.now().astimezone().replace(microsecond=0) - timedelta(minutes=10)).strftime(
+        "%Y-%m-%dT%H:%M"
+    )
+    await client.post(
         "/api/v1/trips",
-        json=payload1,
-        headers={**ADMIN_HEADERS, "Idempotency-Key": "key-conflict-001"},
+        json=make_manual_trip_payload(
+            trip_no="TR-STMT-COMPLETE",
+            driver_id="driver-statement",
+            trip_start_local=first_start,
+        ),
+        headers=ADMIN_HEADERS,
     )
-    assert r1.status_code == 201
-
-    r2 = await client.post(
+    pending = await client.post(
+        "/internal/v1/trips/slips/ingest",
+        json=make_slip_payload(
+            source_slip_no="SLIP-STMT-PENDING",
+            source_reference_key="telegram-message-stmt",
+            driver_id="driver-statement",
+        ),
+        headers=TELEGRAM_SERVICE_HEADERS,
+    )
+    base = await client.post(
         "/api/v1/trips",
-        json=payload2,
-        headers={**ADMIN_HEADERS, "Idempotency-Key": "key-conflict-001"},
+        json=make_manual_trip_payload(
+            trip_no="TR-STMT-BASE",
+            driver_id="driver-statement",
+            route_pair_id="pair-001",
+            trip_start_local=second_start,
+        ),
+        headers=SUPER_ADMIN_HEADERS,
     )
-    assert r2.status_code == 409
-    assert r2.json()["code"] == "TRIP_IDEMPOTENCY_PAYLOAD_MISMATCH"
-
-
-# ---------------------------------------------------------------------------
-# IT-16: STRICT import mode — one invalid row zero trips
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_strict_import_zero_trips():
-    """STRICT mode: one invalid row → all rows rejected."""
-    from trip_service.workers.import_worker import _validate_import_row
-
-    valid = {
-        "driver_id": "d1",
-        "trip_datetime_local": "2025-01-01T10:00:00",
-        "tare_weight_kg": 1000,
-        "gross_weight_kg": 2000,
-        "net_weight_kg": 1000,
-    }
-    err, _ = _validate_import_row(valid, [])
-    assert err is None
-
-    invalid = {"trip_datetime_local": "2025-01-01T10:00:00"}
-    err, _ = _validate_import_row(invalid, [])
-    assert err == "MISSING_DRIVER"
-
-
-# ---------------------------------------------------------------------------
-# IT-17: export download — 409 when not ready
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_export_download_not_ready(client: AsyncClient):
-    """Export download → 409 when job not completed."""
-    r1 = await client.post(
-        "/api/v1/trips/export-jobs",
-        json={"filters": {}},
-        headers={**ADMIN_HEADERS, "Idempotency-Key": "exp-notready-001"},
+    await client.post(
+        f"/api/v1/trips/{base.json()['id']}/empty-return",
+        json={
+            "trip_start_local": empty_return_start,
+            "trip_timezone": "Europe/Istanbul",
+            "driver_id": "driver-statement",
+            "vehicle_id": "vehicle-001",
+            "tare_weight_kg": 14000,
+            "gross_weight_kg": 14000,
+            "net_weight_kg": 0,
+        },
+        headers={**SUPER_ADMIN_HEADERS, "If-Match": base.headers["etag"]},
     )
-    job_id = r1.json()["id"]
 
-    r2 = await client.get(f"/api/v1/trips/export-jobs/{job_id}/download")
-    assert r2.status_code == 409
-    assert r2.json()["code"] == "TRIP_EXPORT_NOT_READY"
-
-
-# ---------------------------------------------------------------------------
-# IT-18: timeline sorted chronologically ASC
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_timeline_sorted_asc(client: AsyncClient):
-    """Timeline items sorted created_at_utc ASC (chronological)."""
-    payload = make_manual_trip_payload(trip_no="TR-TIMELINE-ASC")
-    r1 = await client.post("/api/v1/trips", json=payload, headers=ADMIN_HEADERS)
-    trip_id = r1.json()["id"]
-
-    r2 = await client.get(f"/api/v1/trips/{trip_id}/timeline")
-    assert r2.status_code == 200
-    items = r2.json()["items"]
-    assert len(items) >= 1
-
-    if len(items) > 1:
-        for i in range(len(items) - 1):
-            assert items[i]["created_at_utc"] <= items[i + 1]["created_at_utc"]
+    statement = await client.get(
+        "/internal/v1/driver/trips",
+        params={"driver_id": "driver-statement"},
+        headers=TELEGRAM_SERVICE_HEADERS,
+    )
+    assert pending.status_code == 201
+    assert statement.status_code == 200
+    assert statement.json()["meta"]["total_items"] == 2

@@ -20,7 +20,7 @@ from location_service.config import settings
 from location_service.errors import ProblemDetailError, problem_detail_handler
 from location_service.middleware import RequestIdMiddleware
 from location_service.models import Base
-from location_service.routers import health, pairs, points, processing
+from location_service.routers import health, internal_routes, pairs, points, processing
 
 # ---------------------------------------------------------------------------
 # PostgreSQL container (session-scoped sync fixture)
@@ -90,6 +90,7 @@ async def client(db_engine) -> AsyncGenerator[AsyncClient, None]:
     test_app.include_router(points.router)
     test_app.include_router(pairs.router)
     test_app.include_router(processing.router)
+    test_app.include_router(internal_routes.router)
 
     session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
 

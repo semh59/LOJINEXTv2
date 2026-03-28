@@ -28,6 +28,5 @@ None currently. Coding gate is OPEN per spec.
 
 ## Notes
 
-- TASK-0002 is Weather Service Removal (unrelated)
 - Trip Service port = 8101, Location Service port = 8103
 - The spec requires PostgreSQL 16+ features (partial unique indexes, CHECK constraints, JSONB)

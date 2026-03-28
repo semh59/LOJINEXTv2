@@ -12,6 +12,7 @@ from location_service.routers import (
     bulk_refresh,
     health,
     import_export,
+    internal_routes,
     pairs,
     points,
     processing,
@@ -58,6 +59,7 @@ def create_app() -> FastAPI:
     app.include_router(approval.router)
     app.include_router(bulk_refresh.router)
     app.include_router(import_export.router)
+    app.include_router(internal_routes.router)
 
     return app
 

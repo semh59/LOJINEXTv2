@@ -4,6 +4,7 @@ Tests are mock-based (no Docker) and verify every guard, error code,
 and contract rule identified in the deep audit.
 """
 
+import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
@@ -14,16 +15,14 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from location_service.enums import PairStatus, RunStatus
-from location_service.errors import (
-    ProblemDetailError,
-    problem_detail_handler,
-)
+from location_service.errors import ProblemDetailError, problem_detail_handler
 from location_service.models import LocationPoint, ProcessingRun, RoutePair
+from location_service.processing.pipeline import _background_tasks, _task_done_callback
 from location_service.routers.import_router import router as import_router
 from location_service.routers.pairs import router as pairs_router
 from location_service.routers.points import router as points_router
 from location_service.routers.processing import router as processing_router
-
+from location_service.schemas import PointUpdate
 
 # ---------------------------------------------------------------------------
 # Test App Setup
@@ -73,9 +72,6 @@ def app_client(mock_session):
 
 def test_finding_01_schema_point_update_no_coordinates():
     """PointUpdate schema must NOT have latitude_6dp / longitude_6dp."""
-    from location_service.schemas import PointUpdate
-    import inspect
-
     fields = PointUpdate.model_fields.keys()
     assert "latitude_6dp" not in fields, "latitude_6dp should be immutable (not in PointUpdate)"
     assert "longitude_6dp" not in fields, "longitude_6dp should be immutable (not in PointUpdate)"
@@ -468,8 +464,6 @@ async def test_finding_12_import_duplicate_pair_row_error():
 
 def test_finding_13_import_file_too_large(app_client):
     """POST /v1/import with >20MB file must return 413 with problem+json."""
-    from io import BytesIO
-
     # Create a minimal filename but large content
     big_data = b"a" * (21 * 1024 * 1024)  # 21 MB
 
@@ -483,8 +477,6 @@ def test_finding_13_import_file_too_large(app_client):
 
 def test_finding_13_import_wrong_file_type(app_client):
     """POST /v1/import with non-CSV file must return 415 with problem+json."""
-    from io import BytesIO
-
     resp = app_client.post(
         "/v1/import",
         files={"file": ("data.xlsx", BytesIO(b"fake excel"), "application/vnd.ms-excel")},
@@ -508,9 +500,6 @@ def test_finding_14_background_tasks_set_is_module_level():
 
 def test_finding_14_task_done_callback_removes_task():
     """_task_done_callback must remove finished task from _background_tasks."""
-    from location_service.processing.pipeline import _background_tasks, _task_done_callback
-    import asyncio
-
     mock_task = MagicMock(spec=asyncio.Task)
     mock_task.cancelled.return_value = True  # simulate clean cancellation
 

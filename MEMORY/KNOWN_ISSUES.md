@@ -27,7 +27,14 @@ When resolved: mark resolved, write what fixed it, keep the entry.
 
 ## Open
 
-*(none yet)*
+## [ISSUE-001] Location Service repository-wide lint debt outside internal resolve scope
+
+- **Discovered:** 2026-03-27, TASK-0010
+- **Impact:** Running `ruff check src tests` in `services/location-service` still fails on pre-existing files unrelated to the new internal resolve endpoint, which blocks a clean repo-wide lint signal for that service.
+- **Status:** open
+- **Workaround:** Run targeted lint on the internal resolve files added in TASK-0010 until the existing lint findings in other location-service files are cleaned up.
+- **Linked task:** TASK-0010
+- **Resolution:** 
 
 ---
 

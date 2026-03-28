@@ -1,18 +1,35 @@
-"""Pydantic schemas for API request/response serialization.
-
-Implements V8 Section 9 — Shared Resource Schemas and endpoint contracts.
-"""
+"""Pydantic schemas for API request/response serialization."""
 
 from __future__ import annotations
 
-from datetime import date, datetime
-from typing import Any
+from datetime import datetime
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-# ---------------------------------------------------------------------------
-# V8 Section 9.1 — Trip Resource (response)
-# ---------------------------------------------------------------------------
+from trip_service.timezones import parse_local_datetime, validate_timezone_name
+
+NonEmptyStr = Annotated[str, Field(min_length=1)]
+OptionalNonEmptyStr = NonEmptyStr | None
+NonNegativeInt = Annotated[int, Field(ge=0)]
+
+
+def _validate_timezone(value: str) -> str:
+    return validate_timezone_name(value)
+
+
+def _validate_local_datetime(value: str) -> str:
+    parse_local_datetime(value)
+    return value
+
+
+def _validate_weight_triplet(tare: int | None, gross: int | None, net: int | None) -> None:
+    if tare is None or gross is None or net is None:
+        return
+    if gross < tare:
+        raise ValueError("gross_weight_kg must be greater than or equal to tare_weight_kg.")
+    if net != gross - tare:
+        raise ValueError("net_weight_kg must equal gross_weight_kg - tare_weight_kg.")
 
 
 class EnrichmentSummary(BaseModel):
@@ -33,22 +50,31 @@ class EvidenceSummary(BaseModel):
 
 
 class TripResource(BaseModel):
-    """V8 Section 9.1 — Full trip resource returned by most endpoints."""
+    """Full trip resource returned by most endpoints."""
 
     id: str
     trip_no: str
     source_type: str
     source_slip_no: str | None = None
+    source_reference_key: str | None = None
+    review_reason_code: str | None = None
     base_trip_id: str | None = None
     driver_id: str
     vehicle_id: str | None = None
     trailer_id: str | None = None
+    route_pair_id: str | None = None
     route_id: str | None = None
+    origin_location_id: str | None = None
+    origin_name_snapshot: str | None = None
+    destination_location_id: str | None = None
+    destination_name_snapshot: str | None = None
     trip_datetime_utc: datetime
     trip_timezone: str
-    tare_weight_kg: int
-    gross_weight_kg: int
-    net_weight_kg: int
+    planned_duration_s: int | None = None
+    planned_end_utc: datetime | None = None
+    tare_weight_kg: int | None = None
+    gross_weight_kg: int | None = None
+    net_weight_kg: int | None = None
     is_empty_return: bool
     status: str
     version: int
@@ -59,11 +85,6 @@ class TripResource(BaseModel):
     soft_deleted_at_utc: datetime | None = None
 
     model_config = {"from_attributes": True}
-
-
-# ---------------------------------------------------------------------------
-# V8 Section 9.2 — Trip List Response
-# ---------------------------------------------------------------------------
 
 
 class PaginationMeta(BaseModel):
@@ -77,207 +98,226 @@ class PaginationMeta(BaseModel):
 
 
 class TripListResponse(BaseModel):
-    """V8 Section 9.2 — List response with items + meta."""
+    """List response with items + meta."""
 
     items: list[TripResource]
     meta: PaginationMeta
 
 
-# ---------------------------------------------------------------------------
-# V8 Section 10.1 — Ingest Slip Request
-# ---------------------------------------------------------------------------
+class ManualCreateRequest(BaseModel):
+    """Admin manual trip creation."""
+
+    trip_no: NonEmptyStr
+    route_pair_id: NonEmptyStr
+    trip_start_local: str
+    trip_timezone: NonEmptyStr = "Europe/Istanbul"
+    driver_id: NonEmptyStr
+    vehicle_id: NonEmptyStr
+    trailer_id: OptionalNonEmptyStr = None
+    tare_weight_kg: NonNegativeInt
+    gross_weight_kg: NonNegativeInt
+    net_weight_kg: NonNegativeInt
+    note: str | None = None
+    is_empty_return: bool | None = Field(default=None, exclude=True)
+
+    @field_validator("is_empty_return", mode="before")
+    @classmethod
+    def reject_is_empty_return(cls, value: Any) -> None:
+        if value is not None:
+            raise ValueError("is_empty_return is not allowed in manual create. Use the empty-return endpoint.")
+        return None
+
+    @field_validator("trip_start_local")
+    @classmethod
+    def validate_trip_start_local(cls, value: str) -> str:
+        return _validate_local_datetime(value)
+
+    @field_validator("trip_timezone")
+    @classmethod
+    def validate_trip_timezone(cls, value: str) -> str:
+        return _validate_timezone(value)
+
+    @model_validator(mode="after")
+    def validate_weights(self) -> "ManualCreateRequest":
+        _validate_weight_triplet(self.tare_weight_kg, self.gross_weight_kg, self.net_weight_kg)
+        return self
 
 
-class IngestSlipRequest(BaseModel):
-    """V8 Section 10.1 — Normalized trip slip payload from Slip Processing Service."""
+class EditTripRequest(BaseModel):
+    """Editable fields for PATCH."""
 
-    source_type: str = "TELEGRAM_TRIP_SLIP"
-    source_slip_no: str
-    driver_id: str
-    vehicle_id: str | None = None
-    trailer_id: str | None = None
-    origin_name: str
-    destination_name: str
-    trip_datetime_local: str  # ISO 8601 without timezone
-    trip_timezone: str = "Europe/Istanbul"
-    tare_weight_kg: int
-    gross_weight_kg: int
-    net_weight_kg: int
+    route_pair_id: OptionalNonEmptyStr = None
+    trip_start_local: str | None = None
+    trip_timezone: str | None = None
+    driver_id: OptionalNonEmptyStr = None
+    vehicle_id: OptionalNonEmptyStr = None
+    trailer_id: OptionalNonEmptyStr = None
+    tare_weight_kg: Annotated[int | None, Field(default=None, ge=0)] = None
+    gross_weight_kg: Annotated[int | None, Field(default=None, ge=0)] = None
+    net_weight_kg: Annotated[int | None, Field(default=None, ge=0)] = None
+    note: str | None = None
+    change_reason: str | None = None
+
+    @field_validator("trip_start_local")
+    @classmethod
+    def validate_trip_start_local(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        return _validate_local_datetime(value)
+
+    @field_validator("trip_timezone")
+    @classmethod
+    def validate_trip_timezone(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        return _validate_timezone(value)
+
+    @model_validator(mode="after")
+    def validate_timezone_patch(self) -> "EditTripRequest":
+        if self.trip_timezone is not None and self.trip_start_local is None:
+            raise ValueError("trip_timezone cannot be updated without trip_start_local.")
+        return self
+
+
+class ApproveRequest(BaseModel):
+    """Approve a pending trip."""
+
+    note: str | None = None
+
+
+class RejectRequest(BaseModel):
+    """Reject a pending trip."""
+
+    reason: str | None = None
+
+
+class HardDeleteRequest(BaseModel):
+    """Hard-delete request body."""
+
+    reason: NonEmptyStr
+
+
+class EmptyReturnRequest(BaseModel):
+    """Create empty-return trip."""
+
+    trip_start_local: str
+    trip_timezone: NonEmptyStr = "Europe/Istanbul"
+    driver_id: NonEmptyStr
+    vehicle_id: NonEmptyStr
+    trailer_id: OptionalNonEmptyStr = None
+    tare_weight_kg: NonNegativeInt
+    gross_weight_kg: NonNegativeInt
+    net_weight_kg: NonNegativeInt
+    note: str | None = None
+
+    @field_validator("trip_start_local")
+    @classmethod
+    def validate_trip_start_local(cls, value: str) -> str:
+        return _validate_local_datetime(value)
+
+    @field_validator("trip_timezone")
+    @classmethod
+    def validate_trip_timezone(cls, value: str) -> str:
+        return _validate_timezone(value)
+
+    @model_validator(mode="after")
+    def validate_weights(self) -> "EmptyReturnRequest":
+        _validate_weight_triplet(self.tare_weight_kg, self.gross_weight_kg, self.net_weight_kg)
+        return self
+
+
+class TelegramSlipIngestRequest(BaseModel):
+    """Normalized Telegram slip payload for full ingest."""
+
+    source_type: Literal["TELEGRAM_TRIP_SLIP"] = "TELEGRAM_TRIP_SLIP"
+    source_slip_no: NonEmptyStr
+    source_reference_key: NonEmptyStr
+    driver_id: NonEmptyStr
+    vehicle_id: NonEmptyStr
+    trailer_id: OptionalNonEmptyStr = None
+    origin_name: NonEmptyStr
+    destination_name: NonEmptyStr
+    trip_start_local: str
+    trip_timezone: NonEmptyStr = "Europe/Istanbul"
+    tare_weight_kg: NonNegativeInt
+    gross_weight_kg: NonNegativeInt
+    net_weight_kg: NonNegativeInt
     file_key: str | None = None
     raw_text_ref: str | None = None
     ocr_confidence: float | None = None
     normalized_truck_plate: str | None = None
     normalized_trailer_plate: str | None = None
 
-
-# ---------------------------------------------------------------------------
-# V8 Section 10.2 — Manual Create Request
-# ---------------------------------------------------------------------------
-
-
-class ManualCreateRequest(BaseModel):
-    """V8 Section 10.2 — Admin manual trip creation."""
-
-    trip_no: str
-    driver_id: str
-    vehicle_id: str | None = None
-    trailer_id: str | None = None
-    route_id: str
-    trip_datetime_local: str
-    trip_timezone: str = "Europe/Istanbul"
-    tare_weight_kg: int
-    gross_weight_kg: int
-    net_weight_kg: int
-    note: str | None = None
-
-    # V8 Section 10.2: is_empty_return MUST NOT be accepted. Reject with 422.
-    is_empty_return: bool | None = Field(default=None, exclude=True)
-
-    @field_validator("is_empty_return", mode="before")
+    @field_validator("trip_start_local")
     @classmethod
-    def reject_is_empty_return(cls, v: Any) -> None:
-        """V8: If is_empty_return is provided in request body, reject with 422."""
-        if v is not None:
-            raise ValueError("is_empty_return is not allowed in manual create. Use the empty-return endpoint.")
-        return None
+    def validate_trip_start_local(cls, value: str) -> str:
+        return _validate_local_datetime(value)
+
+    @field_validator("trip_timezone")
+    @classmethod
+    def validate_trip_timezone(cls, value: str) -> str:
+        return _validate_timezone(value)
+
+    @model_validator(mode="after")
+    def validate_weights(self) -> "TelegramSlipIngestRequest":
+        _validate_weight_triplet(self.tare_weight_kg, self.gross_weight_kg, self.net_weight_kg)
+        return self
 
 
-# ---------------------------------------------------------------------------
-# V8 Section 10.6 — Edit Trip Request
-# ---------------------------------------------------------------------------
+class TelegramFallbackIngestRequest(BaseModel):
+    """Fallback Telegram ingest payload when parsing fails."""
+
+    source_reference_key: NonEmptyStr
+    driver_id: NonEmptyStr
+    message_sent_at_utc: datetime
+    file_key: str | None = None
+    raw_text_ref: str | None = None
+    fallback_reason: NonEmptyStr
+
+    @field_validator("message_sent_at_utc")
+    @classmethod
+    def validate_message_sent_at_utc(cls, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            raise ValueError("message_sent_at_utc must include timezone information.")
+        return value
 
 
-class EditTripRequest(BaseModel):
-    """V8 Section 10.6 — Editable fields for PATCH."""
+class ExcelIngestRequest(BaseModel):
+    """Structured Excel-service ingest payload."""
 
-    driver_id: str | None = None
-    vehicle_id: str | None = None
-    trailer_id: str | None = None
-    route_id: str | None = None
-    trip_datetime_local: str | None = None
-    trip_timezone: str | None = None
-    tare_weight_kg: int | None = None
-    gross_weight_kg: int | None = None
-    net_weight_kg: int | None = None
-
-
-# ---------------------------------------------------------------------------
-# V8 Section 10.7 — Approve Request
-# ---------------------------------------------------------------------------
-
-
-class ApproveRequest(BaseModel):
-    """V8 Section 10.7 — Approve pending trip."""
-
+    source_type: Literal["EXCEL_IMPORT"] = "EXCEL_IMPORT"
+    source_reference_key: NonEmptyStr
+    trip_no: NonEmptyStr
+    route_pair_id: NonEmptyStr
+    trip_start_local: str
+    trip_timezone: NonEmptyStr = "Europe/Istanbul"
+    driver_id: NonEmptyStr
+    vehicle_id: NonEmptyStr
+    trailer_id: OptionalNonEmptyStr = None
+    tare_weight_kg: NonNegativeInt
+    gross_weight_kg: NonNegativeInt
+    net_weight_kg: NonNegativeInt
+    row_number: Annotated[int | None, Field(default=None, ge=1)] = None
     note: str | None = None
 
+    @field_validator("trip_start_local")
+    @classmethod
+    def validate_trip_start_local(cls, value: str) -> str:
+        return _validate_local_datetime(value)
 
-# ---------------------------------------------------------------------------
-# V8 Section 10.8 — Empty Return Request
-# ---------------------------------------------------------------------------
+    @field_validator("trip_timezone")
+    @classmethod
+    def validate_trip_timezone(cls, value: str) -> str:
+        return _validate_timezone(value)
 
-
-class EmptyReturnRequest(BaseModel):
-    """V8 Section 10.8 — Create empty-return trip."""
-
-    driver_id: str
-    vehicle_id: str | None = None
-    trailer_id: str | None = None
-    route_id: str | None = None
-    trip_datetime_local: str
-    trip_timezone: str = "Europe/Istanbul"
-    tare_weight_kg: int
-    gross_weight_kg: int
-    net_weight_kg: int
-    note: str | None = None
-
-
-# ---------------------------------------------------------------------------
-# V8 Section 10.13 — Import Job Request
-# ---------------------------------------------------------------------------
-
-
-class CreateImportJobRequest(BaseModel):
-    """V8 Section 10.13 — Create import job."""
-
-    file_key: str
-    import_mode: str = "PARTIAL"
-
-
-# ---------------------------------------------------------------------------
-# V8 Section 9.3 — Import Job Resource
-# ---------------------------------------------------------------------------
-
-
-class ImportJobResource(BaseModel):
-    """V8 Section 9.3."""
-
-    id: str
-    file_key: str
-    status: str
-    import_mode: str
-    imported_count: int
-    rejected_count: int
-    enrichment_pending_count: int
-    enrichment_failed_count: int
-    error_summary_json: Any | None = None
-    created_at_utc: datetime
-    updated_at_utc: datetime
-    completed_at_utc: datetime | None = None
-
-    model_config = {"from_attributes": True}
-
-
-# ---------------------------------------------------------------------------
-# V8 Section 10.15 — Export Job Request
-# ---------------------------------------------------------------------------
-
-
-class ExportFilters(BaseModel):
-    """Filters for export job creation."""
-
-    driver_id: str | None = None
-    vehicle_id: str | None = None
-    route_id: str | None = None
-    date_from: date | None = None
-    date_to: date | None = None
-    timezone: str = "Europe/Istanbul"
-    include_soft_deleted: bool = False
-
-
-class CreateExportJobRequest(BaseModel):
-    """V8 Section 10.15."""
-
-    filters: ExportFilters
-
-
-# ---------------------------------------------------------------------------
-# V8 Section 9.4 — Export Job Resource
-# ---------------------------------------------------------------------------
-
-
-class ExportJobResource(BaseModel):
-    """V8 Section 9.4."""
-
-    id: str
-    status: str
-    requested_filters_json: Any
-    result_file_key: str | None = None
-    result_file_expires_at_utc: datetime | None = None
-    created_at_utc: datetime
-    updated_at_utc: datetime
-    completed_at_utc: datetime | None = None
-
-    model_config = {"from_attributes": True}
-
-
-# ---------------------------------------------------------------------------
-# V8 Section 9.5 — Timeline Item
-# ---------------------------------------------------------------------------
+    @model_validator(mode="after")
+    def validate_weights(self) -> "ExcelIngestRequest":
+        _validate_weight_triplet(self.tare_weight_kg, self.gross_weight_kg, self.net_weight_kg)
+        return self
 
 
 class TimelineItem(BaseModel):
-    """V8 Section 9.5."""
+    """Timeline item resource."""
 
     id: str
     event_type: str
@@ -291,56 +331,35 @@ class TimelineItem(BaseModel):
 
 
 class TimelineResponse(BaseModel):
-    """V8 Section 10.5 — timeline returns all items, no pagination."""
+    """Timeline response."""
 
     items: list[TimelineItem]
 
 
-# ---------------------------------------------------------------------------
-# V8 Section 9.6 — Driver Statement Row
-# ---------------------------------------------------------------------------
-
-
 class DriverStatementRow(BaseModel):
-    """V8 Section 9.6 — V8 renamed tonnage → net_weight_kg."""
+    """Driver statement row."""
 
-    date: str  # YYYY-MM-DD
+    date: str
     truck_plate: str
-    from_: str = Field(alias="from")  # 'from' is Python keyword
+    from_: str = Field(alias="from")
     to: str
     net_weight_kg: int
-    hour: str  # HH:mm
-    fee: str = ""  # always empty in V1
-    approval: str = ""  # always empty in V1
+    hour: str
+    fee: str = ""
+    approval: str = ""
 
     model_config = {"populate_by_name": True}
 
 
 class DriverStatementResponse(BaseModel):
-    """V8 Section 10.11 — Driver statement list response."""
+    """Driver statement list response."""
 
     items: list[DriverStatementRow]
     meta: PaginationMeta
 
 
-# ---------------------------------------------------------------------------
-# V8 Section 10.12 — File Upload Response
-# ---------------------------------------------------------------------------
-
-
-class FileUploadResponse(BaseModel):
-    """V8 Section 10.12."""
-
-    file_key: str
-
-
-# ---------------------------------------------------------------------------
-# V8 Section 10.18 — Retry Enrichment Response
-# ---------------------------------------------------------------------------
-
-
 class RetryEnrichmentResponse(BaseModel):
-    """V8 Section 10.18."""
+    """Retry enrichment response."""
 
     trip_id: str
     queued: bool

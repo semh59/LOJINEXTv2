@@ -28,11 +28,9 @@ The IDE has reported 32 warnings across multiple files. Most are unused imports 
 | services/trip-service/src/trip_service/middleware.py                | modify | Sort imports                                       |
 | services/trip-service/src/trip_service/models.py                    | modify | Remove unused `UniqueConstraint`                   |
 | services/trip-service/src/trip_service/observability.py             | modify | Sort imports, remove unused `select`               |
-| services/trip-service/src/trip_service/routers/import_export.py     | modify | Remove multiple unused imports and variables       |
+| services/trip-service/src/trip_service/routers/driver_statement.py  | modify | Remove unused imports and keep driver statement clean |
 | services/trip-service/src/trip_service/schemas.py                   | modify | Sort imports                                       |
 | services/trip-service/src/trip_service/workers/enrichment_worker.py | modify | Sort imports, remove unused `text`, `AsyncSession` |
-| services/trip-service/src/trip_service/workers/export_worker.py     | modify | Remove unused `Any`                                |
-| services/trip-service/src/trip_service/workers/import_worker.py     | modify | Remove unused `asyncio`, `status`                  |
 | services/trip-service/src/trip_service/workers/outbox_relay.py      | modify | Remove unused `update`                             |
 | services/trip-service/tests/conftest.py                             | modify | Sort imports                                       |
 | services/trip-service/tests/test_contract.py                        | modify | Sort imports                                       |

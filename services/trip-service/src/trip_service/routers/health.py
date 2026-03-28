@@ -1,33 +1,31 @@
-"""Health and readiness endpoints.
+"""Health and readiness endpoints."""
 
-V8 Sections 18.4–18.5.
-"""
+from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
+from trip_service.config import settings
 from trip_service.database import async_session_factory
+from trip_service.dependencies import probe_fleet_service, probe_location_service
+from trip_service.worker_heartbeats import get_worker_heartbeat_snapshot
 
 router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
 async def health() -> dict[str, str]:
-    """V8 Section 18.4 — Process liveness only."""
+    """Process liveness only."""
     return {"status": "ok"}
 
 
 @router.get("/ready")
-async def readiness() -> dict[str, object]:
-    """V8 Section 18.5 — Readiness with hard and soft dependencies.
-
-    Hard dependencies (must pass): DB, internal auth.
-    Soft dependencies (may degrade): object storage, Location, Fleet.
-    """
+async def readiness(request: Request) -> JSONResponse:
+    """Readiness with hard dependency checks only."""
     checks: dict[str, str] = {}
     overall = True
 
-    # Hard dependency: database
     try:
         async with async_session_factory() as session:
             await session.execute(text("SELECT 1"))
@@ -36,17 +34,44 @@ async def readiness() -> dict[str, object]:
         checks["database"] = "unavailable"
         overall = False
 
-    # Hard dependency: internal auth (stub — always ok for V1)
-    checks["internal_auth"] = "ok"
+    broker = getattr(request.app.state, "broker", None)
+    if broker is None:
+        checks["kafka"] = "unavailable"
+        overall = False
+    else:
+        try:
+            await broker.check_health()
+            checks["kafka"] = "ok"
+        except Exception:
+            checks["kafka"] = "unavailable"
+            overall = False
 
-    # Soft dependencies — not blocking startup
-    checks["object_storage"] = "ok"  # checked lazily on use
-    checks["location_service"] = "degraded"  # soft
-    checks["fleet_service"] = "degraded"  # soft
+    location_ok = await probe_location_service()
+    checks["location_service"] = "ok" if location_ok else "unavailable"
+    overall = overall and location_ok
 
-    status_code = 200 if overall else 503
-    return {
-        "status": "ready" if overall else "not_ready",
-        "checks": checks,
-        "_status_code": status_code,
-    }
+    fleet_ok = await probe_fleet_service()
+    checks["fleet_service"] = "ok" if fleet_ok else "unavailable"
+    overall = overall and fleet_ok
+
+    enrichment_heartbeat = get_worker_heartbeat_snapshot(
+        "enrichment-worker",
+        stale_after_seconds=settings.worker_heartbeat_timeout_seconds,
+    )
+    checks["enrichment_worker"] = enrichment_heartbeat.status
+    overall = overall and enrichment_heartbeat.status == "ok"
+
+    outbox_heartbeat = get_worker_heartbeat_snapshot(
+        "outbox-relay",
+        stale_after_seconds=settings.worker_heartbeat_timeout_seconds,
+    )
+    checks["outbox_relay"] = outbox_heartbeat.status
+    overall = overall and outbox_heartbeat.status == "ok"
+
+    return JSONResponse(
+        status_code=200 if overall else 503,
+        content={
+            "status": "ready" if overall else "not_ready",
+            "checks": checks,
+        },
+    )

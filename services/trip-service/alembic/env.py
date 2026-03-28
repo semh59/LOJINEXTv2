@@ -19,9 +19,14 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
+def _database_url() -> str:
+    """Prefer Alembic config URL so tests can point migrations at ephemeral DBs."""
+    return config.get_main_option("sqlalchemy.url") or settings.database_url
+
+
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
-    url = settings.database_url
+    url = _database_url()
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -42,7 +47,7 @@ def do_run_migrations(connection):  # noqa: ANN001
 async def run_async_migrations() -> None:
     """Run migrations in 'online' mode with async engine."""
     configuration = config.get_section(config.config_ini_section, {})
-    configuration["sqlalchemy.url"] = settings.database_url
+    configuration["sqlalchemy.url"] = _database_url()
     connectable = async_engine_from_config(
         configuration,
         prefix="sqlalchemy.",

@@ -340,6 +340,16 @@ def route_not_found() -> ProblemDetailError:
     return ProblemDetailError(404, "ROUTE_NOT_FOUND", "Not found", "Route not found.")
 
 
+def route_resolution_not_found() -> ProblemDetailError:
+    """Internal route resolve not found error."""
+    return ProblemDetailError(
+        404,
+        "LOCATION_ROUTE_RESOLUTION_NOT_FOUND",
+        "Not found",
+        "No active route matches the provided origin/destination/profile.",
+    )
+
+
 def route_ambiguous() -> ProblemDetailError:
     """Section 7.29: ROUTE_AMBIGUOUS."""
     return ProblemDetailError(422, "ROUTE_AMBIGUOUS", "Ambiguous", "Multiple routes match the given names.")

@@ -18,8 +18,7 @@ import asyncio
 import logging
 import random
 import uuid
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from sqlalchemy import and_, or_, select
@@ -33,6 +32,8 @@ from trip_service.enums import (
     SourceType,
 )
 from trip_service.models import TripTrip, TripTripEnrichment, TripTripEvidence
+from trip_service.observability import ENRICHMENT_CLAIMED_TOTAL, ENRICHMENT_COMPLETED_TOTAL, ENRICHMENT_FAILED_TOTAL
+from trip_service.worker_heartbeats import record_worker_heartbeat
 
 logger = logging.getLogger("trip_service.enrichment_worker")
 
@@ -65,7 +66,7 @@ def _enrichment_next_retry_at(attempt_count: int) -> datetime:
 
 def _now_utc() -> datetime:
     """Current UTC timestamp."""
-    return datetime.now(tz=ZoneInfo("UTC"))
+    return datetime.now(UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -135,10 +136,15 @@ async def _resolve_route(origin_name: str, destination_name: str) -> tuple[str |
     Returns (route_id, status) where status is READY/FAILED.
     """
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=settings.dependency_timeout_seconds) as client:
             resp = await client.post(
                 f"{settings.location_service_url}/internal/v1/routes/resolve",
-                json={"origin_name": origin_name, "destination_name": destination_name},
+                json={
+                    "origin_name": origin_name,
+                    "destination_name": destination_name,
+                    "profile_code": "TIR",
+                    "language_hint": "AUTO",
+                },
             )
             if resp.status_code == 200:
                 data = resp.json()
@@ -185,16 +191,20 @@ async def _claim_and_process_batch(worker_id: str, batch_size: int = 10) -> int:
             .where(
                 # V8 Section 13.6 — candidate conditions
                 or_(
-                    TripTripEnrichment.enrichment_status.in_(
-                        [
-                            EnrichmentStatus.PENDING,
-                            EnrichmentStatus.FAILED,
-                        ]
+                    and_(
+                        TripTripEnrichment.enrichment_status.in_(
+                            [
+                                EnrichmentStatus.PENDING,
+                                EnrichmentStatus.FAILED,
+                            ]
+                        ),
+                        TripTripEnrichment.enrichment_attempt_count < settings.enrichment_max_attempts,
                     ),
                     # CRITICAL: Recover orphaned claims from crashed workers
                     and_(
                         TripTripEnrichment.enrichment_status == EnrichmentStatus.RUNNING,
                         TripTripEnrichment.claim_expires_at_utc < now,
+                        TripTripEnrichment.enrichment_attempt_count < settings.enrichment_max_attempts,
                     ),
                 ),
                 or_(
@@ -213,6 +223,7 @@ async def _claim_and_process_batch(worker_id: str, batch_size: int = 10) -> int:
 
         claim_token = str(uuid.uuid4())
         claim_ttl = timedelta(seconds=settings.enrichment_claim_ttl_seconds)
+        ENRICHMENT_CLAIMED_TOTAL.inc(len(enrichment_rows))
 
         # Step 3: Atomically claim rows
         for enrichment in enrichment_rows:
@@ -320,11 +331,13 @@ async def _process_single_enrichment(
                     # Max attempts reached → FAILED
                     enrichment.enrichment_status = EnrichmentStatus.FAILED
                     enrichment.next_retry_at_utc = None
+                    ENRICHMENT_FAILED_TOTAL.inc()
             else:
                 enrichment.next_retry_at_utc = None
             enrichment.enrichment_attempt_count += 1
 
             await session.commit()
+            ENRICHMENT_COMPLETED_TOTAL.labels(result=enrichment.enrichment_status).inc()
 
             logger.info(
                 "Enrichment %s: completed — route=%s enrichment=%s quality=%s",
@@ -349,6 +362,7 @@ async def _process_single_enrichment(
                 enrichment.next_retry_at_utc = _enrichment_next_retry_at(enrichment.enrichment_attempt_count)
             else:
                 enrichment.next_retry_at_utc = None
+                ENRICHMENT_FAILED_TOTAL.inc()
             enrichment.enrichment_attempt_count += 1
 
             await session.commit()
@@ -375,6 +389,7 @@ async def run_enrichment_worker(worker_id: str | None = None) -> None:
             processed = await _claim_and_process_batch(worker_id)
             if processed > 0:
                 logger.info("Worker %s: processed %d enrichment rows", worker_id, processed)
+            record_worker_heartbeat("enrichment-worker")
         except Exception as e:
             logger.error("Worker %s: batch error: %s", worker_id, e)
 

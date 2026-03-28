@@ -1,7 +1,7 @@
 """Manual verification of pipeline logic without Docker."""
 
 import uuid
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -14,6 +14,7 @@ from location_service.processing.pipeline import _process_route_pair
 async def test_manual_verify_logic():
     # 1. Setup session mock
     session_mock = AsyncMock()
+    session_mock.add = MagicMock()
 
     # Mock data
     run_id = uuid.uuid4()
@@ -66,8 +67,6 @@ async def test_manual_verify_logic():
         return None
 
     session_mock.get.side_effect = mock_get
-    from unittest.mock import MagicMock
-
     res_mock = MagicMock()
     res_mock.scalar_one_or_none.return_value = None
     session_mock.execute = AsyncMock(return_value=res_mock)

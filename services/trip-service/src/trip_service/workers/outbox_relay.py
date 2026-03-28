@@ -14,8 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +24,8 @@ from trip_service.config import settings
 from trip_service.database import async_session_factory
 from trip_service.enums import OutboxPublishStatus
 from trip_service.models import TripOutbox
+from trip_service.observability import OUTBOX_DEAD_LETTER_TOTAL, OUTBOX_PUBLISHED_TOTAL
+from trip_service.worker_heartbeats import record_worker_heartbeat
 
 logger = logging.getLogger("trip_service.outbox_relay")
 
@@ -40,23 +41,20 @@ OUTBOX_BACKOFF_SECONDS: list[int] = [
     300,  # 5 minutes (cap)
 ]
 
-MAX_CONSECUTIVE_FAILURES: int = 10
-
-
-def _outbox_next_attempt_at(attempt_count: int) -> datetime:
+def _outbox_next_attempt_at(consecutive_failures: int) -> datetime:
     """Calculate next retry time for outbox relay.
 
     V8 decision: 5s→10s→30s→60s→5min (capped).
     No jitter for outbox (deterministic retries).
     """
-    idx = min(attempt_count, len(OUTBOX_BACKOFF_SECONDS) - 1)
+    idx = min(max(consecutive_failures - 1, 0), len(OUTBOX_BACKOFF_SECONDS) - 1)
     delay = OUTBOX_BACKOFF_SECONDS[idx]
     return _now_utc() + timedelta(seconds=delay)
 
 
 def _now_utc() -> datetime:
     """Current UTC timestamp."""
-    return datetime.now(tz=ZoneInfo("UTC"))
+    return datetime.now(UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +142,7 @@ async def _publish_single(
         row.attempt_count = 0  # Reset consecutive failure counter on success
         row.next_attempt_at_utc = None
         row.last_error_code = None
+        OUTBOX_PUBLISHED_TOTAL.labels(event_name=row.event_name).inc()
 
         logger.info(
             "Outbox %s: published event %s for %s/%s",
@@ -159,10 +158,11 @@ async def _publish_single(
         row.attempt_count += 1
         row.last_error_code = str(e)[:100]
 
-        if row.attempt_count >= MAX_CONSECUTIVE_FAILURES:
+        if row.attempt_count >= settings.outbox_relay_max_failures:
             # V8 Section 14.2: 10 consecutive failures → DEAD_LETTER
             row.publish_status = OutboxPublishStatus.DEAD_LETTER
             row.next_attempt_at_utc = None
+            OUTBOX_DEAD_LETTER_TOTAL.inc()
             logger.error(
                 "Outbox %s: DEAD_LETTER after %d consecutive failures: %s",
                 row.event_id,
@@ -176,7 +176,7 @@ async def _publish_single(
                 "Outbox %s: publish failed (attempt %d/%d), next retry at %s: %s",
                 row.event_id,
                 row.attempt_count,
-                MAX_CONSECUTIVE_FAILURES,
+                settings.outbox_relay_max_failures,
                 row.next_attempt_at_utc,
                 e,
             )
@@ -209,6 +209,7 @@ async def run_outbox_relay(broker: MessageBroker, worker_id: str | None = None) 
                 published = await _relay_batch(broker)
                 if published > 0:
                     logger.info("Relay %s: published %d events", worker_id, published)
+                record_worker_heartbeat("outbox-relay")
             except Exception as e:
                 logger.error("Relay %s: batch error: %s", worker_id, e)
 

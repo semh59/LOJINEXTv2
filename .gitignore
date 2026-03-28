@@ -42,10 +42,6 @@ wheels/
 .installed.cfg
 *.egg
 
-# Storage / Data
-services/trip-service/storage/imports/*
-!services/trip-service/storage/imports/.gitkeep
-
 # IDEs
 .vscode/
 .idea/

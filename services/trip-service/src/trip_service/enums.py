@@ -1,22 +1,16 @@
-"""Enum types for Trip Service.
-
-All enums are defined per V8 Sections 5.1–5.5.
-"""
+"""Enum types for Trip Service."""
 
 import enum
 
 
 class TripStatus(str, enum.Enum):
-    """V8 Section 5.1 — Business status."""
-
     PENDING_REVIEW = "PENDING_REVIEW"
     COMPLETED = "COMPLETED"
+    REJECTED = "REJECTED"
     SOFT_DELETED = "SOFT_DELETED"
 
 
 class EnrichmentStatus(str, enum.Enum):
-    """V8 Section 5.2 — Enrichment status."""
-
     PENDING = "PENDING"
     RUNNING = "RUNNING"
     READY = "READY"
@@ -25,8 +19,6 @@ class EnrichmentStatus(str, enum.Enum):
 
 
 class RouteStatus(str, enum.Enum):
-    """V8 Section 5.3 — Route status."""
-
     PENDING = "PENDING"
     READY = "READY"
     FAILED = "FAILED"
@@ -34,66 +26,27 @@ class RouteStatus(str, enum.Enum):
 
 
 class SourceType(str, enum.Enum):
-    """V8 Section 5.5 — Source type."""
-
     TELEGRAM_TRIP_SLIP = "TELEGRAM_TRIP_SLIP"
     ADMIN_MANUAL = "ADMIN_MANUAL"
-    EXCEL_IMPORT = "EXCEL_IMPORT"
     EMPTY_RETURN_ADMIN = "EMPTY_RETURN_ADMIN"
+    EXCEL_IMPORT = "EXCEL_IMPORT"
 
 
 class DataQualityFlag(str, enum.Enum):
-    """V8 Section 6.3 — Data quality flag computed at enrichment."""
-
     HIGH = "HIGH"
     MEDIUM = "MEDIUM"
     LOW = "LOW"
 
 
 class ActorType(str, enum.Enum):
-    """V8 Section 4 — Caller identity."""
-
     ADMIN = "ADMIN"
+    SUPER_ADMIN = "SUPER_ADMIN"
     DRIVER = "DRIVER"
+    SERVICE = "SERVICE"
     SYSTEM = "SYSTEM"
 
 
-class ImportJobStatus(str, enum.Enum):
-    """V8 Section 6.5 — Import job status."""
-
-    PENDING = "PENDING"
-    RUNNING = "RUNNING"
-    COMPLETED = "COMPLETED"
-    FAILED = "FAILED"
-
-
-class ImportMode(str, enum.Enum):
-    """V8 Section 12.6 — Import mode."""
-
-    STRICT = "STRICT"
-    PARTIAL = "PARTIAL"
-
-
-class ImportRowStatus(str, enum.Enum):
-    """V8 Section 6.6 — Import job row status."""
-
-    PENDING = "PENDING"
-    IMPORTED = "IMPORTED"
-    REJECTED = "REJECTED"
-
-
-class ExportJobStatus(str, enum.Enum):
-    """V8 Section 6.7 — Export job status."""
-
-    PENDING = "PENDING"
-    RUNNING = "RUNNING"
-    COMPLETED = "COMPLETED"
-    FAILED = "FAILED"
-
-
 class OutboxPublishStatus(str, enum.Enum):
-    """V8 Section 6.8 — Outbox publish status."""
-
     PENDING = "PENDING"
     PUBLISHED = "PUBLISHED"
     FAILED = "FAILED"
@@ -101,16 +54,19 @@ class OutboxPublishStatus(str, enum.Enum):
 
 
 class EvidenceSource(str, enum.Enum):
-    """V8 Section 6.2 — Evidence source."""
-
     TELEGRAM_TRIP_SLIP = "TELEGRAM_TRIP_SLIP"
-    EXCEL_IMPORT = "EXCEL_IMPORT"
     ADMIN_MANUAL = "ADMIN_MANUAL"
+    EXCEL_IMPORT = "EXCEL_IMPORT"
 
 
 class EvidenceKind(str, enum.Enum):
-    """V8 Section 6.2 — Evidence kind."""
-
     SLIP_IMAGE = "SLIP_IMAGE"
-    IMPORT_ROW = "IMPORT_ROW"
     MANUAL_ENTRY = "MANUAL_ENTRY"
+    IMPORT_ROW = "IMPORT_ROW"
+
+
+class ReviewReasonCode(str, enum.Enum):
+    SOURCE_IMPORT = "SOURCE_IMPORT"
+    FUTURE_MANUAL = "FUTURE_MANUAL"
+    FALLBACK_MINIMAL = "FALLBACK_MINIMAL"
+    EXCEL_IMPORT = "EXCEL_IMPORT"

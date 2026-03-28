@@ -1,3 +1,5 @@
+import uuid
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
@@ -29,9 +31,10 @@ async def test_ready_endpoint(client: AsyncClient) -> None:
 @pytest.mark.asyncio
 async def test_create_location_point(test_session: AsyncSession) -> None:
     """Deep test: verify we can insert a LocationPoint and constraints hold."""
+    code = f"TR_IST_{uuid.uuid4().hex[:8].upper()}"
     point = LocationPoint(
-        code="TR_IST_01",
-        name_tr="İstanbul Depo",
+        code=code,
+        name_tr="\u0130stanbul Depo",
         name_en="Istanbul Warehouse",
         normalized_name_tr="ISTANBUL DEPO",
         normalized_name_en="ISTANBUL WAREHOUSE",
@@ -43,7 +46,7 @@ async def test_create_location_point(test_session: AsyncSession) -> None:
     await test_session.commit()
 
     # Query back
-    result = await test_session.execute(select(LocationPoint).where(LocationPoint.code == "TR_IST_01"))
+    result = await test_session.execute(select(LocationPoint).where(LocationPoint.code == code))
     saved_point = result.scalar_one()
 
     assert saved_point.location_id is not None

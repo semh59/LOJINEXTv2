@@ -67,4 +67,7 @@ async def test_calculate_trigger(client: AsyncClient) -> None:
     # Trigger calculation
     calc_resp = await client.post(f"/v1/pairs/{pair_id}/calculate")
     assert calc_resp.status_code == 202
-    assert calc_resp.json()["status"] == "accepted"
+    calc_data = calc_resp.json()
+    assert calc_data["pair_id"] == pair_id
+    assert calc_data["run_status"] == "QUEUED"
+    assert "run_id" in calc_data

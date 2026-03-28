@@ -71,6 +71,7 @@ async def approve_route_versions(pair_id: UUID) -> None:
         pair.current_active_reverse_version_no = pair.pending_reverse_version_no
         pair.pending_forward_version_no = None
         pair.pending_reverse_version_no = None
+        pair.pair_status = PairStatus.ACTIVE
 
         await session.commit()
         logger.info(f"Successfully approved versions for pair {pair_id}")

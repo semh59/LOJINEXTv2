@@ -7,7 +7,7 @@ from location_service.enums import DirectionCode
 
 def generate_pair_code() -> str:
     """Generate a unique route pair code in the format RP_<ULID>."""
-    return f"RP_{ulid.ULID()}"
+    return f"RP_{ulid.new()}"
 
 
 def generate_route_code(pair_code: str, direction: DirectionCode) -> str:

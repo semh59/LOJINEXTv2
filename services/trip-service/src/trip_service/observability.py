@@ -12,9 +12,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
-from zoneinfo import ZoneInfo
 
 from prometheus_client import Counter, Histogram, Info
 from sqlalchemy import CursorResult, delete
@@ -42,7 +41,7 @@ def setup_logging(level: str = "INFO") -> None:
     class JsonFormatter(logging.Formatter):
         def format(self, record: logging.LogRecord) -> str:
             log_entry = {
-                "timestamp": datetime.now(tz=ZoneInfo("UTC")).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "level": record.levelname,
                 "service": settings.service_name,
                 "logger": record.name,
@@ -67,7 +66,7 @@ def setup_logging(level: str = "INFO") -> None:
 # V8 Section 18.2 — Prometheus Metrics
 # ---------------------------------------------------------------------------
 
-# 13 Prometheus counters per V8 Section 18.2
+# Core Prometheus counters per V8 Section 18.2
 
 TRIP_CREATED_TOTAL = Counter("trip_created_total", "Total trips created", ["source_type"])
 TRIP_COMPLETED_TOTAL = Counter("trip_completed_total", "Total trips completed (approved)")
@@ -78,9 +77,6 @@ ENRICHMENT_COMPLETED_TOTAL = Counter("enrichment_completed_total", "Enrichment r
 ENRICHMENT_FAILED_TOTAL = Counter("enrichment_failed_total", "Enrichment rows that reached max retries")
 OUTBOX_PUBLISHED_TOTAL = Counter("outbox_published_total", "Outbox events published", ["event_name"])
 OUTBOX_DEAD_LETTER_TOTAL = Counter("outbox_dead_letter_total", "Outbox events that reached DEAD_LETTER")
-IMPORT_JOB_TOTAL = Counter("import_job_total", "Import jobs created", ["mode"])
-IMPORT_ROWS_TOTAL = Counter("import_rows_total", "Import rows processed", ["status"])
-EXPORT_JOB_TOTAL = Counter("export_job_total", "Export jobs created")
 REQUEST_DURATION = Histogram(
     "http_request_duration_seconds",
     "HTTP request duration",
@@ -97,7 +93,7 @@ SERVICE_INFO.info({"version": "0.1.0", "service": settings.service_name})
 
 
 def _now_utc() -> datetime:
-    return datetime.now(tz=ZoneInfo("UTC"))
+    return datetime.now(UTC)
 
 
 async def cleanup_idempotency_records() -> int:

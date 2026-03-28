@@ -9,14 +9,14 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from fastapi import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from trip_service.errors import trip_if_match_required, trip_version_mismatch
+from trip_service.errors import trip_if_match_required, trip_validation_error, trip_version_mismatch
+from trip_service.timezones import InvalidTimezoneError, calendar_date_range_to_utc
 
 # ---------------------------------------------------------------------------
 # V8 Section 8.2 — X-Request-Id Correlation
@@ -93,11 +93,12 @@ def require_if_match(request: Request) -> tuple[str, int]:
     return result
 
 
-def check_version_match(request: Request, current_version: int) -> None:
-    """Verify If-Match version matches current version, or raise 412."""
-    parsed = require_if_match(request)
-    if parsed[1] != current_version:
+def require_trip_if_match(request: Request, trip_id: str) -> int:
+    """Parse If-Match header and ensure it belongs to the requested trip."""
+    parsed_trip_id, version = require_if_match(request)
+    if parsed_trip_id != trip_id:
         raise trip_version_mismatch()
+    return version
 
 
 # ---------------------------------------------------------------------------
@@ -163,18 +164,10 @@ def date_range_to_utc(
     - date_to is inclusive at calendar-date level
     - returns [start_of_day UTC, next_day_start UTC)
     """
-    tz = ZoneInfo(timezone)
-
-    utc_from: datetime | None = None
-    utc_to: datetime | None = None
-
-    if date_from:
-        local_start = datetime.combine(date_from, time.min, tzinfo=tz)
-        utc_from = local_start.astimezone(ZoneInfo("UTC"))
-
-    if date_to:
-        # date_to is inclusive: we use next day's start as exclusive upper bound
-        local_end = datetime.combine(date_to + timedelta(days=1), time.min, tzinfo=tz)
-        utc_to = local_end.astimezone(ZoneInfo("UTC"))
-
-    return utc_from, utc_to
+    try:
+        return calendar_date_range_to_utc(date_from, date_to, timezone)
+    except InvalidTimezoneError as exc:
+        raise trip_validation_error(
+            "Request validation failed.",
+            errors=[{"field": "query.timezone", "message": "Invalid timezone."}],
+        ) from exc

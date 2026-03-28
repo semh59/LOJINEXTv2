@@ -1,31 +1,37 @@
-"""Trip endpoints router — V8 Section 10 API contracts.
-
-This is the main router for all trip-related API endpoints.
-Implements all 18 endpoints from the V8 specification.
-"""
+"""Trip endpoints aligned to the locked product contract."""
 
 from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Header, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from ulid import ULID
 
+from trip_service.auth import (
+    AuthContext,
+    excel_service_auth_dependency,
+    telegram_service_auth_dependency,
+    user_auth_dependency,
+)
+from trip_service.config import settings
 from trip_service.database import get_session
+from trip_service.dependencies import ensure_trip_references_valid, fetch_trip_context, resolve_route_by_names
 from trip_service.enums import (
     ActorType,
     DataQualityFlag,
     EnrichmentStatus,
     EvidenceKind,
     EvidenceSource,
+    ReviewReasonCode,
     RouteStatus,
     SourceType,
     TripStatus,
@@ -33,14 +39,24 @@ from trip_service.enums import (
 from trip_service.errors import (
     empty_return_already_exists,
     enrichment_already_running,
+    enrichment_terminal_state,
+    hard_delete_requires_soft_deleted,
     has_empty_return_child,
     idempotency_payload_mismatch,
+    internal_error,
     invalid_base_for_empty_return,
-    invalid_filter_combination,
     invalid_status_transition,
     route_required_for_completion,
+    source_slip_conflict,
+    trip_change_reason_required,
+    trip_completion_requirements_missing,
+    trip_forbidden,
+    trip_invalid_date_window,
     trip_no_conflict,
     trip_not_found,
+    trip_source_locked_field,
+    trip_source_reference_conflict,
+    trip_validation_error,
     trip_version_mismatch,
 )
 from trip_service.middleware import (
@@ -48,12 +64,13 @@ from trip_service.middleware import (
     make_etag,
     make_pagination_meta,
     parse_pagination,
-    require_if_match,
+    require_trip_if_match,
 )
 from trip_service.models import (
     TripIdempotencyRecord,
     TripOutbox,
     TripTrip,
+    TripTripDeleteAudit,
     TripTripEnrichment,
     TripTripEvidence,
     TripTripTimeline,
@@ -62,21 +79,29 @@ from trip_service.schemas import (
     ApproveRequest,
     EditTripRequest,
     EmptyReturnRequest,
-    EnrichmentSummary,
-    EvidenceSummary,
-    IngestSlipRequest,
+    ExcelIngestRequest,
+    HardDeleteRequest,
     ManualCreateRequest,
+    RejectRequest,
     RetryEnrichmentResponse,
+    TelegramFallbackIngestRequest,
+    TelegramSlipIngestRequest,
     TimelineItem,
-    TripResource,
+    TimelineResponse,
+    TripListResponse,
+)
+from trip_service.timezones import local_datetime_to_utc
+from trip_service.trip_helpers import (
+    apply_trip_context,
+    assert_no_trip_overlap,
+    build_delete_audit,
+    trip_complete_errors,
+    trip_is_complete,
+    trip_to_resource,
+    utc_now,
 )
 
 router = APIRouter(tags=["trips"])
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _generate_id() -> str:
@@ -84,91 +109,58 @@ def _generate_id() -> str:
     return str(ULID())
 
 
-def _now_utc() -> datetime:
-    """Current UTC timestamp."""
-    return datetime.now(tz=ZoneInfo("UTC"))
-
-
-def _local_to_utc(local_str: str, timezone: str) -> datetime:
-    """Convert a local datetime string + timezone to UTC datetime."""
-    tz = ZoneInfo(timezone)
-    local_dt = datetime.fromisoformat(local_str).replace(tzinfo=tz)
-    return local_dt.astimezone(ZoneInfo("UTC"))
-
-
 def _canonicalize_body(body: dict[str, Any]) -> str:
-    """SHA-256 of a canonicalized request body (sorted keys, no whitespace)."""
+    """SHA-256 of a canonicalized request body."""
     canonical = json.dumps(body, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(canonical.encode()).hexdigest()
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _trip_to_resource(trip: TripTrip) -> TripResource:
-    """Map ORM model to API resource."""
-    enrichment_summary = None
-    if trip.enrichment:
-        enrichment_summary = EnrichmentSummary(
-            enrichment_status=trip.enrichment.enrichment_status,
-            route_status=trip.enrichment.route_status,
-            data_quality_flag=trip.enrichment.data_quality_flag,
+def _json_response(status_code: int, content: dict[str, Any], headers: dict[str, str] | None = None) -> JSONResponse:
+    """Return a JSON response with optional headers."""
+    response = JSONResponse(status_code=status_code, content=content)
+    for key, value in (headers or {}).items():
+        response.headers[key] = value
+    return response
+
+
+def _response_headers_for_trip(trip: TripTrip) -> dict[str, str]:
+    """Build the standard response headers for a trip resource."""
+    return {"ETag": make_etag(trip.id, trip.version)}
+
+
+def _require_admin(auth: AuthContext) -> AuthContext:
+    """Ensure the current caller is an admin or super admin."""
+    if auth.role not in {ActorType.ADMIN, ActorType.SUPER_ADMIN}:
+        raise trip_forbidden("User token does not have an admin role.")
+    return auth
+
+
+def _require_super_admin(auth: AuthContext) -> AuthContext:
+    """Ensure the current caller is a super admin."""
+    if not auth.is_super_admin:
+        raise trip_forbidden("Only SUPER_ADMIN can perform this action.")
+    return auth
+
+
+def _validate_trip_weights(tare_weight_kg: int | None, gross_weight_kg: int | None, net_weight_kg: int | None) -> None:
+    """Validate weight invariants before hitting database constraints."""
+    if tare_weight_kg is None or gross_weight_kg is None or net_weight_kg is None:
+        return
+    errors: list[dict[str, str]] = []
+    if gross_weight_kg < tare_weight_kg:
+        errors.append({"field": "body.gross_weight_kg", "message": "gross_weight_kg must be >= tare_weight_kg."})
+    if net_weight_kg != gross_weight_kg - tare_weight_kg:
+        errors.append(
+            {"field": "body.net_weight_kg", "message": "net_weight_kg must equal gross_weight_kg - tare_weight_kg."}
         )
-
-    # BUG-05: Use max(created_at_utc) instead of [-1] which is load-order
-    # dependent (undefined for eagerly-loaded collections).
-    evidence_summary = None
-    if trip.evidence:
-        ev = max(trip.evidence, key=lambda e: e.created_at_utc)
-        evidence_summary = EvidenceSummary(
-            normalized_truck_plate=ev.normalized_truck_plate,
-            normalized_trailer_plate=ev.normalized_trailer_plate,
-            origin_name_raw=ev.origin_name_raw,
-            destination_name_raw=ev.destination_name_raw,
-        )
-
-    return TripResource(
-        id=trip.id,
-        trip_no=trip.trip_no,
-        source_type=trip.source_type,
-        source_slip_no=trip.source_slip_no,
-        base_trip_id=trip.base_trip_id,
-        driver_id=trip.driver_id,
-        vehicle_id=trip.vehicle_id,
-        trailer_id=trip.trailer_id,
-        route_id=trip.route_id,
-        trip_datetime_utc=trip.trip_datetime_utc,
-        trip_timezone=trip.trip_timezone,
-        tare_weight_kg=trip.tare_weight_kg,
-        gross_weight_kg=trip.gross_weight_kg,
-        net_weight_kg=trip.net_weight_kg,
-        is_empty_return=trip.is_empty_return,
-        status=trip.status,
-        version=trip.version,
-        enrichment=enrichment_summary,
-        evidence_summary=evidence_summary,
-        created_at_utc=trip.created_at_utc,
-        updated_at_utc=trip.updated_at_utc,
-        soft_deleted_at_utc=trip.soft_deleted_at_utc,
-    )
-
-
-async def _get_trip_or_404(session: AsyncSession, trip_id: str) -> TripTrip:
-    """Load trip with enrichment + evidence eagerly, or raise 404."""
-    stmt = (
-        select(TripTrip)
-        .options(selectinload(TripTrip.enrichment), selectinload(TripTrip.evidence))
-        .where(TripTrip.id == trip_id)
-    )
-    result = await session.execute(stmt)
-    trip = result.scalar_one_or_none()
-    if trip is None:
-        raise trip_not_found(trip_id)
-    return trip
+    if errors:
+        raise trip_validation_error("Trip weights are inconsistent.", errors=errors)
 
 
 def _compute_data_quality_flag(source_type: str, ocr_confidence: float | None, route_resolved: bool) -> str:
-    """V8 Section 6.3 — data_quality_flag computation."""
+    """Compute the trip data-quality flag using the locked source contract."""
     if source_type in (SourceType.ADMIN_MANUAL, SourceType.EMPTY_RETURN_ADMIN, SourceType.EXCEL_IMPORT):
         return DataQualityFlag.HIGH
-    # TELEGRAM_TRIP_SLIP
     if ocr_confidence is not None and ocr_confidence >= 0.90 and route_resolved:
         return DataQualityFlag.HIGH
     if ocr_confidence is not None and ocr_confidence >= 0.70:
@@ -178,11 +170,31 @@ def _compute_data_quality_flag(source_type: str, ocr_confidence: float | None, r
     return DataQualityFlag.LOW
 
 
-def _create_outbox_event(
-    trip: TripTrip,
-    event_name: str,
-    payload: dict[str, Any],
-) -> TripOutbox:
+def _classify_manual_status(auth: AuthContext, trip_start_utc: datetime) -> tuple[str, str | None]:
+    """Return the status/review reason for a manual or empty-return create."""
+    now = utc_now()
+    if auth.is_super_admin:
+        if trip_start_utc > now:
+            return TripStatus.PENDING_REVIEW, ReviewReasonCode.FUTURE_MANUAL
+        return TripStatus.COMPLETED, None
+
+    grace_start = now - timedelta(minutes=30)
+    if trip_start_utc < grace_start or trip_start_utc > now:
+        raise trip_invalid_date_window(
+            "ADMIN may only create manual trips in the last 30 minutes and may not create future trips."
+        )
+    return TripStatus.COMPLETED, None
+
+
+def _ensure_complete_for_completion(trip: TripTrip) -> None:
+    """Raise when a trip is still incomplete for approval/completion."""
+    if trip_is_complete(trip):
+        return
+    missing = ", ".join(error["field"] for error in trip_complete_errors(trip))
+    raise trip_completion_requirements_missing(f"Trip is missing required fields: {missing}.")
+
+
+def _create_outbox_event(trip: TripTrip, event_name: str, payload: dict[str, Any]) -> TripOutbox:
     """Create a transactional outbox row."""
     return TripOutbox(
         event_id=_generate_id(),
@@ -195,8 +207,68 @@ def _create_outbox_event(
         partition_key=trip.id,
         publish_status="PENDING",
         attempt_count=0,
-        created_at_utc=_now_utc(),
+        created_at_utc=utc_now(),
     )
+
+
+def _constraint_name(exc: IntegrityError) -> str:
+    """Extract a stable constraint/index name from an IntegrityError."""
+    original = getattr(exc, "orig", None)
+    if original is None:
+        return str(exc)
+    if getattr(original, "constraint_name", None):
+        return str(original.constraint_name)
+    if getattr(getattr(original, "diag", None), "constraint_name", None):
+        return str(original.diag.constraint_name)
+    return str(original)
+
+
+def _map_integrity_error(
+    exc: IntegrityError,
+    *,
+    trip_no: str | None = None,
+    source_slip_no: str | None = None,
+    source_reference_key: str | None = None,
+) -> Exception:
+    """Map database integrity errors to stable problem responses."""
+    name = _constraint_name(exc)
+    if "uq_trip_trips_trip_no" in name:
+        return trip_no_conflict(trip_no or "unknown")
+    if "uq_trips_source_slip_no_telegram" in name:
+        return source_slip_conflict(source_slip_no or "unknown")
+    if "uq_trips_source_reference_key" in name:
+        return trip_source_reference_conflict(source_reference_key or "unknown")
+    if "uq_trips_empty_return_base_trip" in name:
+        return empty_return_already_exists()
+    return internal_error(f"Database integrity error: {name}")
+
+
+def _coerce_actor_type(role: str) -> str:
+    """Normalize role strings for persistence/audit fields."""
+    return str(role)
+
+
+def _merged_payload_hash(payload: dict[str, Any]) -> str:
+    """Compute a canonical request hash for source dedupe and idempotency."""
+    return _canonicalize_body(payload)
+
+
+async def _get_trip_or_404(session: AsyncSession, trip_id: str) -> TripTrip:
+    """Load a trip aggregate eagerly or raise 404."""
+    stmt = (
+        select(TripTrip)
+        .options(
+            selectinload(TripTrip.enrichment),
+            selectinload(TripTrip.evidence),
+            selectinload(TripTrip.timeline),
+            selectinload(TripTrip.empty_return_children),
+        )
+        .where(TripTrip.id == trip_id)
+    )
+    trip = (await session.execute(stmt)).scalar_one_or_none()
+    if trip is None:
+        raise trip_not_found(trip_id)
+    return trip
 
 
 async def _check_idempotency_key(
@@ -205,114 +277,256 @@ async def _check_idempotency_key(
     endpoint_fingerprint: str,
     request_hash: str,
 ) -> JSONResponse | None:
-    """V8 Section 15.2 — Admin POST idempotency check.
-
-    Returns a replay response if idempotency key was already used,
-    raises 409 if same key + different payload, or None for new request.
-    """
+    """Return a replay response for a stored idempotency key if present."""
     if not idempotency_key:
         return None
 
-    stmt = select(TripIdempotencyRecord).where(
-        TripIdempotencyRecord.idempotency_key == idempotency_key,
-        TripIdempotencyRecord.endpoint_fingerprint == endpoint_fingerprint,
+    now = utc_now()
+    claim_stmt = (
+        pg_insert(TripIdempotencyRecord)
+        .values(
+            idempotency_key=idempotency_key,
+            endpoint_fingerprint=endpoint_fingerprint,
+            request_hash=request_hash,
+            response_status=0,
+            response_headers_json={},
+            response_body_json="{}",
+            created_at_utc=now,
+            expires_at_utc=now + timedelta(hours=settings.idempotency_retention_hours),
+        )
+        .on_conflict_do_nothing(index_elements=["idempotency_key", "endpoint_fingerprint"])
     )
-    result = await session.execute(stmt)
-    existing = result.scalar_one_or_none()
-
-    if existing is None:
+    claim_result = await session.execute(claim_stmt)
+    if claim_result.rowcount == 1:
         return None
+
+    existing = (
+        await session.execute(
+            select(TripIdempotencyRecord)
+            .where(
+                TripIdempotencyRecord.idempotency_key == idempotency_key,
+                TripIdempotencyRecord.endpoint_fingerprint == endpoint_fingerprint,
+            )
+            .with_for_update()
+        )
+    ).scalar_one()
 
     if existing.request_hash != request_hash:
         raise idempotency_payload_mismatch()
+    if existing.response_status <= 0:
+        raise internal_error("Idempotency record is incomplete.")
 
-    # Replay original response
-    return JSONResponse(
+    return _json_response(
         status_code=existing.response_status,
         content=json.loads(existing.response_body_json),
+        headers={str(key): str(value) for key, value in (existing.response_headers_json or {}).items()},
     )
 
 
 async def _save_idempotency_record(
     session: AsyncSession,
+    *,
     idempotency_key: str,
     endpoint_fingerprint: str,
     request_hash: str,
     response_status: int,
     response_body: dict[str, Any],
+    response_headers: dict[str, str],
 ) -> None:
-    """Persist idempotency record for replay."""
-    now = _now_utc()
-    record = TripIdempotencyRecord(
-        idempotency_key=idempotency_key,
-        endpoint_fingerprint=endpoint_fingerprint,
-        request_hash=request_hash,
-        response_status=response_status,
-        response_body_json=json.dumps(response_body, default=str),
-        created_at_utc=now,
-        expires_at_utc=now + timedelta(hours=24),
+    """Persist idempotency replay material for later requests."""
+    now = utc_now()
+    stmt = (
+        pg_insert(TripIdempotencyRecord)
+        .values(
+            idempotency_key=idempotency_key,
+            endpoint_fingerprint=endpoint_fingerprint,
+            request_hash=request_hash,
+            response_status=response_status,
+            response_headers_json=response_headers,
+            response_body_json=json.dumps(response_body, default=str),
+            created_at_utc=now,
+            expires_at_utc=now + timedelta(hours=settings.idempotency_retention_hours),
+        )
+        .on_conflict_do_update(
+            index_elements=["idempotency_key", "endpoint_fingerprint"],
+            set_={
+                "request_hash": request_hash,
+                "response_status": response_status,
+                "response_headers_json": response_headers,
+                "response_body_json": json.dumps(response_body, default=str),
+                "expires_at_utc": now + timedelta(hours=settings.idempotency_retention_hours),
+            },
+        )
     )
-    session.add(record)
+    await session.execute(stmt)
 
 
-# ---------------------------------------------------------------------------
-# V8 Section 10.1 — Ingest Trip Slip
-# ---------------------------------------------------------------------------
+def _make_placeholder_trip_no(prefix: str) -> str:
+    """Generate a unique placeholder trip number for fallback/minimal imports."""
+    return f"{prefix}-{_generate_id()}"
+
+
+async def _maybe_replay_source_reference(
+    session: AsyncSession,
+    *,
+    source_reference_key: str,
+    request_hash: str,
+) -> JSONResponse | None:
+    """Replay an existing import record when the source reference already exists."""
+    existing = (
+        await session.execute(select(TripTrip).where(TripTrip.source_reference_key == source_reference_key))
+    ).scalar_one_or_none()
+    if existing is None:
+        return None
+    if existing.source_payload_hash != request_hash:
+        raise trip_source_reference_conflict(source_reference_key)
+    trip = await _get_trip_or_404(session, existing.id)
+    resource = trip_to_resource(trip)
+    return _json_response(200, resource.model_dump(mode="json"), _response_headers_for_trip(trip))
+
+
+def _timeline_item_rows(trip: TripTrip) -> TimelineResponse:
+    """Map timeline rows into the timeline response contract."""
+    items = [
+        TimelineItem(
+            id=row.id,
+            event_type=row.event_type,
+            actor_type=row.actor_type,
+            actor_id=row.actor_id,
+            note=row.note,
+            payload_json=json.loads(row.payload_json) if row.payload_json else None,
+            created_at_utc=row.created_at_utc,
+        )
+        for row in sorted(trip.timeline, key=lambda item: item.created_at_utc)
+    ]
+    return TimelineResponse(items=items)
+
+
+def _event_payload(trip: TripTrip) -> dict[str, Any]:
+    """Build a normalized event payload snapshot for outbox records."""
+    return {
+        "trip_id": trip.id,
+        "trip_no": trip.trip_no,
+        "source_type": trip.source_type,
+        "source_slip_no": trip.source_slip_no,
+        "source_reference_key": trip.source_reference_key,
+        "review_reason_code": trip.review_reason_code,
+        "base_trip_id": trip.base_trip_id,
+        "driver_id": trip.driver_id,
+        "vehicle_id": trip.vehicle_id,
+        "trailer_id": trip.trailer_id,
+        "route_pair_id": trip.route_pair_id,
+        "route_id": trip.route_id,
+        "origin_location_id": trip.origin_location_id,
+        "origin_name_snapshot": trip.origin_name_snapshot,
+        "destination_location_id": trip.destination_location_id,
+        "destination_name_snapshot": trip.destination_name_snapshot,
+        "trip_datetime_utc": str(trip.trip_datetime_utc),
+        "trip_timezone": trip.trip_timezone,
+        "planned_duration_s": trip.planned_duration_s,
+        "planned_end_utc": str(trip.planned_end_utc) if trip.planned_end_utc else None,
+        "tare_weight_kg": trip.tare_weight_kg,
+        "gross_weight_kg": trip.gross_weight_kg,
+        "net_weight_kg": trip.net_weight_kg,
+        "is_empty_return": trip.is_empty_return,
+        "status": trip.status,
+        "version": trip.version,
+    }
+
+
+def _set_enrichment_state(
+    trip: TripTrip,
+    enrichment: TripTripEnrichment,
+    *,
+    source_type: str,
+    route_ready: bool,
+    ocr_confidence: float | None = None,
+) -> None:
+    """Synchronize enrichment fields with the current trip payload completeness."""
+    enrichment.route_status = RouteStatus.READY if route_ready else RouteStatus.PENDING
+    enrichment.enrichment_status = EnrichmentStatus.READY if route_ready else EnrichmentStatus.PENDING
+    enrichment.data_quality_flag = _compute_data_quality_flag(source_type, ocr_confidence, route_resolved=route_ready)
+    enrichment.claim_token = None
+    enrichment.claim_expires_at_utc = None
+    enrichment.claimed_by_worker = None
+    enrichment.last_enrichment_error_code = None
+    enrichment.next_retry_at_utc = None
+    enrichment.updated_at_utc = utc_now()
+
+
+def _maybe_require_change_reason(
+    auth: AuthContext,
+    body: EditTripRequest,
+    trip: TripTrip,
+    new_driver_id: str | None,
+) -> None:
+    """Enforce source-aware driver edit rules for imported trips."""
+    if new_driver_id is None or new_driver_id == trip.driver_id:
+        return
+    if trip.source_type not in {SourceType.TELEGRAM_TRIP_SLIP, SourceType.EXCEL_IMPORT}:
+        return
+    if auth.is_super_admin:
+        if not body.change_reason or not body.change_reason.strip():
+            raise trip_change_reason_required("SUPER_ADMIN must provide change_reason to reassign imported driver.")
+        return
+    raise trip_source_locked_field("ADMIN cannot change driver_id on imported trips.")
 
 
 @router.post("/internal/v1/trips/slips/ingest", status_code=201)
 async def ingest_trip_slip(
-    body: IngestSlipRequest,
-    request: Request,
+    body: TelegramSlipIngestRequest,
     session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(telegram_service_auth_dependency),
 ) -> Any:
-    """V8 Section 10.1 — Ingest normalized trip slip from Slip Processing Service."""
-    request_hash = _canonicalize_body(body.model_dump())
+    """Ingest a fully parsed Telegram slip as a pending review trip."""
+    request_body = body.model_dump(exclude_none=True)
+    request_hash = _merged_payload_hash(request_body)
 
-    # Idempotency check by source_slip_no (authoritative)
-    stmt = select(TripTrip).where(
-        TripTrip.source_slip_no == body.source_slip_no,
-        TripTrip.source_type == SourceType.TELEGRAM_TRIP_SLIP,
-    )
-    result = await session.execute(stmt)
-    existing_trip = result.scalar_one_or_none()
-
+    existing_trip = (
+        await session.execute(
+            select(TripTrip).where(
+                TripTrip.source_slip_no == body.source_slip_no,
+                TripTrip.source_type == SourceType.TELEGRAM_TRIP_SLIP,
+            )
+        )
+    ).scalar_one_or_none()
     if existing_trip is not None:
-        if existing_trip.source_payload_hash == request_hash:
-            # Idempotent replay
-            stmt2 = (
-                select(TripTrip)
-                .options(selectinload(TripTrip.enrichment), selectinload(TripTrip.evidence))
-                .where(TripTrip.id == existing_trip.id)
-            )
-            result2 = await session.execute(stmt2)
-            trip = result2.scalar_one()
-            resource = _trip_to_resource(trip)
-            resp = JSONResponse(
-                status_code=200,
-                content=resource.model_dump(mode="json"),
-            )
-            resp.headers["ETag"] = make_etag(trip.id, trip.version)
-            return resp
-        else:
+        if existing_trip.source_payload_hash != request_hash:
             raise idempotency_payload_mismatch()
+        trip = await _get_trip_or_404(session, existing_trip.id)
+        resource = trip_to_resource(trip)
+        return _json_response(200, resource.model_dump(mode="json"), _response_headers_for_trip(trip))
 
-    # New trip creation
-    now = _now_utc()
-    trip_id = _generate_id()
-    trip_datetime_utc = _local_to_utc(body.trip_datetime_local, body.trip_timezone)
+    replay = await _maybe_replay_source_reference(
+        session,
+        source_reference_key=body.source_reference_key,
+        request_hash=request_hash,
+    )
+    if replay is not None:
+        return replay
 
-    trip = TripTrip(
-        id=trip_id,
-        trip_no=body.source_slip_no,  # V8: trip_no = source_slip_no
-        source_type=SourceType.TELEGRAM_TRIP_SLIP,
-        source_slip_no=body.source_slip_no,
-        source_payload_hash=request_hash,
+    await ensure_trip_references_valid(
         driver_id=body.driver_id,
         vehicle_id=body.vehicle_id,
         trailer_id=body.trailer_id,
-        route_id=None,  # Route resolved by enrichment
-        trip_datetime_utc=trip_datetime_utc,
+    )
+    resolution = await resolve_route_by_names(origin_name=body.origin_name, destination_name=body.destination_name)
+    context = await fetch_trip_context(resolution.pair_id, field_name="body.origin_name")
+
+    now = utc_now()
+    trip_id = _generate_id()
+    trip = TripTrip(
+        id=trip_id,
+        trip_no=body.source_slip_no,
+        source_type=SourceType.TELEGRAM_TRIP_SLIP,
+        source_slip_no=body.source_slip_no,
+        source_reference_key=body.source_reference_key,
+        source_payload_hash=request_hash,
+        review_reason_code=ReviewReasonCode.SOURCE_IMPORT,
+        driver_id=body.driver_id,
+        vehicle_id=body.vehicle_id,
+        trailer_id=body.trailer_id,
+        trip_datetime_utc=local_datetime_to_utc(body.trip_start_local, body.trip_timezone),
         trip_timezone=body.trip_timezone,
         tare_weight_kg=body.tare_weight_kg,
         gross_weight_kg=body.gross_weight_kg,
@@ -320,164 +534,390 @@ async def ingest_trip_slip(
         is_empty_return=False,
         status=TripStatus.PENDING_REVIEW,
         version=1,
-        created_by_actor_type=ActorType.SYSTEM,
-        created_by_actor_id="slip-processing-service",
+        created_by_actor_type=ActorType.SERVICE,
+        created_by_actor_id=auth.service_name or auth.actor_id,
+        created_at_utc=now,
+        updated_at_utc=now,
+    )
+    apply_trip_context(trip, context, reverse=False)
+    session.add(trip)
+
+    session.add(
+        TripTripEvidence(
+            id=_generate_id(),
+            trip_id=trip_id,
+            evidence_source=EvidenceSource.TELEGRAM_TRIP_SLIP,
+            evidence_kind=EvidenceKind.SLIP_IMAGE,
+            source_slip_no=body.source_slip_no,
+            telegram_message_id=body.source_reference_key,
+            file_key=body.file_key,
+            raw_text_ref=body.raw_text_ref,
+            ocr_confidence=body.ocr_confidence,
+            normalized_truck_plate=body.normalized_truck_plate,
+            normalized_trailer_plate=body.normalized_trailer_plate,
+            origin_name_raw=body.origin_name,
+            destination_name_raw=body.destination_name,
+            raw_payload_json=json.dumps(request_body, default=str),
+            created_at_utc=now,
+        )
+    )
+    session.add(
+        TripTripEnrichment(
+            id=_generate_id(),
+            trip_id=trip_id,
+            enrichment_status=EnrichmentStatus.READY,
+            route_status=RouteStatus.READY,
+            data_quality_flag=_compute_data_quality_flag(SourceType.TELEGRAM_TRIP_SLIP, body.ocr_confidence, True),
+            enrichment_attempt_count=0,
+            created_at_utc=now,
+            updated_at_utc=now,
+        )
+    )
+    session.add(
+        TripTripTimeline(
+            id=_generate_id(),
+            trip_id=trip_id,
+            event_type="TRIP_CREATED",
+            actor_type=ActorType.SERVICE,
+            actor_id=auth.service_name or auth.actor_id,
+            note=f"Telegram slip {body.source_slip_no} ingested for review.",
+            payload_json=json.dumps({"source_reference_key": body.source_reference_key}),
+            created_at_utc=now,
+        )
+    )
+    session.add(_create_outbox_event(trip, "trip.created.v1", _event_payload(trip)))
+
+    try:
+        await session.flush()
+        trip = await _get_trip_or_404(session, trip_id)
+        resource = trip_to_resource(trip)
+        resource_dict = resource.model_dump(mode="json")
+        headers = _response_headers_for_trip(trip)
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise _map_integrity_error(
+            exc,
+            trip_no=trip.trip_no,
+            source_slip_no=body.source_slip_no,
+            source_reference_key=body.source_reference_key,
+        ) from exc
+
+    return _json_response(201, resource_dict, headers)
+
+
+@router.post("/internal/v1/trips/slips/ingest-fallback", status_code=201)
+async def ingest_trip_slip_fallback(
+    body: TelegramFallbackIngestRequest,
+    session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(telegram_service_auth_dependency),
+) -> Any:
+    """Create a fallback pending-review trip when Telegram parsing fails."""
+    request_body = body.model_dump(exclude_none=True, mode="json")
+    request_hash = _merged_payload_hash(request_body)
+
+    replay = await _maybe_replay_source_reference(
+        session,
+        source_reference_key=body.source_reference_key,
+        request_hash=request_hash,
+    )
+    if replay is not None:
+        return replay
+
+    await ensure_trip_references_valid(driver_id=body.driver_id, vehicle_id=None, trailer_id=None)
+
+    now = utc_now()
+    trip_id = _generate_id()
+    trip = TripTrip(
+        id=trip_id,
+        trip_no=_make_placeholder_trip_no("TG-FALLBACK"),
+        source_type=SourceType.TELEGRAM_TRIP_SLIP,
+        source_reference_key=body.source_reference_key,
+        source_payload_hash=request_hash,
+        review_reason_code=ReviewReasonCode.FALLBACK_MINIMAL,
+        driver_id=body.driver_id,
+        vehicle_id=None,
+        trailer_id=None,
+        trip_datetime_utc=body.message_sent_at_utc.astimezone(UTC),
+        trip_timezone="UTC",
+        tare_weight_kg=None,
+        gross_weight_kg=None,
+        net_weight_kg=None,
+        is_empty_return=False,
+        status=TripStatus.PENDING_REVIEW,
+        version=1,
+        created_by_actor_type=ActorType.SERVICE,
+        created_by_actor_id=auth.service_name or auth.actor_id,
         created_at_utc=now,
         updated_at_utc=now,
     )
     session.add(trip)
 
-    # Evidence row
-    evidence = TripTripEvidence(
-        id=_generate_id(),
-        trip_id=trip_id,
-        evidence_source=EvidenceSource.TELEGRAM_TRIP_SLIP,
-        evidence_kind=EvidenceKind.SLIP_IMAGE,
-        source_slip_no=body.source_slip_no,
-        file_key=body.file_key,
-        raw_text_ref=body.raw_text_ref,
-        ocr_confidence=body.ocr_confidence,
-        normalized_truck_plate=body.normalized_truck_plate,
-        normalized_trailer_plate=body.normalized_trailer_plate,
-        origin_name_raw=body.origin_name,
-        destination_name_raw=body.destination_name,
-        raw_payload_json=json.dumps(body.model_dump(), default=str),
-        created_at_utc=now,
+    session.add(
+        TripTripEvidence(
+            id=_generate_id(),
+            trip_id=trip_id,
+            evidence_source=EvidenceSource.TELEGRAM_TRIP_SLIP,
+            evidence_kind=EvidenceKind.SLIP_IMAGE,
+            telegram_message_id=body.source_reference_key,
+            file_key=body.file_key,
+            raw_text_ref=body.raw_text_ref,
+            raw_payload_json=json.dumps(request_body, default=str),
+            created_at_utc=now,
+        )
     )
-    session.add(evidence)
+    session.add(
+        TripTripEnrichment(
+            id=_generate_id(),
+            trip_id=trip_id,
+            enrichment_status=EnrichmentStatus.PENDING,
+            route_status=RouteStatus.PENDING,
+            data_quality_flag=DataQualityFlag.LOW,
+            enrichment_attempt_count=0,
+            created_at_utc=now,
+            updated_at_utc=now,
+        )
+    )
+    session.add(
+        TripTripTimeline(
+            id=_generate_id(),
+            trip_id=trip_id,
+            event_type="TRIP_CREATED",
+            actor_type=ActorType.SERVICE,
+            actor_id=auth.service_name or auth.actor_id,
+            note="Fallback Telegram trip created for manual completion.",
+            payload_json=json.dumps({"fallback_reason": body.fallback_reason}),
+            created_at_utc=now,
+        )
+    )
+    session.add(_create_outbox_event(trip, "trip.created.v1", _event_payload(trip)))
 
-    # Enrichment row
-    data_quality = _compute_data_quality_flag(
-        SourceType.TELEGRAM_TRIP_SLIP,
-        body.ocr_confidence,
-        route_resolved=False,
+    try:
+        await session.flush()
+        trip = await _get_trip_or_404(session, trip_id)
+        resource = trip_to_resource(trip)
+        resource_dict = resource.model_dump(mode="json")
+        headers = _response_headers_for_trip(trip)
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise _map_integrity_error(exc, trip_no=trip.trip_no, source_reference_key=body.source_reference_key) from exc
+
+    return _json_response(201, resource_dict, headers)
+
+
+@router.post("/internal/v1/trips/excel/ingest", status_code=201)
+async def ingest_excel_trip(
+    body: ExcelIngestRequest,
+    session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(excel_service_auth_dependency),
+) -> Any:
+    """Ingest a structured Excel row as a pending-review trip."""
+    request_body = body.model_dump(exclude_none=True)
+    request_hash = _merged_payload_hash(request_body)
+
+    replay = await _maybe_replay_source_reference(
+        session,
+        source_reference_key=body.source_reference_key,
+        request_hash=request_hash,
     )
-    enrichment = TripTripEnrichment(
-        id=_generate_id(),
-        trip_id=trip_id,
-        enrichment_status=EnrichmentStatus.PENDING,
-        route_status=RouteStatus.PENDING,
-        data_quality_flag=data_quality,
-        enrichment_attempt_count=0,
+    if replay is not None:
+        return replay
+
+    await ensure_trip_references_valid(
+        driver_id=body.driver_id,
+        vehicle_id=body.vehicle_id,
+        trailer_id=body.trailer_id,
+    )
+    context = await fetch_trip_context(body.route_pair_id)
+    now = utc_now()
+    trip_id = _generate_id()
+    trip = TripTrip(
+        id=trip_id,
+        trip_no=body.trip_no,
+        source_type=SourceType.EXCEL_IMPORT,
+        source_reference_key=body.source_reference_key,
+        source_payload_hash=request_hash,
+        review_reason_code=ReviewReasonCode.EXCEL_IMPORT,
+        driver_id=body.driver_id,
+        vehicle_id=body.vehicle_id,
+        trailer_id=body.trailer_id,
+        trip_datetime_utc=local_datetime_to_utc(body.trip_start_local, body.trip_timezone),
+        trip_timezone=body.trip_timezone,
+        tare_weight_kg=body.tare_weight_kg,
+        gross_weight_kg=body.gross_weight_kg,
+        net_weight_kg=body.net_weight_kg,
+        is_empty_return=False,
+        status=TripStatus.PENDING_REVIEW,
+        version=1,
+        created_by_actor_type=ActorType.SERVICE,
+        created_by_actor_id=auth.service_name or auth.actor_id,
         created_at_utc=now,
         updated_at_utc=now,
     )
-    session.add(enrichment)
-
-    # Timeline
-    timeline = TripTripTimeline(
-        id=_generate_id(),
-        trip_id=trip_id,
-        event_type="TRIP_CREATED",
-        actor_type=ActorType.SYSTEM,
-        actor_id="slip-processing-service",
-        note=f"Trip ingested from slip {body.source_slip_no}",
-        created_at_utc=now,
+    apply_trip_context(trip, context, reverse=False)
+    session.add(trip)
+    session.add(
+        TripTripEvidence(
+            id=_generate_id(),
+            trip_id=trip_id,
+            evidence_source=EvidenceSource.EXCEL_IMPORT,
+            evidence_kind=EvidenceKind.IMPORT_ROW,
+            row_number=body.row_number,
+            raw_payload_json=json.dumps(request_body, default=str),
+            created_at_utc=now,
+        )
     )
-    session.add(timeline)
-
-    # Outbox: trip.created.v1
-    outbox = _create_outbox_event(
-        trip,
-        "trip.created.v1",
-        {
-            "trip_id": trip_id,
-            "trip_no": trip.trip_no,
-            "source_type": trip.source_type,
-            "driver_id": trip.driver_id,
-            "vehicle_id": trip.vehicle_id,
-            "trailer_id": trip.trailer_id,
-            "route_id": trip.route_id,
-            "trip_datetime_utc": str(trip.trip_datetime_utc),
-            "status": trip.status,
-            "enrichment_status": enrichment.enrichment_status,
-        },
+    session.add(
+        TripTripEnrichment(
+            id=_generate_id(),
+            trip_id=trip_id,
+            enrichment_status=EnrichmentStatus.READY,
+            route_status=RouteStatus.READY,
+            data_quality_flag=DataQualityFlag.HIGH,
+            enrichment_attempt_count=0,
+            created_at_utc=now,
+            updated_at_utc=now,
+        )
     )
-    session.add(outbox)
+    session.add(
+        TripTripTimeline(
+            id=_generate_id(),
+            trip_id=trip_id,
+            event_type="TRIP_CREATED",
+            actor_type=ActorType.SERVICE,
+            actor_id=auth.service_name or auth.actor_id,
+            note="Excel row ingested for review.",
+            payload_json=json.dumps({"source_reference_key": body.source_reference_key, "row_number": body.row_number}),
+            created_at_utc=now,
+        )
+    )
+    session.add(_create_outbox_event(trip, "trip.created.v1", _event_payload(trip)))
 
-    await session.commit()
+    try:
+        await session.flush()
+        trip = await _get_trip_or_404(session, trip_id)
+        resource = trip_to_resource(trip)
+        resource_dict = resource.model_dump(mode="json")
+        headers = _response_headers_for_trip(trip)
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise _map_integrity_error(
+            exc,
+            trip_no=body.trip_no,
+            source_reference_key=body.source_reference_key,
+        ) from exc
 
-    # Reload with relationships
-    trip = await _get_trip_or_404(session, trip_id)
-    resource = _trip_to_resource(trip)
-
-    resp = JSONResponse(status_code=201, content=resource.model_dump(mode="json"))
-    resp.headers["ETag"] = make_etag(trip.id, trip.version)
-    return resp
+    return _json_response(201, resource_dict, headers)
 
 
-# ---------------------------------------------------------------------------
-# V8 Section 10.2 — Create Manual Trip
-# ---------------------------------------------------------------------------
+@router.get("/internal/v1/trips/excel/export-feed", response_model=TripListResponse)
+async def excel_export_feed(
+    session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(excel_service_auth_dependency),
+    status: TripStatus | None = Query(None),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+    timezone: str = Query("Europe/Istanbul"),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=100),
+) -> TripListResponse:
+    """Return structured trip rows for the separate Excel service."""
+    del auth
+    pagination = parse_pagination(page, per_page)
+    stmt = (
+        select(TripTrip)
+        .options(selectinload(TripTrip.enrichment), selectinload(TripTrip.evidence))
+        .where(TripTrip.status != TripStatus.SOFT_DELETED)
+    )
+    if status is not None:
+        stmt = stmt.where(TripTrip.status == status)
+    if date_from or date_to:
+        utc_from, utc_to = date_range_to_utc(date_from, date_to, timezone)
+        if utc_from is not None:
+            stmt = stmt.where(TripTrip.trip_datetime_utc >= utc_from)
+        if utc_to is not None:
+            stmt = stmt.where(TripTrip.trip_datetime_utc < utc_to)
+
+    total_items = (await session.execute(select(func.count()).select_from(stmt.subquery()))).scalar() or 0
+    trips = (
+        await session.execute(
+            stmt.order_by(TripTrip.trip_datetime_utc.desc(), TripTrip.id.desc())
+            .offset(pagination.offset)
+            .limit(pagination.per_page)
+        )
+    ).scalars().all()
+    return TripListResponse(
+        items=[trip_to_resource(trip) for trip in trips],
+        meta=make_pagination_meta(
+            pagination.page,
+            pagination.per_page,
+            total_items,
+            sort="trip_datetime_utc_desc,id_desc",
+        ),
+    )
 
 
 @router.post("/api/v1/trips", status_code=201)
 async def create_manual_trip(
     body: ManualCreateRequest,
-    request: Request,
     session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(user_auth_dependency),
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
-    x_actor_type: str = Header(..., alias="X-Actor-Type"),
-    x_actor_id: str = Header(..., alias="X-Actor-Id"),
 ) -> Any:
-    """V8 Section 10.2 — Admin manual trip creation (directly COMPLETED)."""
+    """Create a manual trip using route-pair context instead of raw route ids."""
+    auth = _require_admin(auth)
     request_body = body.model_dump(exclude_none=True)
-    request_hash = _canonicalize_body(request_body)
-    endpoint_fp = f"create_trip:{x_actor_id}"
-
-    # Idempotency check
+    request_hash = _merged_payload_hash(request_body)
+    endpoint_fp = f"create_trip:{auth.actor_id}"
     replay = await _check_idempotency_key(session, idempotency_key, endpoint_fp, request_hash)
     if replay is not None:
         return replay
 
-    # Check trip_no uniqueness
-    existing = await session.execute(select(TripTrip).where(TripTrip.trip_no == body.trip_no))
-    if existing.scalar_one_or_none() is not None:
-        raise trip_no_conflict(body.trip_no)
-
-    now = _now_utc()
+    await ensure_trip_references_valid(
+        driver_id=body.driver_id,
+        vehicle_id=body.vehicle_id,
+        trailer_id=body.trailer_id,
+    )
+    context = await fetch_trip_context(body.route_pair_id)
+    trip_start_utc = local_datetime_to_utc(body.trip_start_local, body.trip_timezone)
+    status, review_reason = _classify_manual_status(auth, trip_start_utc)
+    now = utc_now()
     trip_id = _generate_id()
-    trip_datetime_utc = _local_to_utc(body.trip_datetime_local, body.trip_timezone)
-
     trip = TripTrip(
         id=trip_id,
         trip_no=body.trip_no,
         source_type=SourceType.ADMIN_MANUAL,
+        review_reason_code=review_reason,
         driver_id=body.driver_id,
         vehicle_id=body.vehicle_id,
         trailer_id=body.trailer_id,
-        route_id=body.route_id,
-        trip_datetime_utc=trip_datetime_utc,
+        trip_datetime_utc=trip_start_utc,
         trip_timezone=body.trip_timezone,
         tare_weight_kg=body.tare_weight_kg,
         gross_weight_kg=body.gross_weight_kg,
         net_weight_kg=body.net_weight_kg,
-        is_empty_return=False,  # Server-enforced
-        status=TripStatus.COMPLETED,
+        is_empty_return=False,
+        status=status,
         version=1,
-        created_by_actor_type=x_actor_type,
-        created_by_actor_id=x_actor_id,
+        created_by_actor_type=_coerce_actor_type(auth.role),
+        created_by_actor_id=auth.actor_id,
         created_at_utc=now,
         updated_at_utc=now,
+    )
+    apply_trip_context(trip, context, reverse=False)
+    await assert_no_trip_overlap(
+        session,
+        driver_id=trip.driver_id,
+        vehicle_id=trip.vehicle_id,
+        trailer_id=trip.trailer_id,
+        trip_start_utc=trip.trip_datetime_utc,
+        planned_end_utc=trip.planned_end_utc or trip.trip_datetime_utc,
     )
     session.add(trip)
-
-    # Enrichment row: route READY (provided)
-    enrichment = TripTripEnrichment(
-        id=_generate_id(),
-        trip_id=trip_id,
-        enrichment_status=EnrichmentStatus.PENDING,
-        route_status=RouteStatus.READY,
-        data_quality_flag=DataQualityFlag.HIGH,
-        enrichment_attempt_count=0,
-        created_at_utc=now,
-        updated_at_utc=now,
-    )
-    session.add(enrichment)
-
-    # Optional manual evidence
-    if body.note:
-        evidence = TripTripEvidence(
+    session.add(
+        TripTripEvidence(
             id=_generate_id(),
             trip_id=trip_id,
             evidence_source=EvidenceSource.ADMIN_MANUAL,
@@ -485,187 +925,135 @@ async def create_manual_trip(
             raw_payload_json=json.dumps(request_body, default=str),
             created_at_utc=now,
         )
-        session.add(evidence)
-
-    # Timeline
-    timeline = TripTripTimeline(
-        id=_generate_id(),
-        trip_id=trip_id,
-        event_type="TRIP_CREATED",
-        actor_type=x_actor_type,
-        actor_id=x_actor_id,
-        note=body.note or "Manual trip created by admin",
-        created_at_utc=now,
     )
-    session.add(timeline)
-
-    # Outbox: trip.created.v1 + trip.completed.v1
-    for event_name in ("trip.created.v1", "trip.completed.v1"):
-        outbox = _create_outbox_event(
-            trip,
-            event_name,
-            {
-                "trip_id": trip_id,
-                "trip_no": trip.trip_no,
-                "source_type": trip.source_type,
-                "driver_id": trip.driver_id,
-                "vehicle_id": trip.vehicle_id,
-                "trailer_id": trip.trailer_id,
-                "route_id": trip.route_id,
-                "trip_datetime_utc": str(trip.trip_datetime_utc),
-                "status": trip.status,
-                "enrichment_status": enrichment.enrichment_status,
-                "tare_weight_kg": trip.tare_weight_kg,
-                "gross_weight_kg": trip.gross_weight_kg,
-                "net_weight_kg": trip.net_weight_kg,
-                "is_empty_return": trip.is_empty_return,
-                "route_status": enrichment.route_status,
-            },
+    session.add(
+        TripTripEnrichment(
+            id=_generate_id(),
+            trip_id=trip_id,
+            enrichment_status=EnrichmentStatus.READY,
+            route_status=RouteStatus.READY,
+            data_quality_flag=DataQualityFlag.HIGH,
+            enrichment_attempt_count=0,
+            created_at_utc=now,
+            updated_at_utc=now,
         )
-        session.add(outbox)
+    )
+    session.add(
+        TripTripTimeline(
+            id=_generate_id(),
+            trip_id=trip_id,
+            event_type="TRIP_CREATED",
+            actor_type=_coerce_actor_type(auth.role),
+            actor_id=auth.actor_id,
+            note=body.note or "Manual trip created.",
+            payload_json=json.dumps({"route_pair_id": body.route_pair_id}),
+            created_at_utc=now,
+        )
+    )
+    session.add(_create_outbox_event(trip, "trip.created.v1", _event_payload(trip)))
+    if trip.status == TripStatus.COMPLETED:
+        session.add(_create_outbox_event(trip, "trip.completed.v1", _event_payload(trip)))
 
-    await session.commit()
-
-    trip = await _get_trip_or_404(session, trip_id)
-    resource = _trip_to_resource(trip)
-    resource_dict = resource.model_dump(mode="json")
-
-    # Save idempotency record
-    if idempotency_key:
-        await _save_idempotency_record(session, idempotency_key, endpoint_fp, request_hash, 201, resource_dict)
+    try:
+        await session.flush()
+        trip = await _get_trip_or_404(session, trip_id)
+        resource = trip_to_resource(trip)
+        resource_dict = resource.model_dump(mode="json")
+        headers = _response_headers_for_trip(trip)
+        if idempotency_key:
+            await _save_idempotency_record(
+                session,
+                idempotency_key=idempotency_key,
+                endpoint_fingerprint=endpoint_fp,
+                request_hash=request_hash,
+                response_status=201,
+                response_body=resource_dict,
+                response_headers=headers,
+            )
         await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise _map_integrity_error(exc, trip_no=body.trip_no) from exc
 
-    resp = JSONResponse(status_code=201, content=resource_dict)
-    resp.headers["ETag"] = make_etag(trip.id, trip.version)
-    return resp
-
-
-# ---------------------------------------------------------------------------
-# V8 Section 10.3 — List Trips (Admin)
-# ---------------------------------------------------------------------------
+    return _json_response(201, resource_dict, headers)
 
 
-@router.get("/api/v1/trips")
+@router.get("/api/v1/trips", response_model=TripListResponse)
 async def list_trips(
-    request: Request,
     session: AsyncSession = Depends(get_session),
-    page: int = Query(1, ge=1),
-    per_page: int = Query(50, ge=1, le=100),
-    status: str | None = Query(None),
-    source_type: str | None = Query(None),
-    driver_id: str | None = Query(None),
-    vehicle_id: str | None = Query(None),
-    route_id: str | None = Query(None),
+    auth: AuthContext = Depends(user_auth_dependency),
+    status: TripStatus | None = Query(None),
+    source_type: SourceType | None = Query(None),
+    driver_id: str | None = Query(None, min_length=1),
+    include_empty_returns: bool = Query(True),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
     timezone: str = Query("Europe/Istanbul"),
-    trip_no: str | None = Query(None),
-    include_soft_deleted: bool = Query(False),
-) -> dict[str, Any]:
-    """V8 Section 10.3 — Admin list trips with filters."""
-    # V8: status=SOFT_DELETED only valid with include_soft_deleted=true
-    if status == TripStatus.SOFT_DELETED and not include_soft_deleted:
-        raise invalid_filter_combination("status=SOFT_DELETED requires include_soft_deleted=true")
-
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=100),
+) -> TripListResponse:
+    """Return the admin trip list for Tauri screens."""
+    del auth
     pagination = parse_pagination(page, per_page)
-
-    # Build query
-    base_q = select(TripTrip).options(selectinload(TripTrip.enrichment), selectinload(TripTrip.evidence))
-
-    # Default: exclude soft-deleted
-    if not include_soft_deleted:
-        base_q = base_q.where(TripTrip.status != TripStatus.SOFT_DELETED)
-
-    if status:
-        base_q = base_q.where(TripTrip.status == status)
-    if source_type:
-        base_q = base_q.where(TripTrip.source_type == source_type)
-    if driver_id:
-        base_q = base_q.where(TripTrip.driver_id == driver_id)
-    if vehicle_id:
-        base_q = base_q.where(TripTrip.vehicle_id == vehicle_id)
-    if route_id:
-        base_q = base_q.where(TripTrip.route_id == route_id)
-    if trip_no:
-        base_q = base_q.where(TripTrip.trip_no == trip_no)
-
-    # Timezone date filter V8 Section 8.4
+    stmt = select(TripTrip).options(selectinload(TripTrip.enrichment), selectinload(TripTrip.evidence))
+    if status is not None:
+        stmt = stmt.where(TripTrip.status == status)
+    if source_type is not None:
+        stmt = stmt.where(TripTrip.source_type == source_type)
+    if driver_id is not None:
+        stmt = stmt.where(TripTrip.driver_id == driver_id)
+    if not include_empty_returns:
+        stmt = stmt.where(TripTrip.is_empty_return.is_(False))
     if date_from or date_to:
         utc_from, utc_to = date_range_to_utc(date_from, date_to, timezone)
-        if utc_from:
-            base_q = base_q.where(TripTrip.trip_datetime_utc >= utc_from)
-        if utc_to:
-            base_q = base_q.where(TripTrip.trip_datetime_utc < utc_to)
+        if utc_from is not None:
+            stmt = stmt.where(TripTrip.trip_datetime_utc >= utc_from)
+        if utc_to is not None:
+            stmt = stmt.where(TripTrip.trip_datetime_utc < utc_to)
 
-    # Count total
-    count_q = select(func.count()).select_from(base_q.subquery())
-    total_items = (await session.execute(count_q)).scalar() or 0
+    total_items = (await session.execute(select(func.count()).select_from(stmt.subquery()))).scalar() or 0
+    trips = (
+        await session.execute(
+            stmt.order_by(TripTrip.trip_datetime_utc.desc(), TripTrip.id.desc())
+            .offset(pagination.offset)
+            .limit(pagination.per_page)
+        )
+    ).scalars().all()
 
-    # Sort: trip_datetime_utc DESC, id DESC (V8 Section 8.3)
-    items_q = (
-        base_q.order_by(TripTrip.trip_datetime_utc.desc(), TripTrip.id.desc())
-        .offset(pagination.offset)
-        .limit(pagination.per_page)
+    return TripListResponse(
+        items=[trip_to_resource(trip) for trip in trips],
+        meta=make_pagination_meta(
+            pagination.page,
+            pagination.per_page,
+            total_items,
+            sort="trip_datetime_utc_desc,id_desc",
+        ),
     )
-    results = await session.execute(items_q)
-    trips = results.scalars().all()
-
-    return {
-        "items": [_trip_to_resource(t).model_dump(mode="json") for t in trips],
-        "meta": make_pagination_meta(pagination.page, pagination.per_page, total_items),
-    }
-
-
-# ---------------------------------------------------------------------------
-# V8 Section 10.4 — Get Trip Detail
-# ---------------------------------------------------------------------------
 
 
 @router.get("/api/v1/trips/{trip_id}")
-async def get_trip_detail(
+async def get_trip(
     trip_id: str,
-    request: Request,
     session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(user_auth_dependency),
 ) -> Any:
-    """V8 Section 10.4 — Returns trip including soft-deleted."""
+    """Return a single trip resource with ETag."""
+    del auth
     trip = await _get_trip_or_404(session, trip_id)
-    resource = _trip_to_resource(trip)
-    resp = JSONResponse(status_code=200, content=resource.model_dump(mode="json"))
-    resp.headers["ETag"] = make_etag(trip.id, trip.version)
-    return resp
+    resource = trip_to_resource(trip)
+    return _json_response(200, resource.model_dump(mode="json"), _response_headers_for_trip(trip))
 
 
-# ---------------------------------------------------------------------------
-# V8 Section 10.5 — Get Trip Timeline
-# ---------------------------------------------------------------------------
-
-
-@router.get("/api/v1/trips/{trip_id}/timeline")
+@router.get("/api/v1/trips/{trip_id}/timeline", response_model=TimelineResponse)
 async def get_trip_timeline(
     trip_id: str,
-    request: Request,
     session: AsyncSession = Depends(get_session),
-) -> dict[str, Any]:
-    """V8 Section 10.5 — All timeline items, sorted created_at_utc ASC (chronological)."""
-    # Verify trip exists
-    await _get_trip_or_404(session, trip_id)
-
-    stmt = (
-        select(TripTripTimeline)
-        .where(TripTripTimeline.trip_id == trip_id)
-        .order_by(TripTripTimeline.created_at_utc.asc())  # V8: chronological ASC
-    )
-    results = await session.execute(stmt)
-    items = results.scalars().all()
-
-    return {
-        "items": [TimelineItem.model_validate(i).model_dump(mode="json") for i in items],
-    }
-
-
-# ---------------------------------------------------------------------------
-# V8 Section 10.6 — Edit Trip
-# ---------------------------------------------------------------------------
+    auth: AuthContext = Depends(user_auth_dependency),
+) -> TimelineResponse:
+    """Return a trip timeline ordered oldest to newest."""
+    del auth
+    trip = await _get_trip_or_404(session, trip_id)
+    return _timeline_item_rows(trip)
 
 
 @router.patch("/api/v1/trips/{trip_id}")
@@ -674,137 +1062,123 @@ async def edit_trip(
     body: EditTripRequest,
     request: Request,
     session: AsyncSession = Depends(get_session),
-    x_actor_type: str = Header(..., alias="X-Actor-Type"),
-    x_actor_id: str = Header(..., alias="X-Actor-Id"),
+    auth: AuthContext = Depends(user_auth_dependency),
 ) -> Any:
-    """V8 Section 10.6 — Edit trip with optimistic locking."""
-    # BUG-01: Check header ONCE, store result; avoids redundant parse and
-    # ensures 428 fires before any DB read when header is absent.
-    parsed = require_if_match(request)
+    """Edit trip fields under the source-aware product contract."""
+    auth = _require_admin(auth)
+    current_version = require_trip_if_match(request, trip_id)
     trip = await _get_trip_or_404(session, trip_id)
-
-    if parsed[1] != trip.version:
+    if current_version != trip.version:
         raise trip_version_mismatch()
-
-    # V8: Allowed only on COMPLETED and PENDING_REVIEW
-    if trip.status not in (TripStatus.COMPLETED, TripStatus.PENDING_REVIEW):
-        raise invalid_status_transition("Cannot edit a trip with this status.")
-
-    now = _now_utc()
-    changed_fields: list[str] = []
-    route_sensitive_changed = False
+    if trip.status not in (TripStatus.PENDING_REVIEW, TripStatus.COMPLETED):
+        raise invalid_status_transition("Only PENDING_REVIEW or COMPLETED trips can be edited.")
 
     update_data = body.model_dump(exclude_unset=True)
+    _maybe_require_change_reason(auth, body, trip, update_data.get("driver_id"))
 
-    # BUG-02: Handle trip_datetime_local + trip_timezone as a unit BEFORE the
-    # generic field loop so they are not double-processed.
-    if "trip_datetime_local" in update_data or "trip_timezone" in update_data:
-        tz = update_data.get("trip_timezone", trip.trip_timezone)
-        if "trip_datetime_local" in update_data:
-            new_utc = _local_to_utc(update_data["trip_datetime_local"], tz)
-            if new_utc != trip.trip_datetime_utc:
-                trip.trip_datetime_utc = new_utc
+    candidate_driver_id = update_data.get("driver_id", trip.driver_id)
+    candidate_vehicle_id = update_data.get("vehicle_id", trip.vehicle_id)
+    candidate_trailer_id = update_data.get("trailer_id", trip.trailer_id)
+    if {"driver_id", "vehicle_id", "trailer_id"} & update_data.keys():
+        await ensure_trip_references_valid(
+            driver_id=candidate_driver_id,
+            vehicle_id=candidate_vehicle_id,
+            trailer_id=candidate_trailer_id,
+        )
+
+    candidate_tare = update_data.get("tare_weight_kg", trip.tare_weight_kg)
+    candidate_gross = update_data.get("gross_weight_kg", trip.gross_weight_kg)
+    candidate_net = update_data.get("net_weight_kg", trip.net_weight_kg)
+    if {"tare_weight_kg", "gross_weight_kg", "net_weight_kg"} & update_data.keys():
+        _validate_trip_weights(candidate_tare, candidate_gross, candidate_net)
+
+    changed_fields: list[str] = []
+    now = utc_now()
+
+    if "trip_start_local" in update_data or "trip_timezone" in update_data:
+        timezone_value = update_data.get("trip_timezone", trip.trip_timezone)
+        if "trip_start_local" in update_data:
+            new_trip_start_utc = local_datetime_to_utc(update_data["trip_start_local"], timezone_value)
+            if new_trip_start_utc != trip.trip_datetime_utc:
+                trip.trip_datetime_utc = new_trip_start_utc
                 changed_fields.append("trip_datetime_utc")
-                route_sensitive_changed = True
         if "trip_timezone" in update_data and update_data["trip_timezone"] != trip.trip_timezone:
             trip.trip_timezone = update_data["trip_timezone"]
             changed_fields.append("trip_timezone")
-            route_sensitive_changed = True
 
-    # BUG-03: Fields that should reset enrichment on change.
-    _enrichment_sensitive = {
-        "driver_id",
-        "vehicle_id",
-        "trailer_id",
-        "tare_weight_kg",
-        "gross_weight_kg",
-        "net_weight_kg",
-    }
+    for field_name in ("driver_id", "vehicle_id", "trailer_id", "tare_weight_kg", "gross_weight_kg", "net_weight_kg"):
+        if field_name in update_data and getattr(trip, field_name) != update_data[field_name]:
+            setattr(trip, field_name, update_data[field_name])
+            changed_fields.append(field_name)
 
-    for field_name, value in update_data.items():
-        if field_name in ("trip_datetime_local", "trip_timezone"):
-            continue  # already handled above
-        elif field_name == "route_id":
-            if value != trip.route_id:
-                trip.route_id = value
-                changed_fields.append("route_id")
-                route_sensitive_changed = True
-        elif hasattr(trip, field_name):
-            old_val = getattr(trip, field_name)
-            if old_val != value:
-                setattr(trip, field_name, value)
-                changed_fields.append(field_name)
-                if field_name in _enrichment_sensitive:
-                    route_sensitive_changed = True
+    if "route_pair_id" in update_data and update_data["route_pair_id"] != trip.route_pair_id:
+        context = await fetch_trip_context(update_data["route_pair_id"])
+        apply_trip_context(trip, context, reverse=trip.is_empty_return)
+        changed_fields.append("route_pair_id")
+    elif "trip_start_local" in update_data or "trip_timezone" in update_data:
+        if trip.route_pair_id is not None:
+            context = await fetch_trip_context(trip.route_pair_id)
+            apply_trip_context(trip, context, reverse=trip.is_empty_return)
+
+    if update_data.get("note") is not None:
+        changed_fields.append("note")
 
     if not changed_fields:
-        resource = _trip_to_resource(trip)
-        resp = JSONResponse(status_code=200, content=resource.model_dump(mode="json"))
-        resp.headers["ETag"] = make_etag(trip.id, trip.version)
-        return resp
+        resource = trip_to_resource(trip)
+        return _json_response(200, resource.model_dump(mode="json"), _response_headers_for_trip(trip))
 
-    # V8 Section 10.6: Route-sensitive field changes → reset enrichment
-    if route_sensitive_changed and trip.enrichment:
-        enrichment = trip.enrichment
-        enrichment.route_status = RouteStatus.PENDING  # BUG-03 fix: always reset
-        enrichment.enrichment_status = EnrichmentStatus.PENDING
-        enrichment.claim_token = None
-        enrichment.claim_expires_at_utc = None
-        enrichment.claimed_by_worker = None
-        enrichment.next_retry_at_utc = None
-        enrichment.updated_at_utc = now
-        session.add(enrichment)
+    if trip.status == TripStatus.COMPLETED or trip.source_type in (
+        SourceType.ADMIN_MANUAL,
+        SourceType.EMPTY_RETURN_ADMIN,
+        SourceType.EXCEL_IMPORT,
+    ):
+        _ensure_complete_for_completion(trip)
+
+    overlap_fields = {"driver_id", "vehicle_id", "trailer_id", "trip_datetime_utc", "route_pair_id"}
+    if overlap_fields & set(changed_fields) and trip.planned_end_utc is not None:
+        await assert_no_trip_overlap(
+            session,
+            driver_id=trip.driver_id,
+            vehicle_id=trip.vehicle_id,
+            trailer_id=trip.trailer_id,
+            trip_start_utc=trip.trip_datetime_utc,
+            planned_end_utc=trip.planned_end_utc,
+            exclude_trip_id=trip.id,
+        )
+
+    if trip.enrichment is not None:
+        _set_enrichment_state(
+            trip,
+            trip.enrichment,
+            source_type=trip.source_type,
+            route_ready=trip.route_id is not None and trip.planned_end_utc is not None,
+        )
 
     trip.version += 1
     trip.updated_at_utc = now
-
-    # Timeline
-    timeline = TripTripTimeline(
-        id=_generate_id(),
-        trip_id=trip_id,
-        event_type="TRIP_EDITED",
-        actor_type=x_actor_type,
-        actor_id=x_actor_id,
-        note=f"Fields changed: {', '.join(changed_fields)}",
-        payload_json=json.dumps({"changed_fields": changed_fields}),
-        created_at_utc=now,
+    session.add(
+        TripTripTimeline(
+            id=_generate_id(),
+            trip_id=trip.id,
+            event_type="TRIP_EDITED",
+            actor_type=_coerce_actor_type(auth.role),
+            actor_id=auth.actor_id,
+            note=body.note or f"Fields changed: {', '.join(changed_fields)}",
+            payload_json=json.dumps({"changed_fields": changed_fields, "change_reason": body.change_reason}),
+            created_at_utc=now,
+        )
     )
-    session.add(timeline)
+    session.add(_create_outbox_event(trip, "trip.edited.v1", _event_payload(trip)))
 
-    # Outbox: trip.edited.v1
-    outbox = _create_outbox_event(
-        trip,
-        "trip.edited.v1",
-        {
-            "trip_id": trip.id,
-            "trip_no": trip.trip_no,
-            "status": trip.status,
-            "edited_by_actor_id": x_actor_id,
-            "edited_at_utc": str(now),
-            "changed_fields": changed_fields,
-            "driver_id": trip.driver_id,
-            "vehicle_id": trip.vehicle_id,
-            "trailer_id": trip.trailer_id,
-            "route_id": trip.route_id,
-            "trip_datetime_utc": str(trip.trip_datetime_utc),
-            "tare_weight_kg": trip.tare_weight_kg,
-            "gross_weight_kg": trip.gross_weight_kg,
-            "net_weight_kg": trip.net_weight_kg,
-        },
-    )
-    session.add(outbox)
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise _map_integrity_error(exc, trip_no=trip.trip_no, source_reference_key=trip.source_reference_key) from exc
 
-    await session.commit()
-    trip = await _get_trip_or_404(session, trip_id)
-    resource = _trip_to_resource(trip)
-    resp = JSONResponse(status_code=200, content=resource.model_dump(mode="json"))
-    resp.headers["ETag"] = make_etag(trip.id, trip.version)
-    return resp
-
-
-# ---------------------------------------------------------------------------
-# V8 Section 10.7 — Approve Pending Trip
-# ---------------------------------------------------------------------------
+    trip = await _get_trip_or_404(session, trip.id)
+    resource = trip_to_resource(trip)
+    return _json_response(200, resource.model_dump(mode="json"), _response_headers_for_trip(trip))
 
 
 @router.post("/api/v1/trips/{trip_id}/approve")
@@ -813,75 +1187,99 @@ async def approve_trip(
     body: ApproveRequest,
     request: Request,
     session: AsyncSession = Depends(get_session),
-    x_actor_type: str = Header(..., alias="X-Actor-Type"),
-    x_actor_id: str = Header(..., alias="X-Actor-Id"),
+    auth: AuthContext = Depends(user_auth_dependency),
 ) -> Any:
-    """V8 Section 10.7 — Approve PENDING_REVIEW → COMPLETED."""
-    # BUG-11: Check If-Match header before DB load so 428 fires without a
-    # wasted query when the header is missing.
-    parsed = require_if_match(request)
+    """Approve a pending-review trip once it is complete and conflict free."""
+    auth = _require_admin(auth)
+    current_version = require_trip_if_match(request, trip_id)
     trip = await _get_trip_or_404(session, trip_id)
-    if parsed[1] != trip.version:
+    if current_version != trip.version:
         raise trip_version_mismatch()
-
     if trip.status != TripStatus.PENDING_REVIEW:
         raise invalid_status_transition("Only PENDING_REVIEW trips can be approved.")
-
-    if not trip.enrichment or trip.enrichment.route_status != RouteStatus.READY:
+    _ensure_complete_for_completion(trip)
+    if trip.route_id is None or trip.planned_end_utc is None:
         raise route_required_for_completion()
 
-    now = _now_utc()
+    await assert_no_trip_overlap(
+        session,
+        driver_id=trip.driver_id,
+        vehicle_id=trip.vehicle_id,
+        trailer_id=trip.trailer_id,
+        trip_start_utc=trip.trip_datetime_utc,
+        planned_end_utc=trip.planned_end_utc,
+        exclude_trip_id=trip.id,
+    )
+
+    now = utc_now()
     trip.status = TripStatus.COMPLETED
     trip.version += 1
     trip.updated_at_utc = now
+    if trip.enrichment is not None:
+        _set_enrichment_state(
+            trip,
+            trip.enrichment,
+            source_type=trip.source_type,
+            route_ready=True,
+        )
 
-    # Timeline
-    timeline = TripTripTimeline(
-        id=_generate_id(),
-        trip_id=trip_id,
-        event_type="TRIP_APPROVED",
-        actor_type=x_actor_type,
-        actor_id=x_actor_id,
-        note=body.note or "Trip approved",
-        created_at_utc=now,
+    session.add(
+        TripTripTimeline(
+            id=_generate_id(),
+            trip_id=trip.id,
+            event_type="TRIP_APPROVED",
+            actor_type=_coerce_actor_type(auth.role),
+            actor_id=auth.actor_id,
+            note=body.note or "Trip approved.",
+            created_at_utc=now,
+        )
     )
-    session.add(timeline)
-
-    # Outbox: trip.completed.v1
-    outbox = _create_outbox_event(
-        trip,
-        "trip.completed.v1",
-        {
-            "trip_id": trip.id,
-            "trip_no": trip.trip_no,
-            "source_type": trip.source_type,
-            "status": trip.status,
-            "driver_id": trip.driver_id,
-            "vehicle_id": trip.vehicle_id,
-            "trailer_id": trip.trailer_id,
-            "route_id": trip.route_id,
-            "trip_datetime_utc": str(trip.trip_datetime_utc),
-            "tare_weight_kg": trip.tare_weight_kg,
-            "gross_weight_kg": trip.gross_weight_kg,
-            "net_weight_kg": trip.net_weight_kg,
-            "is_empty_return": trip.is_empty_return,
-            "route_status": trip.enrichment.route_status,
-            "enrichment_status": trip.enrichment.enrichment_status,
-        },
-    )
-    session.add(outbox)
-
+    session.add(_create_outbox_event(trip, "trip.completed.v1", _event_payload(trip)))
     await session.commit()
+
+    trip = await _get_trip_or_404(session, trip.id)
+    resource = trip_to_resource(trip)
+    return _json_response(200, resource.model_dump(mode="json"), _response_headers_for_trip(trip))
+
+
+@router.post("/api/v1/trips/{trip_id}/reject")
+async def reject_trip(
+    trip_id: str,
+    body: RejectRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(user_auth_dependency),
+) -> Any:
+    """Reject a pending-review trip."""
+    auth = _require_admin(auth)
+    current_version = require_trip_if_match(request, trip_id)
     trip = await _get_trip_or_404(session, trip_id)
-    resource = _trip_to_resource(trip)
-    resp = JSONResponse(status_code=200, content=resource.model_dump(mode="json"))
-    resp.headers["ETag"] = make_etag(trip.id, trip.version)
-    return resp
+    if current_version != trip.version:
+        raise trip_version_mismatch()
+    if trip.status != TripStatus.PENDING_REVIEW:
+        raise invalid_status_transition("Only PENDING_REVIEW trips can be rejected.")
 
+    now = utc_now()
+    trip.status = TripStatus.REJECTED
+    trip.version += 1
+    trip.updated_at_utc = now
+    session.add(
+        TripTripTimeline(
+            id=_generate_id(),
+            trip_id=trip.id,
+            event_type="TRIP_REJECTED",
+            actor_type=_coerce_actor_type(auth.role),
+            actor_id=auth.actor_id,
+            note=body.reason or "Trip rejected.",
+            created_at_utc=now,
+        )
+    )
+    session.add(_create_outbox_event(trip, "trip.rejected.v1", _event_payload(trip)))
+    await session.commit()
 
-# ---------------------------------------------------------------------------
-# V8 Section 10.8 — Create Empty Return Trip
-# ---------------------------------------------------------------------------
+    trip = await _get_trip_or_404(session, trip.id)
+    resource = trip_to_resource(trip)
+    return _json_response(200, resource.model_dump(mode="json"), _response_headers_for_trip(trip))
 
 
 @router.post("/api/v1/trips/{base_trip_id}/empty-return", status_code=201)
@@ -890,138 +1288,133 @@ async def create_empty_return(
     body: EmptyReturnRequest,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(user_auth_dependency),
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
-    x_actor_type: str = Header(..., alias="X-Actor-Type"),
-    x_actor_id: str = Header(..., alias="X-Actor-Id"),
 ) -> Any:
-    """V8 Section 10.8 — Create derivative empty-return trip."""
-    base_trip = await _get_trip_or_404(session, base_trip_id)
-    parsed = require_if_match(request)
-    if parsed[1] != base_trip.version:
-        raise trip_version_mismatch()
-
-    # Validate base trip
-    if base_trip.status == TripStatus.SOFT_DELETED:
-        raise invalid_base_for_empty_return("Base trip is soft deleted.")
-    if base_trip.is_empty_return:
-        raise invalid_base_for_empty_return("Base trip is itself an empty-return trip.")
-
-    # Check existing empty return
-    existing = await session.execute(
-        select(TripTrip).where(TripTrip.base_trip_id == base_trip_id, TripTrip.is_empty_return.is_(True))
-    )
-    if existing.scalar_one_or_none() is not None:
-        raise empty_return_already_exists()
-
-    # Idempotency check
-    # BUG-12: Include base_trip_id in fingerprint so the same actor can create
-    # empty-returns for different base trips without collision.
+    """Create a reverse derived empty-return trip from a completed base trip."""
+    auth = _require_admin(auth)
+    current_version = require_trip_if_match(request, base_trip_id)
     request_body = body.model_dump(exclude_none=True)
-    request_hash = _canonicalize_body(request_body)
-    endpoint_fp = f"empty_return:{x_actor_id}:{base_trip_id}"
+    request_hash = _merged_payload_hash(request_body)
+    endpoint_fp = f"empty_return:{auth.actor_id}:{base_trip_id}"
     replay = await _check_idempotency_key(session, idempotency_key, endpoint_fp, request_hash)
     if replay is not None:
         return replay
 
-    now = _now_utc()
-    trip_id = _generate_id()
-    trip_datetime_utc = _local_to_utc(body.trip_datetime_local, body.trip_timezone)
+    base_trip = await _get_trip_or_404(session, base_trip_id)
+    if current_version != base_trip.version:
+        raise trip_version_mismatch()
+    if base_trip.status != TripStatus.COMPLETED:
+        raise invalid_base_for_empty_return("Base trip must be COMPLETED before an empty return can be created.")
+    if base_trip.is_empty_return:
+        raise invalid_base_for_empty_return("Base trip is itself an empty return.")
+    if base_trip.status in (TripStatus.SOFT_DELETED, TripStatus.REJECTED):
+        raise invalid_base_for_empty_return("Base trip is not active.")
+    if base_trip.route_pair_id is None:
+        raise invalid_base_for_empty_return("Base trip is missing route pair context.")
 
-    # V8: trip_no = {base_trip_no}B
-    empty_return_trip_no = f"{base_trip.trip_no}B"
-
-    trip = TripTrip(
-        id=trip_id,
-        trip_no=empty_return_trip_no,
-        source_type=SourceType.EMPTY_RETURN_ADMIN,
-        base_trip_id=base_trip_id,
+    await ensure_trip_references_valid(
         driver_id=body.driver_id,
         vehicle_id=body.vehicle_id,
         trailer_id=body.trailer_id,
-        route_id=body.route_id,
-        trip_datetime_utc=trip_datetime_utc,
+    )
+    context = await fetch_trip_context(base_trip.route_pair_id)
+    trip_start_utc = local_datetime_to_utc(body.trip_start_local, body.trip_timezone)
+    status, review_reason = _classify_manual_status(auth, trip_start_utc)
+    now = utc_now()
+    trip_id = _generate_id()
+    trip = TripTrip(
+        id=trip_id,
+        trip_no=f"{base_trip.trip_no}-B",
+        source_type=SourceType.EMPTY_RETURN_ADMIN,
+        review_reason_code=review_reason,
+        base_trip_id=base_trip.id,
+        driver_id=body.driver_id,
+        vehicle_id=body.vehicle_id,
+        trailer_id=body.trailer_id,
+        trip_datetime_utc=trip_start_utc,
         trip_timezone=body.trip_timezone,
         tare_weight_kg=body.tare_weight_kg,
         gross_weight_kg=body.gross_weight_kg,
         net_weight_kg=body.net_weight_kg,
         is_empty_return=True,
-        status=TripStatus.COMPLETED,
+        status=status,
         version=1,
-        created_by_actor_type=x_actor_type,
-        created_by_actor_id=x_actor_id,
+        created_by_actor_type=_coerce_actor_type(auth.role),
+        created_by_actor_id=auth.actor_id,
         created_at_utc=now,
         updated_at_utc=now,
+    )
+    apply_trip_context(trip, context, reverse=True)
+    await assert_no_trip_overlap(
+        session,
+        driver_id=trip.driver_id,
+        vehicle_id=trip.vehicle_id,
+        trailer_id=trip.trailer_id,
+        trip_start_utc=trip.trip_datetime_utc,
+        planned_end_utc=trip.planned_end_utc or trip.trip_datetime_utc,
     )
     session.add(trip)
-
-    # Enrichment: route READY
-    enrichment = TripTripEnrichment(
-        id=_generate_id(),
-        trip_id=trip_id,
-        enrichment_status=EnrichmentStatus.PENDING,
-        route_status=RouteStatus.READY,
-        data_quality_flag=DataQualityFlag.HIGH,
-        enrichment_attempt_count=0,
-        created_at_utc=now,
-        updated_at_utc=now,
-    )
-    session.add(enrichment)
-
-    # Timeline
-    timeline = TripTripTimeline(
-        id=_generate_id(),
-        trip_id=trip_id,
-        event_type="TRIP_CREATED",
-        actor_type=x_actor_type,
-        actor_id=x_actor_id,
-        note=body.note or f"Empty return for {base_trip.trip_no}",
-        created_at_utc=now,
-    )
-    session.add(timeline)
-
-    # Outbox
-    for event_name in ("trip.created.v1", "trip.completed.v1"):
-        outbox = _create_outbox_event(
-            trip,
-            event_name,
-            {
-                "trip_id": trip_id,
-                "trip_no": trip.trip_no,
-                "source_type": trip.source_type,
-                "driver_id": trip.driver_id,
-                "vehicle_id": trip.vehicle_id,
-                "trailer_id": trip.trailer_id,
-                "route_id": trip.route_id,
-                "trip_datetime_utc": str(trip.trip_datetime_utc),
-                "status": trip.status,
-                "enrichment_status": enrichment.enrichment_status,
-                "tare_weight_kg": trip.tare_weight_kg,
-                "gross_weight_kg": trip.gross_weight_kg,
-                "net_weight_kg": trip.net_weight_kg,
-                "is_empty_return": trip.is_empty_return,
-                "route_status": enrichment.route_status,
-            },
+    session.add(
+        TripTripEvidence(
+            id=_generate_id(),
+            trip_id=trip_id,
+            evidence_source=EvidenceSource.ADMIN_MANUAL,
+            evidence_kind=EvidenceKind.MANUAL_ENTRY,
+            raw_payload_json=json.dumps(request_body, default=str),
+            created_at_utc=now,
         )
-        session.add(outbox)
+    )
+    session.add(
+        TripTripEnrichment(
+            id=_generate_id(),
+            trip_id=trip_id,
+            enrichment_status=EnrichmentStatus.READY,
+            route_status=RouteStatus.READY,
+            data_quality_flag=DataQualityFlag.HIGH,
+            enrichment_attempt_count=0,
+            created_at_utc=now,
+            updated_at_utc=now,
+        )
+    )
+    session.add(
+        TripTripTimeline(
+            id=_generate_id(),
+            trip_id=trip_id,
+            event_type="TRIP_CREATED",
+            actor_type=_coerce_actor_type(auth.role),
+            actor_id=auth.actor_id,
+            note=body.note or f"Empty return created from {base_trip.trip_no}.",
+            payload_json=json.dumps({"base_trip_id": base_trip.id}),
+            created_at_utc=now,
+        )
+    )
+    session.add(_create_outbox_event(trip, "trip.created.v1", _event_payload(trip)))
+    if trip.status == TripStatus.COMPLETED:
+        session.add(_create_outbox_event(trip, "trip.completed.v1", _event_payload(trip)))
 
-    await session.commit()
-
-    trip = await _get_trip_or_404(session, trip_id)
-    resource = _trip_to_resource(trip)
-    resource_dict = resource.model_dump(mode="json")
-
-    if idempotency_key:
-        await _save_idempotency_record(session, idempotency_key, endpoint_fp, request_hash, 201, resource_dict)
+    try:
+        await session.flush()
+        trip = await _get_trip_or_404(session, trip_id)
+        resource = trip_to_resource(trip)
+        resource_dict = resource.model_dump(mode="json")
+        headers = _response_headers_for_trip(trip)
+        if idempotency_key:
+            await _save_idempotency_record(
+                session,
+                idempotency_key=idempotency_key,
+                endpoint_fingerprint=endpoint_fp,
+                request_hash=request_hash,
+                response_status=201,
+                response_body=resource_dict,
+                response_headers=headers,
+            )
         await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise _map_integrity_error(exc, trip_no=trip.trip_no) from exc
 
-    resp = JSONResponse(status_code=201, content=resource_dict)
-    resp.headers["ETag"] = make_etag(trip.id, trip.version)
-    return resp
-
-
-# ---------------------------------------------------------------------------
-# V8 Section 10.9 — Cancel Trip (Soft Delete)
-# ---------------------------------------------------------------------------
+    return _json_response(201, resource_dict, headers)
 
 
 @router.post("/api/v1/trips/{trip_id}/cancel")
@@ -1029,145 +1422,111 @@ async def cancel_trip(
     trip_id: str,
     request: Request,
     session: AsyncSession = Depends(get_session),
-    x_actor_type: str = Header(..., alias="X-Actor-Type"),
-    x_actor_id: str = Header(..., alias="X-Actor-Id"),
+    auth: AuthContext = Depends(user_auth_dependency),
 ) -> Any:
-    """V8 Section 10.9 — Cancel (soft delete) with idempotency exception."""
+    """Soft-delete a trip."""
+    auth = _require_admin(auth)
     trip = await _get_trip_or_404(session, trip_id)
-
-    # V8 Section 10.9: If already SOFT_DELETED, return 200 regardless of If-Match
     if trip.status == TripStatus.SOFT_DELETED:
-        resource = _trip_to_resource(trip)
-        resp = JSONResponse(status_code=200, content=resource.model_dump(mode="json"))
-        resp.headers["ETag"] = make_etag(trip.id, trip.version)
-        return resp
+        resource = trip_to_resource(trip)
+        return _json_response(200, resource.model_dump(mode="json"), _response_headers_for_trip(trip))
 
-    # Not yet soft-deleted: enforce If-Match
-    parsed = require_if_match(request)
-    if parsed[1] != trip.version:
+    current_version = require_trip_if_match(request, trip_id)
+    if current_version != trip.version:
         raise trip_version_mismatch()
 
-    now = _now_utc()
     previous_status = trip.status
+    now = utc_now()
     trip.status = TripStatus.SOFT_DELETED
     trip.soft_deleted_at_utc = now
-    trip.soft_deleted_by_actor_id = x_actor_id
+    trip.soft_deleted_by_actor_id = auth.actor_id
     trip.version += 1
     trip.updated_at_utc = now
-
-    # Timeline
-    timeline = TripTripTimeline(
-        id=_generate_id(),
-        trip_id=trip_id,
-        event_type="TRIP_CANCELLED",
-        actor_type=x_actor_type,
-        actor_id=x_actor_id,
-        note="Trip cancelled (soft deleted)",
-        created_at_utc=now,
+    session.add(
+        TripTripTimeline(
+            id=_generate_id(),
+            trip_id=trip.id,
+            event_type="TRIP_CANCELLED",
+            actor_type=_coerce_actor_type(auth.role),
+            actor_id=auth.actor_id,
+            note="Trip soft deleted.",
+            payload_json=json.dumps({"previous_status": previous_status}),
+            created_at_utc=now,
+        )
     )
-    session.add(timeline)
-
-    # Outbox: trip.soft_deleted.v1
-    outbox = _create_outbox_event(
-        trip,
-        "trip.soft_deleted.v1",
-        {
-            "trip_id": trip.id,
-            "trip_no": trip.trip_no,
-            "previous_status": previous_status,
-            "actor_id": x_actor_id,
-            "actor_role": x_actor_type,
-            "timestamp_utc": str(now),
-        },
-    )
-    session.add(outbox)
-
+    session.add(_create_outbox_event(trip, "trip.soft_deleted.v1", _event_payload(trip)))
     await session.commit()
-    trip = await _get_trip_or_404(session, trip_id)
-    resource = _trip_to_resource(trip)
-    resp = JSONResponse(status_code=200, content=resource.model_dump(mode="json"))
-    resp.headers["ETag"] = make_etag(trip.id, trip.version)
-    return resp
+
+    trip = await _get_trip_or_404(session, trip.id)
+    resource = trip_to_resource(trip)
+    return _json_response(200, resource.model_dump(mode="json"), _response_headers_for_trip(trip))
 
 
-# ---------------------------------------------------------------------------
-# V8 Section 10.10 — Hard Delete Trip
-# ---------------------------------------------------------------------------
-
-
-@router.delete("/api/v1/trips/{trip_id}/hard", status_code=204)
+@router.post("/api/v1/trips/{trip_id}/hard-delete", status_code=204)
 async def hard_delete_trip(
     trip_id: str,
+    body: HardDeleteRequest,
     request: Request,
     session: AsyncSession = Depends(get_session),
-    x_actor_type: str = Header(..., alias="X-Actor-Type"),
-    x_actor_id: str = Header(..., alias="X-Actor-Id"),
-) -> None:
-    """V8 Section 10.10 — Physical delete with empty-return child block."""
+    auth: AuthContext = Depends(user_auth_dependency),
+) -> Response:
+    """Hard-delete a soft-deleted trip after writing an immutable audit row."""
+    auth = _require_super_admin(_require_admin(auth))
+    current_version = require_trip_if_match(request, trip_id)
     trip = await _get_trip_or_404(session, trip_id)
-    parsed = require_if_match(request)
-    if parsed[1] != trip.version:
+    if current_version != trip.version:
         raise trip_version_mismatch()
-
-    # V8: Blocked if trip has empty-return children
-    children = await session.execute(select(TripTrip).where(TripTrip.base_trip_id == trip_id))
-    if children.scalars().first() is not None:
+    if trip.status != TripStatus.SOFT_DELETED:
+        raise hard_delete_requires_soft_deleted()
+    if trip.empty_return_children:
         raise has_empty_return_child()
 
-    now = _now_utc()
-
-    # Outbox row BEFORE delete (same transaction)
-    outbox = _create_outbox_event(
-        trip,
-        "trip.hard_deleted.v1",
-        {
-            "trip_id": trip.id,
-            "trip_no": trip.trip_no,
-            "previous_status": trip.status,
-            "actor_id": x_actor_id,
-            "actor_role": x_actor_type,
-            "timestamp_utc": str(now),
-        },
+    now = utc_now()
+    audit_row: TripTripDeleteAudit = build_delete_audit(
+        audit_id=_generate_id(),
+        trip=trip,
+        actor_id=auth.actor_id,
+        actor_role=_coerce_actor_type(auth.role),
+        reason=body.reason,
+        deleted_at_utc=now,
     )
-    session.add(outbox)
-
-    # Physical delete (cascades to evidence, enrichment, timeline)
+    session.add(audit_row)
+    session.add(_create_outbox_event(trip, "trip.hard_deleted.v1", {"reason": body.reason, **_event_payload(trip)}))
     await session.delete(trip)
     await session.commit()
+    return Response(status_code=204)
 
 
-# ---------------------------------------------------------------------------
-# V8 Section 10.18 — Retry Enrichment
-# ---------------------------------------------------------------------------
-
-
-@router.post("/api/v1/trips/{trip_id}/retry-enrichment", status_code=202)
+@router.post("/api/v1/trips/{trip_id}/retry-enrichment", response_model=RetryEnrichmentResponse, status_code=202)
 async def retry_enrichment(
     trip_id: str,
-    request: Request,
     session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(user_auth_dependency),
 ) -> RetryEnrichmentResponse:
-    """V8 Section 10.18 — Retry enrichment (no If-Match required)."""
+    """Manually re-queue enrichment for a non-terminal enrichment row."""
+    del auth
     trip = await _get_trip_or_404(session, trip_id)
+    if trip.enrichment is None:
+        raise internal_error(f"Trip {trip_id} has no enrichment record.")
 
-    if not trip.enrichment:
-        # BUG-04: The trip exists; missing enrichment = data integrity error.
-        # trip_not_found is misleading here.
-        from trip_service.errors import internal_error
-
-        raise internal_error(f"Trip {trip_id} has no enrichment record (data integrity error).")
-
-    # V8: If RUNNING, return 409
-    if trip.enrichment.enrichment_status == EnrichmentStatus.RUNNING:
+    now = utc_now()
+    if trip.enrichment.enrichment_status == EnrichmentStatus.RUNNING and (
+        trip.enrichment.claim_expires_at_utc is None or trip.enrichment.claim_expires_at_utc > now
+    ):
         raise enrichment_already_running()
+    if trip.enrichment.enrichment_status in (EnrichmentStatus.READY, EnrichmentStatus.SKIPPED):
+        raise enrichment_terminal_state()
 
-    now = _now_utc()
+    trip.enrichment.enrichment_status = EnrichmentStatus.PENDING
+    trip.enrichment.route_status = RouteStatus.READY if trip.route_id else RouteStatus.PENDING
+    if trip.enrichment.enrichment_attempt_count >= settings.enrichment_max_attempts:
+        trip.enrichment.enrichment_attempt_count = 0
     trip.enrichment.claim_token = None
     trip.enrichment.claim_expires_at_utc = None
     trip.enrichment.claimed_by_worker = None
+    trip.enrichment.last_enrichment_error_code = None
     trip.enrichment.next_retry_at_utc = now
     trip.enrichment.updated_at_utc = now
-
     await session.commit()
 
     return RetryEnrichmentResponse(trip_id=trip_id, queued=True)

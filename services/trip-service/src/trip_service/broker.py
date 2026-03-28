@@ -7,8 +7,25 @@ a specific technology (Kafka, RabbitMQ, etc.).
 from __future__ import annotations
 
 import abc
+import asyncio
 import logging
 from dataclasses import dataclass
+from typing import Any
+
+from trip_service.config import settings
+
+try:
+    from confluent_kafka.admin import AdminClient
+except ImportError:  # pragma: no cover - exercised only when dependency is absent
+    AdminClient = None
+
+try:
+    from confluent_kafka.aio import AIOProducer
+except ImportError:  # pragma: no cover - compatibility fallback
+    try:
+        from confluent_kafka.experimental.aio import AIOProducer
+    except ImportError:  # pragma: no cover - exercised only when dependency is absent
+        AIOProducer = None
 
 logger = logging.getLogger("trip_service.broker")
 
@@ -45,6 +62,11 @@ class MessageBroker(abc.ABC):
         """Gracefully close the broker connection."""
         ...
 
+    @abc.abstractmethod
+    async def check_health(self) -> None:
+        """Raise when the broker is not healthy."""
+        ...
+
 
 class LogBroker(MessageBroker):
     """Development-only broker that logs messages instead of publishing.
@@ -67,6 +89,10 @@ class LogBroker(MessageBroker):
         """No-op."""
         pass
 
+    async def check_health(self) -> None:
+        """Development log broker is always considered healthy."""
+        return None
+
 
 class NoOpBroker(MessageBroker):
     """Silent broker that discards all messages. Useful for testing."""
@@ -79,17 +105,73 @@ class NoOpBroker(MessageBroker):
         """No-op."""
         pass
 
+    async def check_health(self) -> None:
+        """Test broker is always considered healthy."""
+        return None
 
-def create_broker(broker_type: str = "log") -> MessageBroker:
+
+class KafkaBroker(MessageBroker):
+    """Kafka-backed broker using Confluent's asyncio producer."""
+
+    def __init__(self, producer_config: dict[str, str], topic: str) -> None:
+        if AIOProducer is None or AdminClient is None:
+            raise RuntimeError("confluent-kafka with asyncio support is not installed.")
+        self._topic = topic
+        self._producer = AIOProducer(producer_config)
+        self._admin = AdminClient(producer_config)
+
+    async def publish(self, message: OutboxMessage) -> None:
+        """Publish a JSON payload to the configured Kafka topic."""
+        delivery_future = await self._producer.produce(
+            self._topic,
+            key=message.partition_key.encode("utf-8"),
+            value=message.payload.encode("utf-8"),
+        )
+        await delivery_future
+
+    async def close(self) -> None:
+        """Flush buffered messages and close the underlying producer."""
+        await self._producer.flush()
+        await self._producer.close()
+
+    async def check_health(self) -> None:
+        """Verify broker connectivity by requesting cluster metadata."""
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._list_topics)
+
+    def _list_topics(self) -> Any:
+        """Synchronously fetch metadata from Kafka for health checks."""
+        return self._admin.list_topics(timeout=settings.dependency_timeout_seconds)
+
+
+def _kafka_config() -> dict[str, str]:
+    """Build the Confluent Kafka client configuration."""
+    config: dict[str, str] = {
+        "bootstrap.servers": settings.kafka_bootstrap_servers,
+        "client.id": settings.kafka_client_id,
+        "security.protocol": settings.kafka_security_protocol,
+    }
+    if settings.kafka_sasl_mechanism:
+        config["sasl.mechanism"] = settings.kafka_sasl_mechanism
+    if settings.kafka_sasl_username:
+        config["sasl.username"] = settings.kafka_sasl_username
+    if settings.kafka_sasl_password:
+        config["sasl.password"] = settings.kafka_sasl_password
+    return config
+
+
+def create_broker(broker_type: str) -> MessageBroker:
     """Factory for creating broker instances.
 
     Args:
-        broker_type: "log" (dev), "noop" (test), or future: "kafka", "rabbitmq", etc.
+        broker_type: "kafka", "log", or "noop".
     """
     match broker_type:
+        case "kafka":
+            return KafkaBroker(_kafka_config(), settings.kafka_topic)
         case "log":
             return LogBroker()
         case "noop":
             return NoOpBroker()
         case _:
-            raise ValueError(f"Unknown broker type: {broker_type}. Supported: log, noop")
+            raise ValueError(f"Unknown broker type: {broker_type}. Supported: kafka, log, noop")

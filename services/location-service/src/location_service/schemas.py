@@ -5,7 +5,7 @@ Full endpoint-specific schemas will be added in TASK-0005.
 """
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
@@ -168,3 +168,41 @@ class ProcessingRunResponse(TimestampMixin, LocationBaseModel):
     error_message: str | None = None
     started_at_utc: datetime | None = None
     completed_at_utc: datetime | None = None
+
+
+# ---------------------------------------------------------------------------
+# Internal resolve schemas
+# ---------------------------------------------------------------------------
+
+
+class InternalRouteResolveRequest(LocationBaseModel):
+    """Payload for POST /internal/v1/routes/resolve."""
+
+    origin_name: str = Field(min_length=1)
+    destination_name: str = Field(min_length=1)
+    profile_code: str = "TIR"
+    language_hint: Literal["AUTO", "TR", "EN"] = "AUTO"
+
+
+class InternalRouteResolveResponse(LocationBaseModel):
+    """Resolved route identity returned to trip-service."""
+
+    route_id: UUID
+    pair_id: UUID
+    resolution: Literal["EXACT_TR", "EXACT_EN"]
+
+
+class InternalTripContextResponse(LocationBaseModel):
+    """Active forward/reverse trip context for a route pair."""
+
+    pair_id: UUID
+    origin_location_id: UUID
+    origin_name: str
+    destination_location_id: UUID
+    destination_name: str
+    forward_route_id: UUID
+    forward_duration_s: int
+    reverse_route_id: UUID
+    reverse_duration_s: int
+    profile_code: str
+    pair_status: str

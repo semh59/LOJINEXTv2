@@ -1,0 +1,47 @@
+# CHANGED_FILES.md
+
+- `TASKS/TASK-0010/BRIEF.md` [NEW] - Defined the task scope and expected outcomes.
+- `TASKS/TASK-0010/PLAN.md` [NEW/MODIFY] - Locked the implementation plan and added plan revisions for lockfile/env-surface changes.
+- `TASKS/TASK-0010/STATE.md` [NEW/MODIFY] - Tracked progress, open risks, and the final ready-for-review status.
+- `TASKS/TASK-0010/CHANGED_FILES.md` [NEW/MODIFY] - Recorded all TASK-0010 file changes.
+- `TASKS/TASK-0010/TEST_EVIDENCE.md` [NEW/MODIFY] - Stored baseline and final verification outputs.
+- `TASKS/TASK-0010/NEXT_AGENT.md` [NEW/MODIFY] - Captured the handoff state after implementation.
+- `MEMORY/PROJECT_STATE.md` [MODIFY] - Registered TASK-0010 and updated its current status.
+- `MEMORY/DECISIONS.md` [MODIFY] - Recorded Kafka broker and hard-readiness decisions.
+- `MEMORY/KNOWN_ISSUES.md` [MODIFY] - Logged existing location-service lint debt outside this task scope.
+- `services/trip-service/pyproject.toml` [MODIFY] - Added `tzdata` and `confluent-kafka` runtime dependencies.
+- `services/trip-service/.env.example` [MODIFY] - Documented broker, environment, timeout, and heartbeat settings.
+- `services/trip-service/uv.lock` [NEW/MODIFY] - Captured the resolved dependency graph after verification commands.
+- `services/trip-service/Dockerfile` [NEW] - Added the production container image definition.
+- `services/trip-service/.dockerignore` [NEW] - Reduced build context noise for the image.
+- `services/trip-service/alembic/versions/a1b2c3d4e5f6_trip_service_baseline.py` [MODIFY] - Added idempotency headers column and refined unique indexes.
+- `services/trip-service/src/trip_service/config.py` [MODIFY] - Added broker, dependency timeout, environment, and heartbeat settings.
+- `services/trip-service/src/trip_service/broker.py` [MODIFY] - Implemented Kafka broker support and broker health checks.
+- `services/trip-service/src/trip_service/errors.py` [MODIFY] - Added dependency, source-slip, terminal enrichment, and removed-endpoint problem codes.
+- `services/trip-service/src/trip_service/main.py` [MODIFY] - Wired environment-resolved broker startup and the removed-endpoints router.
+- `services/trip-service/src/trip_service/middleware.py` [MODIFY] - Routed timezone/date filtering through the shared validation helper.
+- `services/trip-service/src/trip_service/models.py` [MODIFY] - Added named unique constraints and idempotency response header storage.
+- `services/trip-service/src/trip_service/observability.py` [MODIFY] - Normalized UTC handling for cleanup/logging helpers.
+- `services/trip-service/src/trip_service/schemas.py` [MODIFY] - Tightened non-empty identifier and timezone validation.
+- `services/trip-service/src/trip_service/timezones.py` [NEW] - Centralized IANA timezone parsing and UTC conversion.
+- `services/trip-service/src/trip_service/dependencies.py` [NEW] - Added fleet validation and readiness probe clients.
+- `services/trip-service/src/trip_service/worker_heartbeats.py` [NEW] - Added process-safe worker heartbeat storage.
+- `services/trip-service/src/trip_service/routers/health.py` [MODIFY] - Implemented hard dependency readiness checks.
+- `services/trip-service/src/trip_service/routers/trips.py` [MODIFY] - Hardened contracts, idempotency, write transactions, and retry behavior.
+- `services/trip-service/src/trip_service/routers/driver_statement.py` [MODIFY] - Aligned statement filtering and timezone conversion with the new helpers.
+- `services/trip-service/src/trip_service/routers/removed_endpoints.py` [NEW] - Returned exact 404 responses for removed Excel endpoints.
+- `services/trip-service/src/trip_service/workers/enrichment_worker.py` [MODIFY] - Fixed retry ceilings, dependency calls, metrics, and heartbeats.
+- `services/trip-service/src/trip_service/workers/outbox_relay.py` [MODIFY] - Fixed first-backoff, dead-letter thresholds, metrics, and heartbeats.
+- `services/trip-service/tests/conftest.py` [MODIFY] - Switched trip-service tests to Alembic migrations with clean DB resets and probe stubs.
+- `services/trip-service/tests/test_contract.py` [MODIFY] - Added validation, dependency, and readiness contract coverage.
+- `services/trip-service/tests/test_integration.py` [MODIFY] - Added idempotency-header and completed-only statement coverage.
+- `services/trip-service/tests/test_unit.py` [MODIFY] - Added retry override and stricter validation coverage while fixing session usage.
+- `services/trip-service/tests/test_workers.py` [NEW] - Added worker-level retry and outbox behavior tests.
+- `services/trip-service/tests/test_migrations.py` [MODIFY] - Verified new schema column/index details.
+- `services/trip-service/tests/test_repo_cleanliness.py` [MODIFY] - Allowed tombstone router paths while preserving repo cleanliness assertions.
+- `services/location-service/src/location_service/main.py` [MODIFY] - Registered the internal route resolve router.
+- `services/location-service/src/location_service/schemas.py` [MODIFY] - Added request/response schemas for the internal resolve contract.
+- `services/location-service/src/location_service/errors.py` [MODIFY] - Added a stable internal route resolution not-found problem code.
+- `services/location-service/src/location_service/routers/internal_routes.py` [NEW] - Implemented active forward/reverse route resolution for downstream callers.
+- `services/location-service/tests/conftest.py` [MODIFY] - Exposed the internal resolve router in test app setup.
+- `services/location-service/tests/test_internal_routes.py` [NEW] - Added exact-match forward/reverse and not-found tests for route resolve.

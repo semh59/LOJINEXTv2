@@ -9,7 +9,7 @@ async def test_create_and_get_point(client: AsyncClient) -> None:
     """Test point creation, normalization, and retrieval."""
     payload = {
         "code": "TR_IST_01",
-        "name_tr": "İstanbul Merkez",
+        "name_tr": "\u0130stanbul Merkez",
         "name_en": "Istanbul Center",
         "latitude_6dp": 41.0082111,
         "longitude_6dp": 28.978400,
@@ -21,7 +21,7 @@ async def test_create_and_get_point(client: AsyncClient) -> None:
     assert resp.status_code == 201
     data = resp.json()
     assert data["code"] == "TR_IST_01"
-    assert data["normalized_name_tr"] == "İSTANBUL MERKEZ"
+    assert data["normalized_name_tr"] == "\u0130STANBUL MERKEZ"
     assert data["latitude_6dp"] == 41.008211  # rounded to 6dp
     point_id = data["location_id"]
 
@@ -45,14 +45,20 @@ async def test_update_point(client: AsyncClient) -> None:
             "longitude_6dp": 8.0,
         },
     )
-    point_id = resp.json()["location_id"]
+    point_data = resp.json()
+    point_id = point_data["location_id"]
+    etag = f"\"{point_data['row_version']}\""
 
     # Update TR name
-    patch_resp = await client.patch(f"/v1/points/{point_id}", json={"name_tr": "Yeni İsim"})
+    patch_resp = await client.patch(
+        f"/v1/points/{point_id}",
+        json={"name_tr": "Yeni \u0130sim"},
+        headers={"If-Match": etag},
+    )
     assert patch_resp.status_code == 200
     patch_data = patch_resp.json()
-    assert patch_data["name_tr"] == "Yeni İsim"
-    assert patch_data["normalized_name_tr"] == "YENİ İSİM"
+    assert patch_data["name_tr"] == "Yeni \u0130sim"
+    assert patch_data["normalized_name_tr"] == "YEN\u0130 \u0130S\u0130M"
     assert patch_data["name_en"] == "Old Name Upd"
     assert patch_data["row_version"] == 2
 

@@ -1,175 +1,132 @@
-"""7 Mandatory Contract Tests — V8 Section 23.
-
-Contract tests verify response schemas, error formats, and API contracts.
-"""
+"""Trip Service contract tests."""
 
 from __future__ import annotations
-
-from datetime import datetime
 
 import pytest
 from httpx import AsyncClient
 
-from tests.conftest import ADMIN_HEADERS, make_manual_trip_payload
-
-# ---------------------------------------------------------------------------
-# CT-01: problem+json error response format (RFC 9457)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_error_response_problem_json_format(client: AsyncClient):
-    """All errors return application/problem+json with required fields."""
-    r = await client.get("/api/v1/trips/nonexistent-trip-id-xxxx")
-    assert r.status_code == 404
-    body = r.json()
-
-    assert "status" in body
-    assert "code" in body
-    assert "title" in body
-    assert "detail" in body
-    assert "instance" in body
-    assert body["status"] == 404
-    assert body["code"] == "TRIP_NOT_FOUND"
-
-
-# ---------------------------------------------------------------------------
-# CT-02: list trips response envelope contract
-# ---------------------------------------------------------------------------
+from tests.conftest import (
+    ADMIN_HEADERS,
+    EXCEL_SERVICE_HEADERS,
+    SUPER_ADMIN_HEADERS,
+    TELEGRAM_SERVICE_HEADERS,
+    make_manual_trip_payload,
+)
 
 
 @pytest.mark.asyncio
-async def test_list_trips_response_envelope(client: AsyncClient):
-    """List response has { items: [], meta: { page, per_page, total_items, total_pages } }."""
-    r = await client.get("/api/v1/trips")
-    assert r.status_code == 200
-    body = r.json()
-
-    assert "items" in body
-    assert isinstance(body["items"], list)
-    assert "meta" in body
-    meta = body["meta"]
-    assert "page" in meta
-    assert "per_page" in meta
-    assert "total_items" in meta
-    assert "total_pages" in meta
-
-
-# ---------------------------------------------------------------------------
-# CT-03: trip resource shape on create
-# ---------------------------------------------------------------------------
+async def test_public_endpoints_require_bearer_auth(client: AsyncClient):
+    response = await client.post("/api/v1/trips", json=make_manual_trip_payload(trip_no="TR-NO-AUTH"))
+    assert response.status_code == 401
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json()["code"] == "TRIP_AUTH_REQUIRED"
 
 
 @pytest.mark.asyncio
-async def test_trip_resource_shape(client: AsyncClient):
-    """POST /api/v1/trips returns a trip resource with all required fields."""
-    payload = make_manual_trip_payload(trip_no="TR-CONTRACT-SHAPE")
-    r = await client.post("/api/v1/trips", json=payload, headers=ADMIN_HEADERS)
-    assert r.status_code == 201
-    body = r.json()
-
-    required_fields = [
-        "id",
-        "trip_no",
-        "source_type",
-        "driver_id",
-        "status",
-        "version",
-        "is_empty_return",
-        "tare_weight_kg",
-        "gross_weight_kg",
-        "net_weight_kg",
-        "created_at_utc",
-        "updated_at_utc",
-    ]
-    for field in required_fields:
-        assert field in body, f"Missing required field: {field}"
-
-    assert body["status"] == "COMPLETED"  # ADMIN_MANUAL → directly COMPLETED
-    assert body["version"] == 1
-    assert body["is_empty_return"] is False
-
-
-# ---------------------------------------------------------------------------
-# CT-04: health endpoint contract
-# ---------------------------------------------------------------------------
+async def test_invalid_bearer_token_returns_401(client: AsyncClient):
+    response = await client.get("/api/v1/trips", headers={"Authorization": "Bearer invalid"})
+    assert response.status_code == 401
+    assert response.json()["code"] == "TRIP_AUTH_INVALID"
 
 
 @pytest.mark.asyncio
-async def test_health_endpoint_contract(client: AsyncClient):
-    """GET /health → 200 with { status: "healthy" }."""
-    r = await client.get("/health")
-    assert r.status_code == 200
-    body = r.json()
-    assert "status" in body
-    assert body["status"] == "ok"
-
-
-# ---------------------------------------------------------------------------
-# CT-05: timeline resource shape
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_timeline_resource_shape(client: AsyncClient):
-    """Timeline items have required fields."""
-    payload = make_manual_trip_payload(trip_no="TR-TL-SHAPE")
-    r1 = await client.post("/api/v1/trips", json=payload, headers=ADMIN_HEADERS)
-    trip_id = r1.json()["id"]
-
-    r2 = await client.get(f"/api/v1/trips/{trip_id}/timeline")
-    assert r2.status_code == 200
-    items = r2.json()["items"]
-    assert len(items) >= 1
-
-    for item in items:
-        assert "event_type" in item
-        assert "actor_type" in item
-        assert "actor_id" in item
-        assert "created_at_utc" in item
-
-
-# ---------------------------------------------------------------------------
-# CT-06: ETag contract — present in mutation responses
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_etag_contract_on_mutations(client: AsyncClient):
-    """Create and edit responses include ETag header."""
-    payload = make_manual_trip_payload(trip_no=f"TR-ETAG-CT-{datetime.now().timestamp()}")
-    r1 = await client.post("/api/v1/trips", json=payload, headers=ADMIN_HEADERS)
-    assert r1.status_code == 201
-    assert "etag" in r1.headers
-
-    trip_id = r1.json()["id"]
-
-    # Re-fetch to get the latest ETag (idempotency record save may have committed)
-    r_get = await client.get(f"/api/v1/trips/{trip_id}")
-    etag = r_get.headers["etag"]
-
-    r2 = await client.patch(
-        f"/api/v1/trips/{trip_id}",
-        json={"driver_id": "driver-updated"},
-        headers={**ADMIN_HEADERS, "If-Match": etag},
-    )
-    assert r2.status_code == 200
-    assert "etag" in r2.headers
-    assert r2.headers["etag"] != etag
-
-
-# ---------------------------------------------------------------------------
-# CT-07: X-Request-Id header echoed in all responses
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_request_id_echoed(client: AsyncClient):
-    """All responses echo X-Request-Id header."""
-    custom_id = "test-req-id-abc-123"
-    r = await client.get(
+async def test_legacy_headers_are_not_part_of_prod_contract(client: AsyncClient):
+    response = await client.post(
         "/api/v1/trips",
-        headers={"X-Request-Id": custom_id},
+        json=make_manual_trip_payload(trip_no="TR-LEGACY"),
+        headers={"X-Actor-Type": "ADMIN", "X-Actor-Id": "legacy-admin"},
     )
-    assert r.status_code == 200
-    assert r.headers.get("x-request-id") == custom_id
+    assert response.status_code == 401
+    assert response.json()["code"] == "TRIP_AUTH_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_validation_error_uses_problem_json(client: AsyncClient):
+    payload = make_manual_trip_payload(trip_no="TR-BAD-WEIGHT", gross_weight_kg=5000, net_weight_kg=1)
+    response = await client.post("/api/v1/trips", json=payload, headers=ADMIN_HEADERS)
+    assert response.status_code == 422
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json()["code"] == "TRIP_VALIDATION_ERROR"
+
+
+@pytest.mark.asyncio
+async def test_invalid_timezone_returns_problem_json(client: AsyncClient):
+    payload = make_manual_trip_payload(trip_no="TR-BAD-TZ", trip_timezone="Bad/Timezone")
+    response = await client.post("/api/v1/trips", json=payload, headers=ADMIN_HEADERS)
+    assert response.status_code == 422
+    assert response.json()["code"] == "TRIP_VALIDATION_ERROR"
+
+
+@pytest.mark.asyncio
+async def test_service_token_cannot_call_public_admin_endpoint(client: AsyncClient):
+    response = await client.post(
+        "/api/v1/trips",
+        json=make_manual_trip_payload(trip_no="TR-SVC"),
+        headers=TELEGRAM_SERVICE_HEADERS,
+    )
+    assert response.status_code == 403
+    assert response.json()["code"] == "TRIP_FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_admin_cannot_hard_delete(client: AsyncClient):
+    created = await client.post(
+        "/api/v1/trips",
+        json=make_manual_trip_payload(trip_no="TR-HARD-403"),
+        headers=ADMIN_HEADERS,
+    )
+    cancelled = await client.post(
+        f"/api/v1/trips/{created.json()['id']}/cancel",
+        headers={**ADMIN_HEADERS, "If-Match": created.headers["etag"]},
+    )
+    response = await client.post(
+        f"/api/v1/trips/{created.json()['id']}/hard-delete",
+        json={"reason": "test"},
+        headers={**ADMIN_HEADERS, "If-Match": cancelled.headers["etag"]},
+    )
+    assert response.status_code == 403
+    assert response.json()["code"] == "TRIP_FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_requires_reason(client: AsyncClient):
+    created = await client.post(
+        "/api/v1/trips",
+        json=make_manual_trip_payload(trip_no="TR-HARD-REASON"),
+        headers=SUPER_ADMIN_HEADERS,
+    )
+    cancelled = await client.post(
+        f"/api/v1/trips/{created.json()['id']}/cancel",
+        headers={**SUPER_ADMIN_HEADERS, "If-Match": created.headers["etag"]},
+    )
+    response = await client.post(
+        f"/api/v1/trips/{created.json()['id']}/hard-delete",
+        json={},
+        headers={**SUPER_ADMIN_HEADERS, "If-Match": cancelled.headers["etag"]},
+    )
+    assert response.status_code == 422
+    assert response.json()["code"] == "TRIP_VALIDATION_ERROR"
+
+
+@pytest.mark.asyncio
+async def test_removed_legacy_hard_delete_path_returns_exact_404(client: AsyncClient):
+    response = await client.delete("/api/v1/trips/some-trip/hard", headers=SUPER_ADMIN_HEADERS)
+    assert response.status_code == 404
+    assert response.json()["code"] == "TRIP_ENDPOINT_REMOVED"
+
+
+@pytest.mark.asyncio
+async def test_driver_statement_range_over_31_days_returns_422(client: AsyncClient):
+    response = await client.get(
+        "/internal/v1/driver/trips",
+        params={"driver_id": "driver-001", "date_from": "2026-01-01", "date_to": "2026-02-02"},
+        headers=TELEGRAM_SERVICE_HEADERS,
+    )
+    assert response.status_code == 422
+    assert response.json()["code"] == "TRIP_DATE_RANGE_TOO_LARGE"
+
+
+@pytest.mark.asyncio
+async def test_excel_service_token_is_required_for_export_feed(client: AsyncClient):
+    response = await client.get("/internal/v1/trips/excel/export-feed", headers=EXCEL_SERVICE_HEADERS)
+    assert response.status_code == 200
