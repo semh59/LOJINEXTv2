@@ -70,7 +70,6 @@ Phase 6   Testing
 | TASK-0011 | Trip Service Contract Alignment             | ready_for_review | 2026-03-27       | Codex       |
 | TASK-0012 | Deep Audit + Full Test Matrix               | in_progress | 2026-03-28       | Codex       |
 | TASK-0014 | Full Repo Detective Audit                  | ready_for_review | 2026-03-28   | Codex       |
-| TASK-0016 | Trip Service Release-Hardening Fixes       | ready_for_review | 2026-03-28   | Codex       |
 
 ---
 
@@ -79,6 +78,7 @@ Phase 6   Testing
 | Task ID   | Description               | Status    | Last Updated | Last Agent  |
 | --------- | ------------------------- | --------- | ------------ | ----------- |
 | TASK-0017 | Trip Service Full Remediation | completed | 2026-03-28 | Codex |
+| TASK-0016 | Trip Service Release-Hardening Fixes | completed | 2026-03-28 | Codex |
 | TASK-0015 | Trip Service Release-Hardening Audit | completed | 2026-03-28 | Codex |
 | TASK-0009 | Location Service Imp/Exp  | completed | 2026-03-26   | Antigravity |
 | TASK-0008 | Location Service Bulk     | completed | 2026-03-26   | Antigravity |

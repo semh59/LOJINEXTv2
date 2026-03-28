@@ -6,8 +6,8 @@
 [ ] planning
 [ ] in_progress
 [ ] blocked
-[x] ready_for_review
-[ ] done
+[ ] ready_for_review
+[x] done
 
 ## Last Updated
 Date: 2026-03-28

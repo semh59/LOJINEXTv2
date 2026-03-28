@@ -12,7 +12,7 @@ Unchecked item without a written reason = task is not done.
 
 ## Records
 - [x] CHANGED_FILES.md lists every file touched
-- [ ] STATE.md marked `done` with date
+- [x] STATE.md marked `done` with date
 
 ## Tests
 - [x] Tests exist for every new piece of logic
@@ -44,7 +44,6 @@ Unchecked item without a written reason = task is not done.
 
 | Item | Reason |
 |------|--------|
-| STATE.md marked `done` with date | Task not yet marked done; awaiting review. |
 | All changes committed | Git commit not performed in this session. |
 | Commit messages follow format in AGENTS.md | No commit created. |
 | Branch pushed | No push performed. |
