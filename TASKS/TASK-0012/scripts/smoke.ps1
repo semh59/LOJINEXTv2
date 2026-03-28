@@ -1,9 +1,18 @@
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 
 $compose = "TASKS/TASK-0012/docker-compose.smoke.yml"
 
+function Assert-LastExitCode {
+    param([string]$Context)
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Context failed with exit code $LASTEXITCODE"
+    }
+}
+
 Write-Host "Starting docker smoke stack..."
-docker compose -f $compose up -d --build
+$composeOutput = docker compose -f $compose up -d --build 2>&1
+if ($composeOutput) { $composeOutput | Write-Host }
+Assert-LastExitCode "docker compose up"
 
 function Invoke-CurlJson {
     param(
@@ -27,7 +36,14 @@ function Invoke-CurlJson {
         $args += @("-D", $HeaderOut)
     }
     $args += $Url
-    $result = & curl.exe @args
+    $curlErrorPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $result = & curl.exe @args 2>$null
+    $ErrorActionPreference = $curlErrorPreference
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) {
+        throw "curl failed with exit code $exitCode for $Url"
+    }
     if ($tempFile) {
         Remove-Item $tempFile -ErrorAction SilentlyContinue
     }
@@ -46,11 +62,14 @@ function Get-HeaderValue {
 }
 
 Write-Host "Waiting for trip-service /health..."
+$curlErrorPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
 for ($i = 0; $i -lt 30; $i++) {
-    $resp = & curl.exe -s -S http://localhost:8101/health
+    $resp = & curl.exe -s -S http://localhost:8101/health 2>$null
     if ($resp -like "*ok*") { break }
     Start-Sleep -Seconds 2
 }
+$ErrorActionPreference = $curlErrorPreference
 
 Write-Host "Running alembic migrations inside service containers..."
 @'
@@ -61,7 +80,8 @@ from alembic import command
 cfg = Config("alembic.ini")
 cfg.set_main_option("sqlalchemy.url", os.environ["TRIP_DATABASE_URL"])
 command.upgrade(cfg, "head")
-'@ | docker compose -f $compose exec -T trip-service python -
+'@ | docker compose -f $compose exec -T trip-service python - 2>&1 | Write-Host
+Assert-LastExitCode "trip-service alembic upgrade"
 
 @'
 import os
@@ -71,31 +91,37 @@ from alembic import command
 cfg = Config("alembic.ini")
 cfg.set_main_option("sqlalchemy.url", os.environ["LOCATION_DATABASE_URL"])
 command.upgrade(cfg, "head")
-'@ | docker compose -f $compose exec -T location-service python -
+'@ | docker compose -f $compose exec -T location-service python - 2>&1 | Write-Host
+Assert-LastExitCode "location-service alembic upgrade"
 
 Write-Host "Seeding location-service database..."
-docker compose -f $compose exec -T postgres psql -U postgres -d location_service -f /seed/seed-location.sql
+docker compose -f $compose exec -T postgres psql -U postgres -d location_service -f /seed/seed-location.sql 2>&1 | Write-Host
+Assert-LastExitCode "seed location-service database"
 
 Write-Host "Generating JWT tokens in trip-service container..."
 $adminToken = @'
 import jwt, os
 print(jwt.encode({"sub":"admin-1","role":"ADMIN"}, os.environ["TRIP_AUTH_JWT_SECRET"], algorithm=os.environ["TRIP_AUTH_JWT_ALGORITHM"]))
-'@ | docker compose -f $compose exec -T trip-service python -
+'@ | docker compose -f $compose exec -T trip-service python - 2>&1 | Write-Host
+Assert-LastExitCode "generate admin token"
 
 $superAdminToken = @'
 import jwt, os
 print(jwt.encode({"sub":"super-1","role":"SUPER_ADMIN"}, os.environ["TRIP_AUTH_JWT_SECRET"], algorithm=os.environ["TRIP_AUTH_JWT_ALGORITHM"]))
-'@ | docker compose -f $compose exec -T trip-service python -
+'@ | docker compose -f $compose exec -T trip-service python - 2>&1 | Write-Host
+Assert-LastExitCode "generate super admin token"
 
 $telegramToken = @'
 import jwt, os
 print(jwt.encode({"sub":"telegram-service","role":"SERVICE","service":"telegram-service"}, os.environ["TRIP_AUTH_JWT_SECRET"], algorithm=os.environ["TRIP_AUTH_JWT_ALGORITHM"]))
-'@ | docker compose -f $compose exec -T trip-service python -
+'@ | docker compose -f $compose exec -T trip-service python - 2>&1 | Write-Host
+Assert-LastExitCode "generate telegram token"
 
 $excelToken = @'
 import jwt, os
 print(jwt.encode({"sub":"excel-service","role":"SERVICE","service":"excel-service"}, os.environ["TRIP_AUTH_JWT_SECRET"], algorithm=os.environ["TRIP_AUTH_JWT_ALGORITHM"]))
-'@ | docker compose -f $compose exec -T trip-service python -
+'@ | docker compose -f $compose exec -T trip-service python - 2>&1 | Write-Host
+Assert-LastExitCode "generate excel token"
 
 $adminHeaders = @{ Authorization = "Bearer $adminToken"; "Content-Type" = "application/json" }
 $superHeaders = @{ Authorization = "Bearer $superAdminToken"; "Content-Type" = "application/json" }
@@ -203,3 +229,4 @@ $hardHeaders["If-Match"] = $manualEtag
 Invoke-CurlJson -Method "POST" -Url ("http://localhost:8101/api/v1/trips/{0}/hard-delete" -f $manualTrip.id) -Headers $hardHeaders -Body @{ reason = "smoke cleanup" } | Out-Null
 
 Write-Host "Smoke completed."
+exit 0

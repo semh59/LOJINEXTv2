@@ -42,6 +42,7 @@ from trip_service.errors import (
     enrichment_terminal_state,
     hard_delete_requires_soft_deleted,
     has_empty_return_child,
+    idempotency_in_flight,
     idempotency_payload_mismatch,
     internal_error,
     invalid_base_for_empty_return,
@@ -205,7 +206,7 @@ def _create_outbox_event(trip: TripTrip, event_name: str, payload: dict[str, Any
         schema_version=1,
         payload_json=json.dumps(payload, default=str),
         partition_key=trip.id,
-        publish_status="PENDING",
+        publish_status="READY",
         attempt_count=0,
         created_at_utc=utc_now(),
     )
@@ -314,7 +315,7 @@ async def _check_idempotency_key(
     if existing.request_hash != request_hash:
         raise idempotency_payload_mismatch()
     if existing.response_status <= 0:
-        raise internal_error("Idempotency record is incomplete.")
+        raise idempotency_in_flight()
 
     return _json_response(
         status_code=existing.response_status,

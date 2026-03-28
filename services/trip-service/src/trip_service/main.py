@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 
 from trip_service.broker import create_broker
-from trip_service.config import settings
+from trip_service.config import settings, validate_prod_settings
 from trip_service.database import engine
 from trip_service.errors import (
     ProblemDetailError,
@@ -29,6 +29,7 @@ logger = logging.getLogger("trip_service")
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: startup and shutdown hooks."""
     setup_logging()
+    validate_prod_settings(settings)
 
     broker = create_broker(settings.resolved_broker_type)
     app.state.broker = broker

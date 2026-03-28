@@ -4,6 +4,10 @@ from typing import Literal
 
 from pydantic_settings import BaseSettings
 
+DEFAULT_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/trip_service"
+DEFAULT_AUTH_JWT_SECRET = "trip-service-dev-secret-please-change-me-32b"
+DEFAULT_KAFKA_BOOTSTRAP = "localhost:9092"
+
 
 class Settings(BaseSettings):
     """Trip Service configuration loaded from environment variables."""
@@ -12,12 +16,12 @@ class Settings(BaseSettings):
     service_port: int = 8101
     environment: Literal["dev", "test", "prod"] = "dev"
 
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/trip_service"
+    database_url: str = DEFAULT_DATABASE_URL
 
     fleet_service_url: str = "http://localhost:8102"
     location_service_url: str = "http://localhost:8103"
     dependency_timeout_seconds: float = 5.0
-    auth_jwt_secret: str = "trip-service-dev-secret-please-change-me-32b"
+    auth_jwt_secret: str = DEFAULT_AUTH_JWT_SECRET
     auth_jwt_algorithm: str = "HS256"
     allow_legacy_actor_headers: bool = False
 
@@ -31,10 +35,11 @@ class Settings(BaseSettings):
 
     idempotency_retention_hours: int = 24
     broker_type: Literal["kafka", "log", "noop"] | None = None
-    kafka_bootstrap_servers: str = "localhost:9092"
+    kafka_bootstrap_servers: str = DEFAULT_KAFKA_BOOTSTRAP
     kafka_topic: str = "trip.events.v1"
     kafka_client_id: str = "trip-service"
     kafka_security_protocol: str = "PLAINTEXT"
+    allow_plaintext_in_prod: bool = False
     kafka_sasl_mechanism: str | None = None
     kafka_sasl_username: str | None = None
     kafka_sasl_password: str | None = None
@@ -54,3 +59,24 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def validate_prod_settings(current: Settings) -> None:
+    """Fail fast when production settings are insecure or missing."""
+    if current.environment != "prod":
+        return
+
+    errors: list[str] = []
+    if not current.auth_jwt_secret or current.auth_jwt_secret == DEFAULT_AUTH_JWT_SECRET:
+        errors.append("TRIP_AUTH_JWT_SECRET must be set to a non-default value in prod.")
+    if not current.database_url or current.database_url == DEFAULT_DATABASE_URL:
+        errors.append("TRIP_DATABASE_URL must be set to a non-default value in prod.")
+    if current.broker_type is None:
+        errors.append("TRIP_BROKER_TYPE must be explicitly set in prod.")
+    if not current.kafka_bootstrap_servers or current.kafka_bootstrap_servers == DEFAULT_KAFKA_BOOTSTRAP:
+        errors.append("TRIP_KAFKA_BOOTSTRAP_SERVERS must be set to a non-default value in prod.")
+    if current.kafka_security_protocol == "PLAINTEXT" and not current.allow_plaintext_in_prod:
+        errors.append("TRIP_KAFKA_SECURITY_PROTOCOL cannot be PLAINTEXT in prod without TRIP_ALLOW_PLAINTEXT_IN_PROD.")
+
+    if errors:
+        raise ValueError("Production settings invalid: " + " ".join(errors))

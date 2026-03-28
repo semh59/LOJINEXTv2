@@ -143,6 +143,15 @@ def idempotency_payload_mismatch() -> ProblemDetailError:
     )
 
 
+def idempotency_in_flight() -> ProblemDetailError:
+    return ProblemDetailError(
+        409,
+        "TRIP_IDEMPOTENCY_IN_FLIGHT",
+        "Idempotency in progress",
+        "A request with this idempotency key is still being processed. Retry the request.",
+    )
+
+
 def invalid_status_transition(detail: str = "") -> ProblemDetailError:
     return ProblemDetailError(
         409, "TRIP_INVALID_STATUS_TRANSITION", "Invalid status transition", detail or "This transition is not allowed."

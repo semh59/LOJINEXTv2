@@ -19,7 +19,8 @@ from tests.conftest import (
     make_manual_trip_payload,
     make_slip_payload,
 )
-from trip_service.models import TripTrip, TripTripDeleteAudit
+from trip_service.models import TripIdempotencyRecord, TripOutbox, TripTrip, TripTripDeleteAudit
+from trip_service.routers.trips import _merged_payload_hash
 
 
 @pytest.mark.asyncio
@@ -291,6 +292,55 @@ async def test_manual_idempotency_replays_full_response(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_manual_idempotency_inflight_returns_controlled_conflict(client: AsyncClient, db_engine):
+    payload = make_manual_trip_payload(trip_no="TR-IDEMP-INFLIGHT")
+    request_hash = _merged_payload_hash(payload)
+    now = datetime.now().astimezone()
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with session_factory() as session:
+        session.add(
+            TripIdempotencyRecord(
+                idempotency_key="manual-idemp-inflight",
+                endpoint_fingerprint="create_trip:admin-test-001",
+                request_hash=request_hash,
+                response_status=0,
+                response_headers_json={},
+                response_body_json="{}",
+                created_at_utc=now,
+                expires_at_utc=now + timedelta(hours=24),
+            )
+        )
+        await session.commit()
+
+    response = await client.post(
+        "/api/v1/trips",
+        json=payload,
+        headers={**ADMIN_HEADERS, "Idempotency-Key": "manual-idemp-inflight"},
+    )
+    assert response.status_code == 409
+    assert response.json()["code"] == "TRIP_IDEMPOTENCY_IN_FLIGHT"
+
+
+@pytest.mark.asyncio
+async def test_manual_idempotency_payload_mismatch_same_key(client: AsyncClient):
+    first_payload = make_manual_trip_payload(trip_no="TR-IDEMP-MM-1")
+    second_payload = make_manual_trip_payload(trip_no="TR-IDEMP-MM-2")
+    created = await client.post(
+        "/api/v1/trips",
+        json=first_payload,
+        headers={**ADMIN_HEADERS, "Idempotency-Key": "manual-idemp-mm-001"},
+    )
+    conflict = await client.post(
+        "/api/v1/trips",
+        json=second_payload,
+        headers={**ADMIN_HEADERS, "Idempotency-Key": "manual-idemp-mm-001"},
+    )
+    assert created.status_code == 201
+    assert conflict.status_code == 409
+    assert conflict.json()["code"] == "TRIP_IDEMPOTENCY_PAYLOAD_MISMATCH"
+
+
+@pytest.mark.asyncio
 async def test_telegram_slip_dedupe_and_conflict(client: AsyncClient):
     payload = make_slip_payload(source_slip_no="SLIP-IDEMP-001", source_reference_key="telegram-message-idemp-001")
     created = await client.post("/internal/v1/trips/slips/ingest", json=payload, headers=TELEGRAM_SERVICE_HEADERS)
@@ -366,3 +416,22 @@ async def test_driver_statement_shows_completed_only_and_hides_empty_returns(cli
     assert pending.status_code == 201
     assert statement.status_code == 200
     assert statement.json()["meta"]["total_items"] == 2
+
+
+@pytest.mark.asyncio
+async def test_create_manual_trip_writes_outbox_row(client: AsyncClient, db_engine):
+    created = await client.post(
+        "/api/v1/trips",
+        json=make_manual_trip_payload(trip_no="TR-OUTBOX-001"),
+        headers=ADMIN_HEADERS,
+    )
+    assert created.status_code == 201
+
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with session_factory() as session:
+        rows = (
+            await session.execute(
+                select(TripOutbox).where(TripOutbox.aggregate_id == created.json()["id"])
+            )
+        ).scalars().all()
+    assert rows, "Expected at least one outbox row for created trip."

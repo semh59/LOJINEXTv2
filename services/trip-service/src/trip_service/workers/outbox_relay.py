@@ -72,13 +72,14 @@ async def _relay_batch(broker: MessageBroker, batch_size: int = 20) -> int:
     published_count = 0
 
     async with async_session_factory() as session:
-        # Select PENDING or FAILED rows that are ready
+        # Select PENDING/READY/FAILED rows that are ready
         stmt = (
             select(TripOutbox)
             .where(
                 TripOutbox.publish_status.in_(
                     [
                         OutboxPublishStatus.PENDING,
+                        OutboxPublishStatus.READY,
                         OutboxPublishStatus.FAILED,
                     ]
                 ),
@@ -94,6 +95,12 @@ async def _relay_batch(broker: MessageBroker, batch_size: int = 20) -> int:
 
         if not rows:
             return 0
+
+        # Mark rows as PUBLISHING before any broker publish
+        for row in rows:
+            row.publish_status = OutboxPublishStatus.PUBLISHING
+            row.next_attempt_at_utc = None
+        await session.commit()
 
         for row in rows:
             success = await _publish_single(broker, session, row)

@@ -61,6 +61,33 @@ In exchange: context loss is eliminated. Any agent can continue any task.
 
 ### Status
 
+superseded by [2026-03-28, Trip Service outbox relay avoids duplicate publishes]
+
+---
+
+## [2026-03-28] Trip Service outbox relay avoids duplicate publishes
+
+### Context
+
+At-least-once outbox delivery caused a duplicate-publish window when broker publish succeeded but the relay DB commit failed. The requirement is to prevent duplicates in Trip Service even if that introduces a different tradeoff.
+
+### Decision
+
+The outbox relay now uses a `PUBLISHING` state and only publishes `READY/FAILED` rows. Rows are marked `PUBLISHING` before any broker publish. After publish, rows are marked `PUBLISHED`. The relay does not republish rows already in `PUBLISHING`.
+
+### Alternatives Considered
+
+- Kafka transactions: rejected for operational complexity in this phase.
+- Accept at-least-once: rejected due to “no accepted risks” requirement.
+
+### Consequences
+
+- Duplicate publishes are avoided by design.
+- A failed commit after publish can leave a row in `PUBLISHING` requiring manual intervention.
+- Operational runbooks must include handling for stuck `PUBLISHING` rows.
+
+### Status
+
 active
 
 ---
@@ -230,6 +257,32 @@ The old contract still assumed header-based actor identity, raw `route_id` input
 - Tauri desktop work must use bearer tokens, ETag/If-Match, and route-pair lookups against the new contract.
 - Downstream Telegram and Excel services must integrate with the structured internal ingest/export APIs instead of file/job endpoints.
 - Location-service trip-context is now part of the production dependency surface for trip creation, reverse derivation, and overlap windows.
+
+### Status
+
+active
+
+---
+
+## [2026-03-28] Trip Service outbox duplicate-publish window is accepted (at-least-once)
+
+### Context
+
+Outbox relay publishes events to the broker and then commits the database transaction. If the broker publish succeeds but the DB commit fails, the row can be retried and published again. This is a standard at-least-once failure window.
+
+### Decision
+
+We accept the duplicate-publish window as an at-least-once delivery tradeoff. Downstream consumers must de-duplicate by `event_id`. No code mitigation will be added in this phase.
+
+### Alternatives Considered
+
+- Broker transactions or two-phase commit: rejected due to complexity and operational coupling.
+- Additional publish markers/locks in DB: rejected for now; may be revisited if consumers cannot de-duplicate reliably.
+
+### Consequences
+
+- Event delivery is at-least-once; consumers must handle duplicates.
+- Documentation must state this explicitly for downstream teams.
 
 ### Status
 

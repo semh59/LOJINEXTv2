@@ -38,6 +38,17 @@ When resolved: mark resolved, write what fixed it, keep the entry.
 
 ---
 
+## [ISSUE-002] Docker smoke script returns non-zero due to PowerShell NativeCommandError
+
+- **Discovered:** 2026-03-28, TASK-0014
+- **Impact:** `TASKS/TASK-0012/scripts/smoke.ps1` can exit non-zero even when the smoke steps complete, which may cause CI or automation to treat the run as failed.
+- **Status:** resolved
+- **Workaround:** (resolved)
+- **Linked task:** TASK-0017
+- **Resolution:** Updated `TASKS/TASK-0012/scripts/smoke.ps1` to suppress PowerShell native-command error records, validate exit codes explicitly, and exit 0 on success.
+
+---
+
 ## Resolved
 
 *(none yet)*

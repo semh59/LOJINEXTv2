@@ -1,0 +1,95 @@
+# Trip Service Final Release-Hardening Audit (TASK-0015)
+
+## 1. Executive Summary
+Decision: **Production-ready deðil**
+
+Reasons (max 5):
+- Idempotency in-flight race returns a 5xx error for the second concurrent request (`_check_idempotency_key`), which violates controlled-idempotency expectations.
+- Outbox relay publishes before the DB commit completes, creating a duplicate-publish window on commit failure without documented acceptance.
+- Production config has insecure defaults (JWT secret, DB URL, Kafka PLAINTEXT) with no prod fail-fast validation.
+- Required release-gate tests for idempotency parallelism, outbox retry/dead-letter flows, and full create›enrich›outbox path are missing.
+
+## 2. Severity Table
+| Severity | Title | File | Function | Impact | Recommended Fix |
+|---|---|---|---|---|---|
+| Blocker | Idempotency in-flight returns 5xx | `services/trip-service/src/trip_service/routers/trips.py` | `_check_idempotency_key` | Parallel same-key request can return internal error instead of replay/conflict | Return a controlled response (409/425/202 with Retry-After) or block until record finalized; add parallel test. |
+| High | Outbox publish/commit duplicate window | `services/trip-service/src/trip_service/workers/outbox_relay.py` | `_relay_batch`, `_publish_single` | Publish can succeed but DB commit fail › duplicate publish on retry | Document at-least-once semantics + require consumer de-dupe, or introduce durable publish markers/transactions. |
+| High | Insecure prod defaults, no fail-fast | `services/trip-service/src/trip_service/config.py`, `services/trip-service/src/trip_service/main.py` | `Settings`, `lifespan` | Prod can boot with dev JWT secret, local DB URL, PLAINTEXT Kafka | Add prod validation to fail fast when secrets/URLs are default or missing. |
+| Medium | Release-gate test gaps | `services/trip-service/tests/**` | multiple | Missing key automated tests for readiness gates | Add explicit tests listed in checklist. |
+
+## 3. Detailed Findings by Audit Area
+
+### 3.1 Idempotency In-Flight Race — **FAIL**
+- **Evidence**: `_check_idempotency_key` inserts a placeholder with `response_status=0` and returns `internal_error` if an existing record still has `response_status <= 0`.
+  - File: `services/trip-service/src/trip_service/routers/trips.py`
+  - Function: `_check_idempotency_key`
+  - Lines: 274–323
+  - Behavior: when a second request hits an existing idempotency row before the first request finishes, `existing.response_status <= 0` causes `internal_error("Idempotency record is incomplete.")`.
+- **Current behavior**: second request gets 5xx when the idempotency record is still incomplete.
+- **Expected behavior**: return a controlled response (e.g., 409/425/202) indicating “in progress” or wait for completion and replay without 5xx.
+- **Risk level**: Blocker.
+- **Fix recommendation**: replace the 5xx path with a deterministic “in progress” response (e.g., 409 + problem code, or 202 + Retry-After) or wait for record completion within a bounded timeout. Ensure the first request writes a terminal response before releasing.
+- **Required test**: `test_manual_idempotency_parallel_inflight_returns_controlled_response` (spawn two concurrent POSTs with same Idempotency-Key; second must not return 5xx). Use an async barrier to force overlap.
+- **Inference**: The parallel-request scenario is inferred from deterministic code flow; no runtime concurrency test exists.
+
+### 3.2 Outbox Publish/Commit Safety — **FAIL**
+- **Evidence**: `_publish_single` publishes to broker, then marks row as PUBLISHED; `_relay_batch` commits after processing the batch.
+  - File: `services/trip-service/src/trip_service/workers/outbox_relay.py`
+  - Functions: `_publish_single` (lines 108–184), `_relay_batch` (lines 65–105)
+- **Failure window**: publish succeeds, then `session.commit()` fails in `_relay_batch` (lines 98–105). The event is published but DB row remains PENDING/FAILED, so the worker can republish on the next run.
+- **Production impact**: duplicate event deliveries in Kafka/log broker without an explicit idempotency guarantee in code or docs.
+- **Bug vs tradeoff**: Not documented as an accepted at-least-once tradeoff in code or docs; treated as a risk needing explicit acceptance or mitigation.
+- **Minimum action to close**: add documented at-least-once semantics + consumer de-dup by `event_id`, or move to a publish-then-commit scheme with broker transactions/outbox marker to prevent re-publish.
+- **Inference**: The duplicate window depends on commit failure after publish; this is a standard failure mode and is inferred from the sequence.
+
+### 3.3 Production Config Safety — **FAIL**
+- **Evidence**: Default values for JWT secret and DB URL are non-prod safe and there is no prod validation.
+  - File: `services/trip-service/src/trip_service/config.py`
+  - Class: `Settings`
+  - Lines: 11–40
+- **Insecure defaults**:
+  - `auth_jwt_secret` default is a dev placeholder.
+  - `database_url` defaults to local `postgres@localhost`.
+  - `kafka_security_protocol` default is `PLAINTEXT`.
+- **Prod boot safety**: `main.py` does not enforce fail-fast validation when `environment == "prod"`.
+  - File: `services/trip-service/src/trip_service/main.py`
+  - Function: `lifespan`
+  - Lines: 28–47
+- **Required settings**: `TRIP_AUTH_JWT_SECRET`, `TRIP_DATABASE_URL`, `TRIP_KAFKA_BOOTSTRAP_SERVERS`, `TRIP_KAFKA_SECURITY_PROTOCOL` should be mandatory in prod; `TRIP_BROKER_TYPE` should be explicit.
+- **Test gaps**: no tests assert that prod boot fails when defaults are used.
+
+### 3.4 Release Gate Test Sufficiency — **FAIL**
+- **Current test coverage**:
+  - Idempotency replay for manual create: `test_manual_idempotency_replays_full_response`.
+    - File: `services/trip-service/tests/test_integration.py`
+    - Lines: 274–291
+  - Outbox retry/backoff unit tests: `test_outbox_first_failure_backoff_is_five_seconds`, `test_outbox_dead_letters_at_configured_ceiling`, `test_outbox_backoff_helper_caps_after_fifth_window`.
+    - File: `services/trip-service/tests/test_workers.py`
+    - Lines: 30–76, 136–139
+- **Missing critical tests**:
+  - Parallel same Idempotency-Key request.
+  - Payload mismatch on same Idempotency-Key.
+  - Enrichment reclaim after stale claim expiry.
+  - Outbox retry + dead-letter end-to-end flow.
+  - Create › enrichment › complete/cancel › outbox integration path.
+- **Dependency-heavy tests**: outbox and enrichment full integration likely require dockerized DB + broker; mark as integration gated tests.
+
+## 4. Release Checklist
+- [ ] Parallel same-key create test returns controlled non-5xx response (Idempotency-Key in-flight).
+- [ ] Same-key payload mismatch test returns deterministic 409 (no 5xx).
+- [ ] Prod boot fails when `TRIP_AUTH_JWT_SECRET` is unset or default.
+- [ ] Prod boot fails when `TRIP_DATABASE_URL` is unset or default.
+- [ ] Prod boot fails when Kafka is `PLAINTEXT` in prod without explicit acceptance.
+- [ ] Outbox duplicate-publish risk is either fixed or explicitly accepted in ADR.
+- [ ] Enrichment worker reclaims stale claims after `claim_expires_at_utc` (automated test).
+- [ ] Outbox retry and dead-letter flow tested end-to-end with broker.
+- [ ] Create › enrichment › complete/cancel › outbox integration path verified.
+
+## 5. Final Decision
+**NOT READY**
+
+Closure conditions (max 10):
+1. Replace idempotency in-flight 5xx with controlled response or replay semantics and add parallel test.
+2. Document or mitigate outbox publish/commit duplicate window; add consumer idempotency or transactional publish.
+3. Add prod fail-fast validation for JWT secret, DB URL, and broker security settings.
+4. Add missing release-gate tests listed above, with clear pass criteria.
