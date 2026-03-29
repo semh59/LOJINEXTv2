@@ -22,11 +22,7 @@ from location_service.enums import (
     BulkRefreshItemStatus,
     BulkRefreshStatus,
     DirectionCode,
-    ExportStatus,
     GradeClass,
-    ImportJobStatus,
-    ImportMode,
-    ImportRowStatus,
     PairStatus,
     ProcessingStatus,
     RoadClass,
@@ -258,10 +254,6 @@ class ProcessingRun(Base):
     bulk_refresh_job_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("bulk_refresh_jobs.bulk_refresh_job_id"), nullable=True
     )
-    import_job_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("route_import_jobs.import_job_id"), nullable=True
-    )
-
     started_at_utc: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at_utc: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_utcnow, nullable=False)
@@ -360,94 +352,6 @@ class BulkRefreshJobItem(Base):
     )
 
     __table_args__ = (UniqueConstraint("bulk_refresh_job_id", "item_no", name="uq_bulk_refresh_job_items_no"),)
-
-
-class RouteImportJob(Base):
-    __tablename__ = "route_import_jobs"
-
-    import_job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    file_storage_ref: Mapped[str] = mapped_column(String(512), nullable=False)
-    content_checksum: Mapped[str] = mapped_column(String(64), nullable=False)
-    mode: Mapped[ImportMode] = mapped_column(String(50), nullable=False)
-    job_status: Mapped[ImportJobStatus] = mapped_column(String(50), nullable=False)
-
-    total_rows: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    processed_rows: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    failed_rows: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-
-    started_at_utc: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    completed_at_utc: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_utcnow, nullable=False)
-    updated_at_utc: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=get_utcnow, onupdate=get_utcnow, nullable=False
-    )
-
-    __table_args__ = (UniqueConstraint("content_checksum", "mode", name="uq_route_import_jobs_checksum_mode"),)
-
-
-class RouteImportJobRow(Base):
-    __tablename__ = "route_import_job_rows"
-
-    import_job_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("route_import_jobs.import_job_id", ondelete="CASCADE"), primary_key=True
-    )
-    row_no: Mapped[int] = mapped_column(Integer, primary_key=True)
-    row_status: Mapped[ImportRowStatus] = mapped_column(String(50), nullable=False)
-    raw_data_json: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
-
-    route_pair_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("route_pairs.route_pair_id", ondelete="SET NULL"), nullable=True
-    )
-    processing_run_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("processing_runs.processing_run_id", ondelete="SET NULL"), nullable=True
-    )
-
-    created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_utcnow, nullable=False)
-    updated_at_utc: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=get_utcnow, onupdate=get_utcnow, nullable=False
-    )
-
-
-class RouteImportJobRowError(Base):
-    __tablename__ = "route_import_job_row_errors"
-
-    import_job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
-    row_no: Mapped[int] = mapped_column(Integer, primary_key=True)
-    error_seq: Mapped[int] = mapped_column(Integer, primary_key=True)
-
-    error_code: Mapped[str] = mapped_column(String(100), nullable=False)
-    error_message: Mapped[str] = mapped_column(String(512), nullable=False)
-
-    created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_utcnow, nullable=False)
-
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["import_job_id", "row_no"],
-            ["route_import_job_rows.import_job_id", "route_import_job_rows.row_no"],
-            ondelete="CASCADE",
-            name="fk_route_import_job_row_errors_row",
-        ),
-    )
-
-
-class RouteExportJob(Base):
-    __tablename__ = "route_export_jobs"
-
-    export_job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    job_status: Mapped[ExportStatus] = mapped_column(String(50), nullable=False)
-    scope_json: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    include_segments: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-
-    file_storage_ref: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
-    record_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-
-    expires_at_utc: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    started_at_utc: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    completed_at_utc: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_utcnow, nullable=False)
-    updated_at_utc: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=get_utcnow, onupdate=get_utcnow, nullable=False
-    )
 
 
 class IdempotencyKey(Base):

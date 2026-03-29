@@ -10,7 +10,7 @@ from uuid import UUID
 from sqlalchemy import select
 
 from location_service.database import async_session_factory
-from location_service.enums import PairStatus
+from location_service.enums import PairStatus, TriggerType
 from location_service.models import RoutePair
 from location_service.processing.pipeline import trigger_processing
 
@@ -43,7 +43,7 @@ async def trigger_bulk_refresh(pair_ids: List[UUID] | None = None) -> int:
     # trigger_processing handles its own session and asyncio task creation
     for pid in targets:
         try:
-            await trigger_processing(pair_id=pid, trigger_type="REFRESH")
+            await trigger_processing(pair_id=pid, trigger_type=TriggerType.BULK_REFRESH_ITEM)
         except Exception as e:
             logger.error(f"Failed to trigger refresh for pair {pid}: {e}")
             continue

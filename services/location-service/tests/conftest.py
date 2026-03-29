@@ -1,68 +1,81 @@
-"""Shared test fixtures for Location Service tests.
-
-Uses testcontainers to spin up a real PostgreSQL instance.
-"""
+"""Shared test fixtures for Location Service tests."""
 
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
 
+import jwt
 import pytest
 import pytest_asyncio
-from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 from testcontainers.postgres import PostgresContainer
 
 from location_service.config import settings
-from location_service.errors import ProblemDetailError, problem_detail_handler
-from location_service.middleware import RequestIdMiddleware
+from location_service.database import get_db
+from location_service.main import create_app
 from location_service.models import Base
-from location_service.routers import health, internal_routes, pairs, points, processing
-
-# ---------------------------------------------------------------------------
-# PostgreSQL container (session-scoped sync fixture)
-# ---------------------------------------------------------------------------
 
 _pg_url: str = ""
-_tables_created: bool = False
+TEST_AUTH_SECRET = "location-service-test-secret-please-change-me-32b"
+settings.environment = "test"
+settings.auth_jwt_secret = TEST_AUTH_SECRET
+settings.auth_jwt_algorithm = "HS256"
+settings.mapbox_api_key = "test-mapbox-key"
+settings.enable_ors_validation = False
+
+
+def _token(payload: dict[str, str]) -> str:
+    return jwt.encode(payload, settings.auth_jwt_secret, algorithm=settings.auth_jwt_algorithm)
+
+
+def _bearer_headers(payload: dict[str, str]) -> dict[str, str]:
+    return {"Authorization": f"Bearer {_token(payload)}"}
+
+
+ADMIN_HEADERS: dict[str, str] = _bearer_headers({"sub": "admin-test-001", "role": "ADMIN"})
+SUPER_ADMIN_HEADERS: dict[str, str] = _bearer_headers({"sub": "super-admin-001", "role": "SUPER_ADMIN"})
+INTERNAL_SERVICE_HEADERS: dict[str, str] = _bearer_headers(
+    {"sub": "trip-service", "role": "SERVICE", "service": "trip-service"}
+)
+FORBIDDEN_SERVICE_HEADERS: dict[str, str] = _bearer_headers(
+    {"sub": "other-service", "role": "SERVICE", "service": "other-service"}
+)
+FORBIDDEN_USER_HEADERS: dict[str, str] = _bearer_headers({"sub": "driver-test-001", "role": "DRIVER"})
+
+
+@pytest.fixture(scope="session", autouse=True)
+def configure_test_settings() -> None:
+    settings.environment = "test"
+    settings.auth_jwt_secret = TEST_AUTH_SECRET
+    settings.auth_jwt_algorithm = "HS256"
+    settings.mapbox_api_key = "test-mapbox-key"
+    settings.enable_ors_validation = False
 
 
 @pytest.fixture(scope="session")
-def postgres_container():
+def postgres_container() -> str:
     """Start a PostgreSQL 16 container for the entire test session."""
     global _pg_url
     with PostgresContainer("postgres:16-alpine") as pg:
         url = pg.get_connection_url()
         _pg_url = url.replace("postgresql+psycopg2://", "postgresql+asyncpg://")
         _pg_url = _pg_url.replace("postgresql://", "postgresql+asyncpg://")
-
-        # Override settings for tests
         settings.database_url = _pg_url
-        yield
-
-
-# ---------------------------------------------------------------------------
-# Engine + session (function-scoped, NullPool avoids cross-loop issues)
-# ---------------------------------------------------------------------------
+        yield _pg_url
 
 
 @pytest_asyncio.fixture
-async def db_engine(postgres_container):
-    """Create an engine for the current test using NullPool."""
-    global _tables_created
-
+async def db_engine(postgres_container: str):
+    """Create a fresh engine and clean schema for each test."""
     engine = create_async_engine(_pg_url, echo=False, poolclass=NullPool)
-
-    if not _tables_created:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        _tables_created = True
-
+    async with engine.begin() as conn:
+        await conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
+        await conn.execute(text("CREATE SCHEMA public"))
+        await conn.run_sync(Base.metadata.create_all)
     yield engine
-
     await engine.dispose()
 
 
@@ -72,43 +85,46 @@ async def test_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
     session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
     async with session_factory() as session:
         yield session
-        await session.rollback()
+        if session.in_transaction():
+            try:
+                await session.rollback()
+            except Exception:
+                pass
 
 
 @pytest_asyncio.fixture
-async def client(db_engine) -> AsyncGenerator[AsyncClient, None]:
-    """Provide a test HTTP client."""
-
-    @asynccontextmanager
-    async def noop_lifespan(app: FastAPI):
-        yield
-
-    test_app = FastAPI(lifespan=noop_lifespan)
-    test_app.add_middleware(RequestIdMiddleware)
-    test_app.add_exception_handler(ProblemDetailError, problem_detail_handler)  # type: ignore[arg-type]
-    test_app.include_router(health.router)
-    test_app.include_router(points.router)
-    test_app.include_router(pairs.router)
-    test_app.include_router(processing.router)
-    test_app.include_router(internal_routes.router)
-
+async def raw_client(db_engine, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[AsyncClient, None]:
+    """Provide an unauthenticated test client for auth and health checks."""
     session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    app = create_app()
 
-    # Patch the global session factory so direct users get test DB
-    import location_service.database
-    import location_service.processing.pipeline
-    import location_service.routers.health
+    async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
+        async with session_factory() as session:
+            yield session
 
-    original_factory = location_service.database.async_session_factory
-    location_service.database.async_session_factory = session_factory
-    location_service.routers.health.async_session_factory = session_factory
-    location_service.processing.pipeline.async_session_factory = session_factory
+    app.dependency_overrides[get_db] = override_get_db
 
-    transport = ASGITransport(app=test_app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+    monkeypatch.setattr("location_service.database.async_session_factory", session_factory)
+    monkeypatch.setattr("location_service.routers.health.async_session_factory", session_factory)
+    monkeypatch.setattr("location_service.processing.pipeline.async_session_factory", session_factory)
+    monkeypatch.setattr("location_service.processing.approval.async_session_factory", session_factory)
+    monkeypatch.setattr("location_service.processing.bulk.async_session_factory", session_factory)
+    monkeypatch.setattr("location_service.processing.pipeline._dispatch_processing_task", lambda *_args: None)
 
-    # Restore original
-    location_service.database.async_session_factory = original_factory
-    location_service.routers.health.async_session_factory = original_factory
-    location_service.processing.pipeline.async_session_factory = original_factory
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client
+
+
+@pytest_asyncio.fixture
+async def client(raw_client: AsyncClient) -> AsyncGenerator[AsyncClient, None]:
+    """Provide a public-admin authenticated test client."""
+    raw_client.headers.update(ADMIN_HEADERS)
+    yield raw_client
+
+
+@pytest_asyncio.fixture
+async def internal_client(raw_client: AsyncClient) -> AsyncGenerator[AsyncClient, None]:
+    """Provide an internal trip-service authenticated test client."""
+    raw_client.headers.update(INTERNAL_SERVICE_HEADERS)
+    yield raw_client

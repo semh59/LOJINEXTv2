@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     worker_heartbeat_timeout_seconds: int = 30
 
     outbox_relay_poll_interval_seconds: int = 5
+    outbox_relay_claim_ttl_seconds: int = 60
     outbox_relay_max_failures: int = 10
 
     idempotency_retention_hours: int = 24

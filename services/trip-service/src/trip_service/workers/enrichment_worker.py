@@ -25,6 +25,7 @@ from sqlalchemy import and_, or_, select
 
 from trip_service.config import settings
 from trip_service.database import async_session_factory
+from trip_service.dependencies import _location_service_headers, _problem_code
 from trip_service.enums import (
     DataQualityFlag,
     EnrichmentStatus,
@@ -145,17 +146,24 @@ async def _resolve_route(origin_name: str, destination_name: str) -> tuple[str |
                     "profile_code": "TIR",
                     "language_hint": "AUTO",
                 },
+                headers=_location_service_headers(),
             )
             if resp.status_code == 200:
                 data = resp.json()
                 return data.get("route_id"), RouteStatus.READY
-            else:
-                logger.warning(
-                    "Route resolution failed: status=%d body=%s",
+            problem_code = _problem_code(resp)
+            if resp.status_code in {404, 422} and problem_code in {
+                "LOCATION_ROUTE_RESOLUTION_NOT_FOUND",
+                "ROUTE_AMBIGUOUS",
+            }:
+                logger.info(
+                    "Route resolution skipped as business-invalid: status=%d code=%s",
                     resp.status_code,
-                    resp.text,
+                    problem_code,
                 )
-                return None, RouteStatus.FAILED
+                return None, RouteStatus.SKIPPED
+            logger.warning("Route resolution failed: status=%d code=%s", resp.status_code, problem_code)
+            return None, RouteStatus.FAILED
     except Exception as e:
         logger.error("Route resolution error: %s", e)
         return None, RouteStatus.FAILED

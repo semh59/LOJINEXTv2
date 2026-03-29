@@ -205,7 +205,7 @@ async def test_outbox_relay_skips_publishing_rows(test_session, db_engine, monke
     await test_session.commit()
 
     broker = RecordingBroker()
-    processed = await _relay_batch(broker, batch_size=10)
+    processed = await _relay_batch(broker, worker_id="test-worker", batch_size=10)
     assert processed == 2
     assert len(broker.messages) == 2
     assert {msg.event_id for msg in broker.messages} == {pending.event_id, ready.event_id}
@@ -305,3 +305,129 @@ async def test_enrichment_reclaims_stale_claim(test_session, db_engine, monkeypa
     assert refreshed is not None
     assert refreshed.enrichment_status == EnrichmentStatus.READY
     assert refreshed.claim_token is None
+
+
+@pytest.mark.asyncio
+async def test_enrichment_skips_non_retryable_location_business_invalid(
+    test_session,
+    db_engine,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    monkeypatch.setattr("trip_service.workers.enrichment_worker.async_session_factory", session_factory)
+
+    async def skipped_route_resolution(origin_name: str, destination_name: str):
+        del origin_name, destination_name
+        return None, RouteStatus.SKIPPED
+
+    monkeypatch.setattr("trip_service.workers.enrichment_worker._resolve_route", skipped_route_resolution)
+
+    now = datetime.now(UTC)
+    trip = TripTrip(
+        id="01JATENRICHSKIPPED0001",
+        trip_no="TR-ENRICH-SKIPPED",
+        source_type="TELEGRAM_TRIP_SLIP",
+        source_slip_no="SLIP-ENRICH-SKIPPED",
+        source_reference_key="telegram-message-enrich-skipped",
+        source_payload_hash="hash",
+        review_reason_code="SOURCE_IMPORT",
+        base_trip_id=None,
+        driver_id="driver-001",
+        vehicle_id="vehicle-001",
+        trailer_id=None,
+        route_pair_id=None,
+        route_id=None,
+        origin_location_id=None,
+        origin_name_snapshot=None,
+        destination_location_id=None,
+        destination_name_snapshot=None,
+        trip_datetime_utc=now,
+        trip_timezone="Europe/Istanbul",
+        planned_duration_s=None,
+        planned_end_utc=None,
+        tare_weight_kg=10000,
+        gross_weight_kg=25000,
+        net_weight_kg=15000,
+        is_empty_return=False,
+        status="PENDING_REVIEW",
+        version=1,
+        created_by_actor_type="SERVICE",
+        created_by_actor_id="worker-test",
+        created_at_utc=now,
+        updated_at_utc=now,
+    )
+    evidence = TripTripEvidence(
+        id="01JATENRICHSKIPPED0002",
+        trip_id=trip.id,
+        evidence_source="TELEGRAM_TRIP_SLIP",
+        evidence_kind="OCR",
+        source_slip_no="SLIP-ENRICH-SKIPPED",
+        origin_name_raw="Unknown Origin",
+        destination_name_raw="Unknown Destination",
+        raw_payload_json="{}",
+        created_at_utc=now,
+    )
+    enrichment = TripTripEnrichment(
+        id="01JATENRICHSKIPPED0003",
+        trip_id=trip.id,
+        enrichment_status=EnrichmentStatus.PENDING,
+        route_status=RouteStatus.PENDING,
+        data_quality_flag="LOW",
+        enrichment_attempt_count=0,
+        next_retry_at_utc=None,
+        created_at_utc=now,
+        updated_at_utc=now,
+    )
+    test_session.add_all([trip, evidence, enrichment])
+    await test_session.commit()
+
+    processed = await _claim_and_process_batch("worker-test")
+    assert processed == 1
+
+    async with session_factory() as session:
+        refreshed = await session.get(TripTripEnrichment, enrichment.id)
+    assert refreshed is not None
+    assert refreshed.route_status == RouteStatus.SKIPPED
+    assert refreshed.enrichment_status == EnrichmentStatus.SKIPPED
+    assert refreshed.next_retry_at_utc is None
+
+
+@pytest.mark.asyncio
+async def test_outbox_relay_reclaims_stale_claim(test_session, db_engine, monkeypatch: pytest.MonkeyPatch):
+    """Ensure outbox relay reclaims rows stuck in PUBLISHING with expired claims."""
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    monkeypatch.setattr("trip_service.workers.outbox_relay.async_session_factory", session_factory)
+
+    now = datetime.now(UTC)
+    stale_publishing = TripOutbox(
+        event_id="01JATSTALEOUTBOX001",
+        aggregate_type="TRIP",
+        aggregate_id="TRIP-STALE-001",
+        aggregate_version=1,
+        event_name="trip.created.v1",
+        schema_version=1,
+        payload_json="{}",
+        partition_key="TRIP-STALE-001",
+        publish_status="PUBLISHING",
+        attempt_count=1,
+        claim_token="old-token",
+        claim_expires_at_utc=now - timedelta(minutes=10),
+        claimed_by_worker="dead-worker",
+        created_at_utc=now - timedelta(hours=1),
+    )
+    test_session.add(stale_publishing)
+    await test_session.commit()
+
+    broker = RecordingBroker()
+    processed = await _relay_batch(broker, worker_id="new-worker", batch_size=10)
+
+    assert processed == 1
+    assert len(broker.messages) == 1
+    assert broker.messages[0].event_id == stale_publishing.event_id
+
+    async with session_factory() as session:
+        refreshed = await session.get(TripOutbox, stale_publishing.event_id)
+    assert refreshed is not None
+    assert refreshed.publish_status == "PUBLISHED"
+    assert refreshed.claim_token is None
+    assert refreshed.claimed_by_worker is None

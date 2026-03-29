@@ -1,14 +1,10 @@
 """Domain enums for Location Service.
 
 Implements all status enums, classification enums, and type enums
-referenced across Sections 4–8 of the v0.7 spec.
+referenced across Sections 4-8 of the v0.7 spec.
 """
 
 from enum import StrEnum
-
-# ---------------------------------------------------------------------------
-# Section 4.2 — Route pair lifecycle
-# ---------------------------------------------------------------------------
 
 
 class PairStatus(StrEnum):
@@ -19,21 +15,11 @@ class PairStatus(StrEnum):
     SOFT_DELETED = "SOFT_DELETED"
 
 
-# ---------------------------------------------------------------------------
-# Section 4.3 — Directional identity
-# ---------------------------------------------------------------------------
-
-
 class DirectionCode(StrEnum):
     """Route direction within a pair."""
 
     FORWARD = "FORWARD"
     REVERSE = "REVERSE"
-
-
-# ---------------------------------------------------------------------------
-# Section 4.5 — Route version lifecycle
-# ---------------------------------------------------------------------------
 
 
 class ProcessingStatus(StrEnum):
@@ -52,11 +38,6 @@ class ValidationResult(StrEnum):
     WARNING = "WARNING"
     FAIL = "FAIL"
     UNVALIDATED = "UNVALIDATED"
-
-
-# ---------------------------------------------------------------------------
-# Section 4.7 — Processing runs
-# ---------------------------------------------------------------------------
 
 
 class RunStatus(StrEnum):
@@ -89,11 +70,6 @@ class ProviderCallStatus(StrEnum):
     UNAVAILABLE = "UNAVAILABLE"
 
 
-# ---------------------------------------------------------------------------
-# Section 4.9 — Bulk refresh jobs
-# ---------------------------------------------------------------------------
-
-
 class BulkRefreshStatus(StrEnum):
     """Bulk refresh job status."""
 
@@ -122,73 +98,6 @@ class BulkRefreshItemStatus(StrEnum):
     CANCELLED = "CANCELLED"
 
 
-# ---------------------------------------------------------------------------
-# Section 4.11 — Import jobs
-# ---------------------------------------------------------------------------
-
-
-class ImportMode(StrEnum):
-    """Import job mode."""
-
-    IMPORT_ONLY = "IMPORT_ONLY"
-    IMPORT_AND_CALCULATE = "IMPORT_AND_CALCULATE"
-
-
-class ImportJobStatus(StrEnum):
-    """Import job status."""
-
-    QUEUED = "QUEUED"
-    RUNNING = "RUNNING"
-    PARTIAL_SUCCESS = "PARTIAL_SUCCESS"
-    FAILED = "FAILED"
-    SUCCEEDED = "SUCCEEDED"
-
-
-class ImportRowStatus(StrEnum):
-    """Import job row status."""
-
-    VALIDATED = "VALIDATED"
-    IMPORTED = "IMPORTED"
-    CALCULATE_QUEUED = "CALCULATE_QUEUED"
-    CALCULATE_SUCCEEDED = "CALCULATE_SUCCEEDED"
-    CALCULATE_FAILED = "CALCULATE_FAILED"
-    FAILED = "FAILED"
-    WARNING_ONLY = "WARNING_ONLY"
-
-
-class ImportErrorSeverity(StrEnum):
-    """Import row error severity."""
-
-    ERROR = "ERROR"
-    WARNING = "WARNING"
-
-
-# ---------------------------------------------------------------------------
-# Section 4.14 — Export jobs
-# ---------------------------------------------------------------------------
-
-
-class ExportStatus(StrEnum):
-    """Export job status."""
-
-    QUEUED = "QUEUED"
-    RUNNING = "RUNNING"
-    SUCCEEDED = "SUCCEEDED"
-    FAILED = "FAILED"
-
-
-class ExportVersionScope(StrEnum):
-    """Export version scope."""
-
-    ACTIVE_ONLY = "ACTIVE_ONLY"
-    ALL_VERSIONS = "ALL_VERSIONS"
-
-
-# ---------------------------------------------------------------------------
-# Section 5.4 — Grade classification
-# ---------------------------------------------------------------------------
-
-
 class GradeClass(StrEnum):
     """Segment grade classification."""
 
@@ -197,11 +106,6 @@ class GradeClass(StrEnum):
     FLAT = "FLAT"
     UPHILL_MODERATE = "UPHILL_MODERATE"
     UPHILL_STEEP = "UPHILL_STEEP"
-
-
-# ---------------------------------------------------------------------------
-# Section 5.6 — Road classification
-# ---------------------------------------------------------------------------
 
 
 class RoadClass(StrEnum):
@@ -223,22 +127,12 @@ class RoadClass(StrEnum):
     OTHER = "OTHER"
 
 
-# ---------------------------------------------------------------------------
-# Section 5.6 — Urban classification
-# ---------------------------------------------------------------------------
-
-
 class UrbanClass(StrEnum):
     """Segment urban classification."""
 
     URBAN = "URBAN"
     NON_URBAN = "NON_URBAN"
     UNKNOWN = "UNKNOWN"
-
-
-# ---------------------------------------------------------------------------
-# Section 5.5 — Speed band
-# ---------------------------------------------------------------------------
 
 
 class SpeedBand(StrEnum):
@@ -250,11 +144,6 @@ class SpeedBand(StrEnum):
     UNKNOWN = "UNKNOWN"
 
 
-# ---------------------------------------------------------------------------
-# Section 5.7 — Speed limit state
-# ---------------------------------------------------------------------------
-
-
 class SpeedLimitState(StrEnum):
     """Segment speed limit data availability."""
 
@@ -262,20 +151,10 @@ class SpeedLimitState(StrEnum):
     UNKNOWN = "UNKNOWN"
 
 
-# ---------------------------------------------------------------------------
-# Section 5.8 — Geometry format
-# ---------------------------------------------------------------------------
-
-
 class GeometryFormat(StrEnum):
     """Supported geometry encoding formats."""
 
     POLYLINE6 = "POLYLINE6"
-
-
-# ---------------------------------------------------------------------------
-# Section 5.3 — Language hint for resolve
-# ---------------------------------------------------------------------------
 
 
 class LanguageHint(StrEnum):

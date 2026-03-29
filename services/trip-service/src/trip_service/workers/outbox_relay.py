@@ -16,7 +16,7 @@ import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from trip_service.broker import MessageBroker, OutboxMessage
@@ -41,6 +41,7 @@ OUTBOX_BACKOFF_SECONDS: list[int] = [
     300,  # 5 minutes (cap)
 ]
 
+
 def _outbox_next_attempt_at(consecutive_failures: int) -> datetime:
     """Calculate next retry time for outbox relay.
 
@@ -62,26 +63,37 @@ def _now_utc() -> datetime:
 # ---------------------------------------------------------------------------
 
 
-async def _relay_batch(broker: MessageBroker, batch_size: int = 20) -> int:
+async def _relay_batch(broker: MessageBroker, worker_id: str, batch_size: int = 20) -> int:
     """Claim and publish a batch of outbox rows.
 
     Uses SELECT ... FOR UPDATE SKIP LOCKED for multi-instance safety.
+    Reclaims PUBLISHING rows that have exceeded their claim TTL.
+
     Returns number of rows processed.
     """
     now = _now_utc()
     published_count = 0
+    claim_ttl = timedelta(seconds=settings.outbox_relay_claim_ttl_seconds)
+    claim_token = str(uuid.uuid4())
 
     async with async_session_factory() as session:
-        # Select PENDING/READY/FAILED rows that are ready
+        # Select PENDING/READY/FAILED rows OR stale PUBLISHING rows
         stmt = (
             select(TripOutbox)
             .where(
-                TripOutbox.publish_status.in_(
-                    [
-                        OutboxPublishStatus.PENDING,
-                        OutboxPublishStatus.READY,
-                        OutboxPublishStatus.FAILED,
-                    ]
+                or_(
+                    TripOutbox.publish_status.in_(
+                        [
+                            OutboxPublishStatus.PENDING,
+                            OutboxPublishStatus.READY,
+                            OutboxPublishStatus.FAILED,
+                        ]
+                    ),
+                    # RECOVERY: Pick up rows stuck in PUBLISHING (e.g. worker crashed)
+                    and_(
+                        TripOutbox.publish_status == OutboxPublishStatus.PUBLISHING,
+                        TripOutbox.claim_expires_at_utc < now,
+                    ),
                 ),
                 # Only pick up rows ready for attempt
                 TripOutbox.next_attempt_at_utc.is_(None) | (TripOutbox.next_attempt_at_utc <= now),
@@ -96,12 +108,16 @@ async def _relay_batch(broker: MessageBroker, batch_size: int = 20) -> int:
         if not rows:
             return 0
 
-        # Mark rows as PUBLISHING before any broker publish
+        # Mark rows as PUBLISHING with claim metadata before any broker publish
         for row in rows:
             row.publish_status = OutboxPublishStatus.PUBLISHING
             row.next_attempt_at_utc = None
+            row.claim_token = claim_token
+            row.claim_expires_at_utc = now + claim_ttl
+            row.claimed_by_worker = worker_id
         await session.commit()
 
+        # Process each row
         for row in rows:
             success = await _publish_single(broker, session, row)
             if success:
@@ -149,6 +165,9 @@ async def _publish_single(
         row.attempt_count = 0  # Reset consecutive failure counter on success
         row.next_attempt_at_utc = None
         row.last_error_code = None
+        row.claim_token = None
+        row.claim_expires_at_utc = None
+        row.claimed_by_worker = None
         OUTBOX_PUBLISHED_TOTAL.labels(event_name=row.event_name).inc()
 
         logger.info(
@@ -164,6 +183,9 @@ async def _publish_single(
         # FAILURE: Increment consecutive failure counter
         row.attempt_count += 1
         row.last_error_code = str(e)[:100]
+        row.claim_token = None
+        row.claim_expires_at_utc = None
+        row.claimed_by_worker = None
 
         if row.attempt_count >= settings.outbox_relay_max_failures:
             # V8 Section 14.2: 10 consecutive failures → DEAD_LETTER
@@ -213,7 +235,7 @@ async def run_outbox_relay(broker: MessageBroker, worker_id: str | None = None) 
     try:
         while True:
             try:
-                published = await _relay_batch(broker)
+                published = await _relay_batch(broker, worker_id)
                 if published > 0:
                     logger.info("Relay %s: published %d events", worker_id, published)
                 record_worker_heartbeat("outbox-relay")

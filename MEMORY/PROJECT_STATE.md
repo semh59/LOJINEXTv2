@@ -13,7 +13,7 @@ Update it at the end of any session that changes project state.
 ## Next Task ID
 
 ```
-TASK-0018
+TASK-0024
 ```
 
 Use this when creating the next task. Then increment this counter.
@@ -69,7 +69,13 @@ Phase 6   Testing
 | TASK-0010 | Trip Service Prod Hardening                 | ready_for_review | 2026-03-27 | Codex       |
 | TASK-0011 | Trip Service Contract Alignment             | ready_for_review | 2026-03-27       | Codex       |
 | TASK-0012 | Deep Audit + Full Test Matrix               | in_progress | 2026-03-28       | Codex       |
-| TASK-0014 | Full Repo Detective Audit                  | ready_for_review | 2026-03-28   | Codex       |
+| TASK-0014 | Full Repo Detective Audit                   | ready_for_review | 2026-03-28   | Codex       |
+| TASK-0018 | Location Service Contract Cleanup           | ready_for_review | 2026-03-28  | Codex       |
+| TASK-0019 | Location Release Hardening + Trip Alignment | ready_for_review | 2026-03-28 | Codex       |
+| TASK-0020 | Location Cleanup and Architecture Hardening | planning | 2026-03-28 | Codex       |
+| TASK-0021 | Location Frontend Contract Alignment       | ready_for_review | 2026-03-29 | Codex       |
+| TASK-0022 | Location Service Deep Audit + Prod-Hard Tests | ready_for_review | 2026-03-29 | Codex |
+| TASK-0023 | Location Service Critical Fixes + Retest | ready_for_review | 2026-03-29 | Codex |
 
 ---
 
@@ -92,9 +98,9 @@ Phase 6   Testing
 ## What Comes Next
 
 ```
-Task:   TASK-0011 - Trip Service Contract Alignment
-Why:    Deep audit and full test execution across trip-service and location-service are underway to validate the contract work before downstream adoption.
-Brief:  Complete TASK-0012 (audit + lint/pytest/migrations/docker smoke), then proceed with the Tauri admin shell in TASK-0013.
+Task:   TASK-0020 - Location Cleanup and Architecture Hardening
+Why:    TASK-0019 and TASK-0021 closed the release blockers and frontend public-contract gaps; the remaining work is the deferred P2 cleanup and persistent worker redesign.
+Brief:  Remove dead surface, replace in-process recovery with a durable worker model, and finish the remaining Location Service cleanup without reopening the hardened public contract.
 ```
 
 ---
@@ -114,6 +120,8 @@ Parts of the system that are fragile, incomplete, or temporary.
 | Area | Issue | Task |
 | ---- | ----- | ---- |
 | Trip service public contract | TASK-0011 changes public auth and request shapes; downstream callers must migrate before release | TASK-0011 |
+| Location processing runtime | TASK-0019 keeps in-process processing plus startup recovery; a durable DB-backed worker is still deferred | TASK-0020 |
+| Location public compatibility aliases | TASK-0021 intentionally keeps `limit` and the deprecated pair-prefixed processing-run detail path for one cycle | TASK-0020 |
 
 ---
 

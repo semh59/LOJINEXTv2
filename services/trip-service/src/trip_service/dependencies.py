@@ -5,9 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import httpx
+import jwt
 
 from trip_service.config import settings
-from trip_service.errors import trip_dependency_unavailable, trip_validation_error
+from trip_service.errors import (
+    trip_dependency_unavailable,
+    trip_invalid_route_pair,
+    trip_validation_error,
+)
 
 
 @dataclass(frozen=True)
@@ -58,6 +63,39 @@ def _location_resolve_url() -> str:
 def _location_trip_context_url(pair_id: str) -> str:
     """Return the Location trip-context endpoint URL."""
     return f"{settings.location_service_url}/internal/v1/route-pairs/{pair_id}/trip-context"
+
+
+def _location_service_headers() -> dict[str, str]:
+    token = jwt.encode(
+        {"sub": "trip-service", "role": "SERVICE", "service": "trip-service"},
+        settings.auth_jwt_secret,
+        algorithm=settings.auth_jwt_algorithm,
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _problem_code(response: httpx.Response) -> str | None:
+    try:
+        data = response.json()
+    except ValueError:
+        return None
+    if isinstance(data, dict):
+        code = data.get("code")
+        if isinstance(code, str) and code:
+            return code
+    return None
+
+
+def _location_validation_error(detail: str) -> Exception:
+    return trip_validation_error(
+        detail,
+        errors=[
+            {
+                "field": "body.origin_name",
+                "message": "origin_name and destination_name do not map to a single active route pair.",
+            }
+        ],
+    )
 
 
 async def validate_trip_references(
@@ -128,20 +166,15 @@ async def resolve_route_by_names(
     }
     try:
         async with httpx.AsyncClient(timeout=settings.dependency_timeout_seconds) as client:
-            response = await client.post(_location_resolve_url(), json=payload)
+            response = await client.post(_location_resolve_url(), json=payload, headers=_location_service_headers())
     except httpx.HTTPError as exc:
         raise trip_dependency_unavailable("Location Service route resolution is unavailable.") from exc
 
-    if response.status_code == 404:
-        raise trip_validation_error(
-            "Trip route could not be resolved.",
-            errors=[
-                {
-                    "field": "body.origin_name",
-                    "message": "origin_name and destination_name do not map to an active pair.",
-                }
-            ],
-        )
+    problem_code = _problem_code(response)
+    if response.status_code == 404 and problem_code == "LOCATION_ROUTE_RESOLUTION_NOT_FOUND":
+        raise _location_validation_error("Trip route could not be resolved.")
+    if response.status_code == 422 and problem_code == "ROUTE_AMBIGUOUS":
+        raise _location_validation_error("Trip route resolution is ambiguous.")
     if response.status_code != 200:
         raise trip_dependency_unavailable(
             f"Location Service route resolution returned unexpected status {response.status_code}."
@@ -159,19 +192,19 @@ async def fetch_trip_context(pair_id: str, *, field_name: str = "body.route_pair
     """Fetch forward and reverse trip context for a route pair."""
     try:
         async with httpx.AsyncClient(timeout=settings.dependency_timeout_seconds) as client:
-            response = await client.get(_location_trip_context_url(pair_id))
+            response = await client.get(_location_trip_context_url(pair_id), headers=_location_service_headers())
     except httpx.HTTPError as exc:
         raise trip_dependency_unavailable("Location Service trip context is unavailable.") from exc
 
-    if response.status_code == 404:
-        raise trip_validation_error(
-            "Route pair is invalid or inactive.",
-            errors=[
-                {
-                    "field": field_name,
-                    "message": "route_pair_id does not map to an active pair with trip context.",
-                }
-            ],
+    problem_code = _problem_code(response)
+    if (
+        response.status_code == 404
+        and problem_code == "LOCATION_ROUTE_PAIR_NOT_FOUND"
+        or response.status_code == 409
+        and problem_code in {"LOCATION_ROUTE_PAIR_NOT_ACTIVE_USE_CALCULATE", "LOCATION_ROUTE_PAIR_SOFT_DELETED"}
+    ):
+        raise trip_invalid_route_pair(
+            f"The provided route pair cannot be used for trip creation: {problem_code}.",
         )
     if response.status_code != 200:
         raise trip_dependency_unavailable(
@@ -213,12 +246,14 @@ async def probe_location_service() -> bool:
         "profile_code": "TIR",
         "language_hint": "AUTO",
     }
+    headers = _location_service_headers()
     try:
         async with httpx.AsyncClient(timeout=settings.dependency_timeout_seconds) as client:
-            resolve_response = await client.post(_location_resolve_url(), json=resolve_payload)
+            resolve_response = await client.post(_location_resolve_url(), json=resolve_payload, headers=headers)
             context_response = await client.get(
-                _location_trip_context_url("00000000-0000-0000-0000-000000000000")
+                _location_trip_context_url("00000000-0000-0000-0000-000000000000"),
+                headers=headers,
             )
     except httpx.HTTPError:
         return False
-    return resolve_response.status_code in {200, 404} and context_response.status_code in {200, 404}
+    return resolve_response.status_code in {200, 404, 422} and context_response.status_code in {200, 404, 409}

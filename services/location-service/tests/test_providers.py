@@ -1,18 +1,21 @@
-"""Unit tests for Provider Adapters (Section 6)."""
+"""Unit tests for provider adapters and provider config wiring."""
+
+from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
 
+from location_service.config import settings
 from location_service.providers.mapbox_directions import MapboxDirectionsClient
 from location_service.providers.mapbox_terrain import MapboxTerrainClient
 from location_service.providers.ors_validation import ORSValidationClient
 
 
 @pytest.mark.asyncio
-async def test_mapbox_directions_success():
-    client = MapboxDirectionsClient(api_key="test_key")
+async def test_mapbox_directions_success_parses_geojson() -> None:
+    client = MapboxDirectionsClient(api_key="test-key")
 
     mock_resp = httpx.Response(
         200,
@@ -21,8 +24,11 @@ async def test_mapbox_directions_success():
                 {
                     "distance": 1500.5,
                     "duration": 300.2,
-                    "geometry": "encoded_polyline",
-                    "legs": [{"annotation": {"speed": [10, 15]}}],
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": [[10.0, 10.0], [20.0, 20.0]],
+                    },
+                    "legs": [{"annotation": {"speed": [10, 15], "maxspeed": [{"speed": 70, "unit": "km/h"}]}}],
                 }
             ]
         },
@@ -32,16 +38,22 @@ async def test_mapbox_directions_success():
         mock_get.return_value = mock_resp
 
         result = await client.get_route(10.0, 10.0, 20.0, 20.0)
-        assert result.distance == 1500.5
-        assert result.duration == 300.2
-        assert result.geometry == "encoded_polyline"
-        assert result.annotations == {"speed": [10, 15]}
-        mock_get.assert_called_once()
+
+    assert result.distance == 1500.5
+    assert result.duration == 300.2
+    assert result.geometry.type == "LineString"
+    assert result.geometry.coordinates == [(10.0, 10.0), (20.0, 20.0)]
+    assert result.annotations["speed"] == [10, 15]
+    mock_get.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_ors_validation_success():
-    client = ORSValidationClient(api_key="test_ors_key")
+async def test_ors_validation_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "enable_ors_validation", True)
+    monkeypatch.setattr(settings, "provider_timeout_ms", 2500)
+    monkeypatch.setattr(settings, "provider_retry_max", 2)
+
+    client = ORSValidationClient(api_key="test-ors-key")
 
     mock_resp = httpx.Response(
         200,
@@ -49,7 +61,6 @@ async def test_ors_validation_success():
             "routes": [
                 {
                     "summary": {"distance": 1450.0, "duration": 290.0},
-                    "bbox": [10.0, 10.0, 20.0, 20.0],  # minX, minY, maxX, maxY
                 }
             ]
         },
@@ -57,32 +68,53 @@ async def test_ors_validation_success():
 
     with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
         mock_post.return_value = mock_resp
-
         result = await client.get_validation(10.0, 10.0, 20.0, 20.0)
-        assert result.status == "VALIDATED"
-        assert result.distance == 1450.0
-        assert result.end_location == (20.0, 20.0)
-        mock_post.assert_called_once()
+
+    assert client.timeout == 2.5
+    assert client.max_retries == 2
+    assert result.status == "VALIDATED"
+    assert result.distance == 1450.0
+    assert result.duration == 290.0
+    mock_post.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_ors_validation_missing_key():
+async def test_ors_validation_disabled_skips_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "enable_ors_validation", False)
+    client = ORSValidationClient(api_key="test-ors-key")
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        result = await client.get_validation(10.0, 10.0, 20.0, 20.0)
+
+    assert result.status == "UNVALIDATED"
+    assert result.message == "ORS validation disabled"
+    mock_post.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ors_validation_missing_key_degrades(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "enable_ors_validation", True)
+    monkeypatch.setattr(settings, "ors_api_key", "")
     client = ORSValidationClient(api_key="")
-    # Should degrade gracefully
-    result = await client.get_validation(10.0, 10.0, 20.0, 20.0)
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        result = await client.get_validation(10.0, 10.0, 20.0, 20.0)
+
     assert result.status == "UNVALIDATED"
     assert result.distance == 0.0
+    mock_post.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_mapbox_terrain_success():
+async def test_mapbox_terrain_success(monkeypatch: pytest.MonkeyPatch) -> None:
     import io
 
     from PIL import Image
 
-    client = MapboxTerrainClient(api_key="test_terrain_key")
+    monkeypatch.setattr(settings, "provider_timeout_ms", 3100)
+    monkeypatch.setattr(settings, "provider_retry_max", 4)
+    client = MapboxTerrainClient(api_key="test-terrain-key")
 
-    # Create a 256x256 image with color (10, 20, 30)
     img = Image.new("RGB", (256, 256), color=(10, 20, 30))
     img_byte_arr = io.BytesIO()
     img.save(img_byte_arr, format="PNG")
@@ -91,14 +123,22 @@ async def test_mapbox_terrain_success():
 
     with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
         mock_get.return_value = mock_resp
-
-        # Expected calculation:
-        # height = -10000 + ((10 * 65536 + 20 * 256 + 30) * 0.1)
-        # R=10: 655360, G=20: 5120, B=30 -> 660510 * 0.1 = 66051.0
-        # height = -10000 + 66051.0 = 56051.0
-
         async with httpx.AsyncClient() as ac:
             elev = await client.get_elevation(28.9784, 41.0082, ac)
 
-        assert elev == 56051.0
-        mock_get.assert_called_once()
+    assert client.timeout == 3.1
+    assert client.max_retries == 4
+    assert elev == 56051.0
+    mock_get.assert_called_once()
+
+
+def test_mapbox_directions_uses_configured_timeout_and_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "provider_timeout_ms", 4100)
+    monkeypatch.setattr(settings, "provider_retry_max", 5)
+    monkeypatch.setattr(settings, "mapbox_directions_base_url", "https://example.com/directions/v5")
+
+    client = MapboxDirectionsClient(api_key="test-key")
+
+    assert client.timeout == 4.1
+    assert client.max_retries == 5
+    assert client.base_url == "https://example.com/directions/v5/mapbox/driving"

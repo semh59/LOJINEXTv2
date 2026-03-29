@@ -16,7 +16,7 @@ from trip_service.errors import (
     problem_detail_handler,
     validation_exception_handler,
 )
-from trip_service.middleware import RequestIdMiddleware
+from trip_service.middleware import PrometheusMiddleware, RequestIdMiddleware
 from trip_service.observability import run_cleanup_loop, setup_logging
 from trip_service.routers import driver_statement, health, removed_endpoints, trips
 from trip_service.workers.enrichment_worker import run_enrichment_worker
@@ -57,6 +57,7 @@ app = FastAPI(
 )
 
 app.add_middleware(RequestIdMiddleware)
+app.add_middleware(PrometheusMiddleware)
 
 app.add_exception_handler(ProblemDetailError, problem_detail_handler)  # type: ignore[arg-type]
 app.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore[arg-type]

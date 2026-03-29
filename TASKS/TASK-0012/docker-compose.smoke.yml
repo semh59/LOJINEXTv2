@@ -42,8 +42,13 @@ services:
       context: ../../services/location-service
     environment:
       LOCATION_DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/location_service
-      LOCATION_ENV_NAME: dev
-      LOCATION_ENABLE_ORS_VALIDATION: "false"
+      LOCATION_ENVIRONMENT: dev
+      LOCATION_AUTH_JWT_SECRET: ${SMOKE_SHARED_JWT_SECRET:-trip-service-smoke-secret-please-change-me-32b}
+      LOCATION_AUTH_JWT_ALGORITHM: HS256
+      LOCATION_MAPBOX_API_KEY: ${LOCATION_MAPBOX_API_KEY:-}
+      LOCATION_ENABLE_ORS_VALIDATION: ${SMOKE_LOCATION_ENABLE_ORS_VALIDATION:-false}
+      LOCATION_ORS_API_KEY: ${LOCATION_ORS_API_KEY:-}
+      LOCATION_ORS_BASE_URL: ${LOCATION_ORS_BASE_URL:-https://api.openrouteservice.org/v2/directions/driving-hgv}
     ports:
       - "8103:8103"
     depends_on:
@@ -75,7 +80,7 @@ services:
       TRIP_DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/trip_service
       TRIP_FLEET_SERVICE_URL: http://fleet-stub:8110
       TRIP_LOCATION_SERVICE_URL: http://location-service:8103
-      TRIP_AUTH_JWT_SECRET: trip-service-smoke-secret-please-change-me-32b
+      TRIP_AUTH_JWT_SECRET: ${SMOKE_SHARED_JWT_SECRET:-trip-service-smoke-secret-please-change-me-32b}
       TRIP_AUTH_JWT_ALGORITHM: HS256
       TRIP_ALLOW_LEGACY_ACTOR_HEADERS: "false"
       TRIP_ENVIRONMENT: dev

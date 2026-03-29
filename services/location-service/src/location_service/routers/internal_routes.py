@@ -12,8 +12,10 @@ from location_service.database import get_db
 from location_service.domain.normalization import normalize_en, normalize_tr
 from location_service.enums import PairStatus, ProcessingStatus
 from location_service.errors import (
+    route_ambiguous,
     route_pair_not_active_use_calculate,
     route_pair_not_found,
+    route_pair_soft_deleted,
     route_resolution_not_found,
 )
 from location_service.models import LocationPoint, RoutePair, RouteVersion
@@ -38,76 +40,80 @@ async def _find_point_ids_by_normalized_name(
 
     origin_id = (
         await session.execute(
-            select(LocationPoint.location_id).where(
-                name_column == normalized_origin,
-                LocationPoint.is_active.is_(True),
-            )
+            select(LocationPoint.location_id).where(name_column == normalized_origin, LocationPoint.is_active.is_(True))
         )
     ).scalar_one_or_none()
     destination_id = (
         await session.execute(
             select(LocationPoint.location_id).where(
-                name_column == normalized_destination,
-                LocationPoint.is_active.is_(True),
+                name_column == normalized_destination, LocationPoint.is_active.is_(True)
             )
         )
     ).scalar_one_or_none()
     return origin_id, destination_id
 
 
-async def _resolve_active_route(
+async def _collect_active_route_candidates(
     session: AsyncSession,
     *,
     origin_location_id: UUID,
     destination_location_id: UUID,
     profile_code: str,
     resolution: str,
-) -> InternalRouteResolveResponse | None:
-    """Resolve the active forward or reverse route for a location pair."""
+) -> list[InternalRouteResolveResponse]:
+    """Collect all matching ACTIVE route-version candidates for a pair resolution attempt."""
     pairs = (
-        await session.execute(
-            select(RoutePair).where(
-                RoutePair.profile_code == profile_code,
-                RoutePair.pair_status == PairStatus.ACTIVE,
-                or_(
-                    and_(
-                        RoutePair.origin_location_id == origin_location_id,
-                        RoutePair.destination_location_id == destination_location_id,
+        (
+            await session.execute(
+                select(RoutePair).where(
+                    RoutePair.profile_code == profile_code,
+                    RoutePair.pair_status == PairStatus.ACTIVE,
+                    or_(
+                        and_(
+                            RoutePair.origin_location_id == origin_location_id,
+                            RoutePair.destination_location_id == destination_location_id,
+                        ),
+                        and_(
+                            RoutePair.origin_location_id == destination_location_id,
+                            RoutePair.destination_location_id == origin_location_id,
+                        ),
                     ),
-                    and_(
-                        RoutePair.origin_location_id == destination_location_id,
-                        RoutePair.destination_location_id == origin_location_id,
-                    ),
-                ),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
+    candidates: list[InternalRouteResolveResponse] = []
     for pair in pairs:
-        if (
-            pair.origin_location_id == origin_location_id
-            and pair.destination_location_id == destination_location_id
-            and pair.forward_route_id is not None
-            and pair.current_active_forward_version_no is not None
-        ):
-            return InternalRouteResolveResponse(
-                route_id=pair.forward_route_id,
-                pair_id=pair.route_pair_id,
-                resolution=resolution,
-            )
-        if (
-            pair.origin_location_id == destination_location_id
-            and pair.destination_location_id == origin_location_id
-            and pair.reverse_route_id is not None
-            and pair.current_active_reverse_version_no is not None
-        ):
-            return InternalRouteResolveResponse(
-                route_id=pair.reverse_route_id,
-                pair_id=pair.route_pair_id,
-                resolution=resolution,
-            )
+        if pair.origin_location_id == origin_location_id and pair.destination_location_id == destination_location_id:
+            route_id = pair.forward_route_id
+            version_no = pair.current_active_forward_version_no
+        else:
+            route_id = pair.reverse_route_id
+            version_no = pair.current_active_reverse_version_no
 
-    return None
+        if route_id is None or version_no is None:
+            continue
+
+        active_version = (
+            await session.execute(
+                select(RouteVersion.route_id).where(
+                    RouteVersion.route_id == route_id,
+                    RouteVersion.version_no == version_no,
+                    RouteVersion.processing_status == ProcessingStatus.ACTIVE,
+                )
+            )
+        ).scalar_one_or_none()
+        if active_version is None:
+            continue
+
+        candidates.append(
+            InternalRouteResolveResponse(route_id=route_id, pair_id=pair.route_pair_id, resolution=resolution)
+        )
+
+    return candidates
 
 
 @router.post("/internal/v1/routes/resolve", response_model=InternalRouteResolveResponse)
@@ -122,6 +128,7 @@ async def resolve_route(
     if payload.language_hint in {"AUTO", "EN"}:
         attempts.append((normalize_en(payload.origin_name), normalize_en(payload.destination_name), True))
 
+    unique_candidates: dict[tuple[UUID, UUID], InternalRouteResolveResponse] = {}
     for normalized_origin, normalized_destination, use_english_names in attempts:
         origin_id, destination_id = await _find_point_ids_by_normalized_name(
             session,
@@ -133,30 +140,31 @@ async def resolve_route(
             continue
 
         resolution = "EXACT_EN" if use_english_names else "EXACT_TR"
-        resolved = await _resolve_active_route(
+        candidates = await _collect_active_route_candidates(
             session,
             origin_location_id=origin_id,
             destination_location_id=destination_id,
             profile_code=payload.profile_code,
             resolution=resolution,
         )
-        if resolved is not None:
-            return resolved
+        for candidate in candidates:
+            unique_candidates.setdefault((candidate.route_id, candidate.pair_id), candidate)
 
-    raise route_resolution_not_found()
+    if not unique_candidates:
+        raise route_resolution_not_found()
+    if len(unique_candidates) > 1:
+        raise route_ambiguous()
+    return next(iter(unique_candidates.values()))
 
 
 @router.get("/internal/v1/route-pairs/{pair_id}/trip-context", response_model=InternalTripContextResponse)
-async def get_trip_context(
-    pair_id: UUID,
-    session: AsyncSession = Depends(get_db),
-) -> InternalTripContextResponse:
+async def get_trip_context(pair_id: UUID, session: AsyncSession = Depends(get_db)) -> InternalTripContextResponse:
     """Return forward and reverse trip context for an active route pair."""
     pair = await session.get(RoutePair, pair_id)
     if pair is None:
         raise route_pair_not_found(str(pair_id))
     if pair.pair_status == PairStatus.SOFT_DELETED:
-        raise route_pair_not_found(str(pair_id))
+        raise route_pair_soft_deleted()
     if pair.pair_status != PairStatus.ACTIVE:
         raise route_pair_not_active_use_calculate()
     if (

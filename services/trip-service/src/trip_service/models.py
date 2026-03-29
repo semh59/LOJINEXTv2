@@ -300,11 +300,13 @@ class TripOutbox(Base):
     event_name: Mapped[str] = mapped_column(String(50), nullable=False)
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
     payload_json: Mapped[str] = mapped_column(Text, nullable=False)
-    partition_key: Mapped[str] = mapped_column(String(26), nullable=False)
-    publish_status: Mapped[str] = mapped_column(String(15), nullable=False)
+    partition_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    publish_status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING")
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     next_attempt_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    last_error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    claim_token: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    claim_expires_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    claimed_by_worker: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     published_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -312,6 +314,7 @@ class TripOutbox(Base):
         Index("ix_outbox_status_attempt_created", "publish_status", "next_attempt_at_utc", "created_at_utc"),
         Index("ix_outbox_aggregate", "aggregate_type", "aggregate_id", "created_at_utc"),
         Index("ix_outbox_event_name", "event_name", "created_at_utc"),
+        Index("ix_outbox_claim_exp", "claim_expires_at_utc"),
     )
 
 

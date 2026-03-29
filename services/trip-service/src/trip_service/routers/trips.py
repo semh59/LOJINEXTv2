@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from ulid import ULID
@@ -75,6 +75,12 @@ from trip_service.models import (
     TripTripEnrichment,
     TripTripEvidence,
     TripTripTimeline,
+)
+from trip_service.observability import (
+    TRIP_CANCELLED_TOTAL,
+    TRIP_COMPLETED_TOTAL,
+    TRIP_CREATED_TOTAL,
+    TRIP_HARD_DELETED_TOTAL,
 )
 from trip_service.schemas import (
     ApproveRequest,
@@ -301,16 +307,20 @@ async def _check_idempotency_key(
     if claim_result.rowcount == 1:
         return None
 
-    existing = (
-        await session.execute(
-            select(TripIdempotencyRecord)
-            .where(
-                TripIdempotencyRecord.idempotency_key == idempotency_key,
-                TripIdempotencyRecord.endpoint_fingerprint == endpoint_fingerprint,
+    try:
+        existing = (
+            await session.execute(
+                select(TripIdempotencyRecord)
+                .where(
+                    TripIdempotencyRecord.idempotency_key == idempotency_key,
+                    TripIdempotencyRecord.endpoint_fingerprint == endpoint_fingerprint,
+                )
+                .with_for_update(nowait=True)
             )
-            .with_for_update()
-        )
-    ).scalar_one()
+        ).scalar_one()
+    except (IntegrityError, OperationalError, DBAPIError):
+        # If we can't get the lock immediately, it means another request is still processing it.
+        raise idempotency_in_flight()
 
     if existing.request_hash != request_hash:
         raise idempotency_payload_mismatch()
@@ -478,10 +488,15 @@ async def ingest_trip_slip(
     body: TelegramSlipIngestRequest,
     session: AsyncSession = Depends(get_session),
     auth: AuthContext = Depends(telegram_service_auth_dependency),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ) -> Any:
     """Ingest a fully parsed Telegram slip as a pending review trip."""
     request_body = body.model_dump(exclude_none=True)
     request_hash = _merged_payload_hash(request_body)
+    endpoint_fp = f"ingest_slip:{body.source_slip_no}"
+    replay = await _check_idempotency_key(session, idempotency_key, endpoint_fp, request_hash)
+    if replay is not None:
+        return replay
 
     existing_trip = (
         await session.execute(
@@ -587,6 +602,7 @@ async def ingest_trip_slip(
         )
     )
     session.add(_create_outbox_event(trip, "trip.created.v1", _event_payload(trip)))
+    TRIP_CREATED_TOTAL.labels(source_type=trip.source_type).inc()
 
     try:
         await session.flush()
@@ -594,6 +610,16 @@ async def ingest_trip_slip(
         resource = trip_to_resource(trip)
         resource_dict = resource.model_dump(mode="json")
         headers = _response_headers_for_trip(trip)
+        if idempotency_key:
+            await _save_idempotency_record(
+                session,
+                idempotency_key=idempotency_key,
+                endpoint_fingerprint=endpoint_fp,
+                request_hash=request_hash,
+                response_status=201,
+                response_body=resource_dict,
+                response_headers=headers,
+            )
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()
@@ -612,10 +638,15 @@ async def ingest_trip_slip_fallback(
     body: TelegramFallbackIngestRequest,
     session: AsyncSession = Depends(get_session),
     auth: AuthContext = Depends(telegram_service_auth_dependency),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ) -> Any:
     """Create a fallback pending-review trip when Telegram parsing fails."""
     request_body = body.model_dump(exclude_none=True, mode="json")
     request_hash = _merged_payload_hash(request_body)
+    endpoint_fp = f"ingest_fallback:{body.source_reference_key}"
+    replay = await _check_idempotency_key(session, idempotency_key, endpoint_fp, request_hash)
+    if replay is not None:
+        return replay
 
     replay = await _maybe_replay_source_reference(
         session,
@@ -692,6 +723,7 @@ async def ingest_trip_slip_fallback(
         )
     )
     session.add(_create_outbox_event(trip, "trip.created.v1", _event_payload(trip)))
+    TRIP_CREATED_TOTAL.labels(source_type=trip.source_type).inc()
 
     try:
         await session.flush()
@@ -699,6 +731,16 @@ async def ingest_trip_slip_fallback(
         resource = trip_to_resource(trip)
         resource_dict = resource.model_dump(mode="json")
         headers = _response_headers_for_trip(trip)
+        if idempotency_key:
+            await _save_idempotency_record(
+                session,
+                idempotency_key=idempotency_key,
+                endpoint_fingerprint=endpoint_fp,
+                request_hash=request_hash,
+                response_status=201,
+                response_body=resource_dict,
+                response_headers=headers,
+            )
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()
@@ -712,10 +754,15 @@ async def ingest_excel_trip(
     body: ExcelIngestRequest,
     session: AsyncSession = Depends(get_session),
     auth: AuthContext = Depends(excel_service_auth_dependency),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ) -> Any:
     """Ingest a structured Excel row as a pending-review trip."""
     request_body = body.model_dump(exclude_none=True)
     request_hash = _merged_payload_hash(request_body)
+    endpoint_fp = f"ingest_excel:{body.source_reference_key}"
+    replay = await _check_idempotency_key(session, idempotency_key, endpoint_fp, request_hash)
+    if replay is not None:
+        return replay
 
     replay = await _maybe_replay_source_reference(
         session,
@@ -794,6 +841,7 @@ async def ingest_excel_trip(
         )
     )
     session.add(_create_outbox_event(trip, "trip.created.v1", _event_payload(trip)))
+    TRIP_CREATED_TOTAL.labels(source_type=trip.source_type).inc()
 
     try:
         await session.flush()
@@ -801,6 +849,16 @@ async def ingest_excel_trip(
         resource = trip_to_resource(trip)
         resource_dict = resource.model_dump(mode="json")
         headers = _response_headers_for_trip(trip)
+        if idempotency_key:
+            await _save_idempotency_record(
+                session,
+                idempotency_key=idempotency_key,
+                endpoint_fingerprint=endpoint_fp,
+                request_hash=request_hash,
+                response_status=201,
+                response_body=resource_dict,
+                response_headers=headers,
+            )
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()
@@ -843,12 +901,16 @@ async def excel_export_feed(
 
     total_items = (await session.execute(select(func.count()).select_from(stmt.subquery()))).scalar() or 0
     trips = (
-        await session.execute(
-            stmt.order_by(TripTrip.trip_datetime_utc.desc(), TripTrip.id.desc())
-            .offset(pagination.offset)
-            .limit(pagination.per_page)
+        (
+            await session.execute(
+                stmt.order_by(TripTrip.trip_datetime_utc.desc(), TripTrip.id.desc())
+                .offset(pagination.offset)
+                .limit(pagination.per_page)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return TripListResponse(
         items=[trip_to_resource(trip) for trip in trips],
         meta=make_pagination_meta(
@@ -952,8 +1014,10 @@ async def create_manual_trip(
         )
     )
     session.add(_create_outbox_event(trip, "trip.created.v1", _event_payload(trip)))
+    TRIP_CREATED_TOTAL.labels(source_type=trip.source_type).inc()
     if trip.status == TripStatus.COMPLETED:
         session.add(_create_outbox_event(trip, "trip.completed.v1", _event_payload(trip)))
+        TRIP_COMPLETED_TOTAL.inc()
 
     try:
         await session.flush()
@@ -1014,12 +1078,16 @@ async def list_trips(
 
     total_items = (await session.execute(select(func.count()).select_from(stmt.subquery()))).scalar() or 0
     trips = (
-        await session.execute(
-            stmt.order_by(TripTrip.trip_datetime_utc.desc(), TripTrip.id.desc())
-            .offset(pagination.offset)
-            .limit(pagination.per_page)
+        (
+            await session.execute(
+                stmt.order_by(TripTrip.trip_datetime_utc.desc(), TripTrip.id.desc())
+                .offset(pagination.offset)
+                .limit(pagination.per_page)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     return TripListResponse(
         items=[trip_to_resource(trip) for trip in trips],
@@ -1236,6 +1304,7 @@ async def approve_trip(
         )
     )
     session.add(_create_outbox_event(trip, "trip.completed.v1", _event_payload(trip)))
+    TRIP_COMPLETED_TOTAL.inc()
     await session.commit()
 
     trip = await _get_trip_or_404(session, trip.id)
@@ -1276,6 +1345,7 @@ async def reject_trip(
         )
     )
     session.add(_create_outbox_event(trip, "trip.rejected.v1", _event_payload(trip)))
+    TRIP_CANCELLED_TOTAL.inc()
     await session.commit()
 
     trip = await _get_trip_or_404(session, trip.id)
@@ -1391,8 +1461,10 @@ async def create_empty_return(
         )
     )
     session.add(_create_outbox_event(trip, "trip.created.v1", _event_payload(trip)))
+    TRIP_CREATED_TOTAL.labels(source_type=trip.source_type).inc()
     if trip.status == TripStatus.COMPLETED:
         session.add(_create_outbox_event(trip, "trip.completed.v1", _event_payload(trip)))
+        TRIP_COMPLETED_TOTAL.inc()
 
     try:
         await session.flush()
@@ -1456,6 +1528,7 @@ async def cancel_trip(
         )
     )
     session.add(_create_outbox_event(trip, "trip.soft_deleted.v1", _event_payload(trip)))
+    TRIP_CANCELLED_TOTAL.inc()
     await session.commit()
 
     trip = await _get_trip_or_404(session, trip.id)
@@ -1493,6 +1566,7 @@ async def hard_delete_trip(
     )
     session.add(audit_row)
     session.add(_create_outbox_event(trip, "trip.hard_deleted.v1", {"reason": body.reason, **_event_payload(trip)}))
+    TRIP_HARD_DELETED_TOTAL.inc()
     await session.delete(trip)
     await session.commit()
     return Response(status_code=204)

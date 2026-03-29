@@ -287,3 +287,149 @@ We accept the duplicate-publish window as an at-least-once delivery tradeoff. Do
 ### Status
 
 active
+---
+
+## [2026-03-28] Location Service no longer owns import/export responsibilities
+
+### Context
+
+Trip Service already models Excel ingest/export as a separate service-to-service contract.
+Location Service still exposes its own import/export endpoints, schema objects, and runtime dependencies even though that responsibility is being split out.
+
+### Decision
+
+- Location Service no longer owns file-based or spreadsheet-based import/export responsibilities.
+- The public `POST /v1/import` and `GET /v1/export` endpoints are removed.
+- Import/export-specific tables, config, errors, metrics, and runtime dependencies are removed from Location Service.
+- The only downstream contracts Location Service must preserve for Trip Service are route resolve and trip-context.
+
+### Alternatives Considered
+
+- Leave the endpoints in place but return `410 Gone`: rejected because it preserves dead contract surface and schema baggage.
+- Keep the schema/models but remove only routers: rejected because it leaves ambiguous ownership and unused runtime complexity.
+
+### Consequences
+
+- Location Service becomes a narrower route-authority service.
+- Any future Excel/import-export behavior must live in a separate service, not be reintroduced into Location Service.
+- Trip Service contracts remain unchanged and continue consuming only internal resolve/trip-context endpoints.
+
+### Status
+
+active
+
+---
+
+## [2026-03-28] Location and Trip services share a JWT signing domain for service auth
+
+### Context
+
+TASK-0019 hardens `location-service` with bearer-token auth while `trip-service` already signs JWTs for its own public and internal callers.
+Trip Service must call Location internal endpoints as a service, and the smoke stack needs one deterministic auth model for both services.
+
+### Decision
+
+- `location-service` validates bearer JWTs using its own env surface: `LOCATION_AUTH_JWT_SECRET` and `LOCATION_AUTH_JWT_ALGORITHM`.
+- `trip-service` signs outbound Location service tokens with the same signing domain and sends `role=SERVICE` and `service=trip-service`.
+- Public Location endpoints require `ADMIN` or `SUPER_ADMIN`; internal `/internal/v1/*` endpoints currently accept only the `trip-service` service claim.
+
+### Alternatives Considered
+
+- Separate token issuers and key domains for Location immediately: rejected for this phase because it adds operational and integration complexity before the release blockers are closed.
+- Leave Location unauthenticated and rely on network isolation: rejected because it leaves a real prod security gap.
+
+### Consequences
+
+- Deployments must keep Trip and Location JWT signing settings aligned.
+- Any future internal caller of Location must either use the same signing domain or trigger a new auth design decision.
+- Smoke and integration tests now exercise the same service-auth model as production.
+
+### Status
+
+active
+
+---
+
+## [2026-03-28] Location hardening work is split by severity
+
+### Context
+
+The first hardening plan mixed release blockers with deeper cleanup and architecture work. That made it harder to distinguish what must ship now from what should be cleaned next.
+
+### Decision
+
+- `TASK-0019` owns only the P0/P1 work: auth, readiness, live provider/runtime fixes, approval/ETag contract completion, Trip/Location error mapping, and smoke verification.
+- `TASK-0020` owns the deferred P2 work: dead surface cleanup, persistent worker redesign, deeper observability cleanup, and remaining spec-completeness work.
+
+### Alternatives Considered
+
+- Ship one large hardening tranche: rejected because it mixes blockers with cleanup and increases delivery risk.
+- Ignore the cleanup entirely: rejected because the deferred work still matters and must remain explicitly tracked.
+
+### Consequences
+
+- Release blockers can be reviewed and shipped without waiting on the larger cleanup tranche.
+- The remaining Location technical debt is not silent; it stays visible in `TASKS/TASK-0020/`.
+- Reviews can judge TASK-0019 on production correctness instead of on cleanup scope.
+
+### Status
+
+active
+
+---
+
+## [2026-03-29] Location frontend contract work stays separate from cleanup
+
+### Context
+
+After TASK-0019, `location-service` was production-hardened but still backend-shaped for a future admin/Tauri frontend. At the same time, TASK-0020 already existed to track P2 cleanup and architecture hardening.
+
+### Decision
+
+- Frontend-facing public contract work for `location-service` is tracked as its own task (`TASK-0021`), not folded into TASK-0020.
+- TASK-0021 is allowed to change only the public `/v1/*` contract surface, request/response schemas, and related tests.
+- TASK-0020 remains responsible for cleanup, dead-surface removal, and worker/architecture hardening.
+
+### Alternatives Considered
+
+- Fold frontend-contract work into TASK-0020: rejected because it mixes product-contract work with cleanup and makes review scope ambiguous.
+- Treat frontend contract as implicit documentation only: rejected because the contract needs executable tests and explicit API decisions.
+
+### Consequences
+
+- Location public contract changes can be reviewed independently from cleanup work.
+- Future frontend work has a stable backend contract before TASK-0020 lands.
+- Cleanup work must not silently change frontend-visible behavior without a new explicit decision.
+
+### Status
+
+active
+
+---
+
+## [2026-03-29] Location public profile codes are locked to TIR and VAN
+
+### Context
+
+The frontend contract needs a closed, testable `profile_code` surface. `location-service` previously treated `profile_code` as a free-form string in public schemas.
+
+### Decision
+
+- Public `location-service` request and response schemas now lock `profile_code` to the closed enum values `TIR` and `VAN`.
+- `TIR` remains the default.
+- Unsupported public `profile_code` values are rejected through the generic validation contract.
+
+### Alternatives Considered
+
+- Keep `profile_code` as an unrestricted string: rejected because it leaves frontend options ambiguous and untestable.
+- Move the enum decision to cleanup work later: rejected because the frontend contract needs the decision now.
+
+### Consequences
+
+- Future frontend clients can render a closed selection set for profile choice.
+- Any new public profile code will require an explicit schema and contract update.
+- Internal Location data storage remains unchanged; only the public contract is tightened here.
+
+### Status
+
+active

@@ -1,6 +1,9 @@
 """Manual verification of pipeline logic without Docker."""
 
+from __future__ import annotations
+
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -31,6 +34,7 @@ async def test_manual_verify_logic():
         destination_location_id=dest_id,
         pair_code="RP_" + "A" * 26,
         pair_status=PairStatus.DRAFT,
+        row_version=1,
     )
     origin = LocationPoint(
         location_id=origin_id,
@@ -72,11 +76,16 @@ async def test_manual_verify_logic():
     session_mock.execute = AsyncMock(return_value=res_mock)
 
     # 2. Mock Provider Clients
-    mock_mb_resp = AsyncMock()
+    mock_mb_resp = MagicMock()
     mock_mb_resp.distance = 1000.0
     mock_mb_resp.duration = 600.0
-    mock_mb_resp.geometry = {"coordinates": [[0, 0], [1, 1]]}
-    mock_mb_resp.annotations = {"distance": [1000.0], "duration": [600.0], "speed": [1.6]}
+    mock_mb_resp.geometry = SimpleNamespace(coordinates=[(0, 0), (1, 1)])
+    mock_mb_resp.annotations = {
+        "distance": [1000.0],
+        "duration": [600.0],
+        "speed": [1.6],
+        "maxspeed": [{"speed": 70, "unit": "km/h"}],
+    }
 
     mock_ors_resp = AsyncMock()
     mock_ors_resp.status = "VALIDATED"

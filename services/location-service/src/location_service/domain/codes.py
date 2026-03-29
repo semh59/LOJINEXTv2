@@ -1,13 +1,13 @@
 """Pair and route code generation utilities (Section 5.2 and 5.3)."""
 
-import ulid
+from ulid import ULID
 
 from location_service.enums import DirectionCode
 
 
 def generate_pair_code() -> str:
     """Generate a unique route pair code in the format RP_<ULID>."""
-    return f"RP_{ulid.new()}"
+    return f"RP_{ULID()}"
 
 
 def generate_route_code(pair_code: str, direction: DirectionCode) -> str:

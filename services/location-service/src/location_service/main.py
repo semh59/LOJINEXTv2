@@ -1,66 +1,72 @@
+"""Location Service FastAPI application entry point."""
+
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
+from fastapi.exceptions import RequestValidationError
 
-from location_service.config import settings
+from location_service.auth import trip_service_auth_dependency, user_auth_dependency
+from location_service.config import settings, validate_prod_settings
 from location_service.database import engine
-from location_service.errors import ProblemDetailError, problem_detail_handler
+from location_service.errors import (
+    ProblemDetailError,
+    problem_detail_handler,
+    unexpected_exception_handler,
+    validation_exception_handler,
+)
 from location_service.middleware import RequestIdMiddleware
+from location_service.processing.pipeline import recover_processing_runs
 from location_service.routers import (
     approval,
     bulk_refresh,
     health,
-    import_export,
     internal_routes,
     pairs,
     points,
     processing,
+    removed_endpoints,
+    routes_public,
 )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """FastAPI lifespan events.
-
-    Handles startup (e.g., stuck run recovery if implemented later) and shutdown
-    cleanup of database connections.
-    """
-    # Startup tasks go here.
-
+    """FastAPI lifespan events."""
+    del app
+    validate_prod_settings(settings)
+    await recover_processing_runs()
     yield
-
-    # Shutdown logic
     await engine.dispose()
 
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application instance."""
+    docs_enabled = settings.environment != "prod"
     app = FastAPI(
-        title=f"Location Service ({settings.env_name})",
+        title=f"Location Service ({settings.environment})",
         description="Authoritative source for locations, routes, and segment geometry.",
         version="0.7.0",
         lifespan=lifespan,
-        docs_url="/docs",
-        redoc_url="/redoc",
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
+        openapi_url="/openapi.json" if docs_enabled else None,
     )
-
-    # Global middleware (pure ASGI)
     app.add_middleware(RequestIdMiddleware)
-
-    # Global exception handlers
-    app.add_exception_handler(ProblemDetailError, problem_detail_handler)
-
-    # Routers
+    app.add_exception_handler(ProblemDetailError, problem_detail_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(Exception, unexpected_exception_handler)
     app.include_router(health.router)
-    app.include_router(points.router)
-    app.include_router(pairs.router)
-    app.include_router(processing.router)
-    app.include_router(approval.router)
-    app.include_router(bulk_refresh.router)
-    app.include_router(import_export.router)
-    app.include_router(internal_routes.router)
-
+    public_dependencies = [Depends(user_auth_dependency)]
+    app.include_router(points.router, dependencies=public_dependencies)
+    app.include_router(pairs.router, dependencies=public_dependencies)
+    app.include_router(processing.router, dependencies=public_dependencies)
+    app.include_router(processing.public_router, dependencies=public_dependencies)
+    app.include_router(approval.router, dependencies=public_dependencies)
+    app.include_router(bulk_refresh.router, dependencies=public_dependencies)
+    app.include_router(routes_public.router, dependencies=public_dependencies)
+    app.include_router(removed_endpoints.router, dependencies=public_dependencies)
+    app.include_router(internal_routes.router, dependencies=[Depends(trip_service_auth_dependency)])
     return app
 
 

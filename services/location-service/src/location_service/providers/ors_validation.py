@@ -1,8 +1,8 @@
-"""OpenRouteService Validation Adapter (Section 6).
+"""OpenRouteService validation adapter."""
 
-Provides secondary validation for Mapbox routes.
-"""
+from __future__ import annotations
 
+import asyncio
 import logging
 
 import httpx
@@ -18,8 +18,7 @@ class ORSValidationResult(BaseModel):
 
     distance: float
     duration: float
-    end_location: tuple[float, float]
-    status: str  # "VALIDATED", "UNVALIDATED", "FAILED"
+    status: str  # VALIDATED, UNVALIDATED, FAILED
     message: str
 
 
@@ -27,21 +26,29 @@ class ORSValidationClient:
     """Client for ORS validation."""
 
     def __init__(self, api_key: str | None = None) -> None:
-        self.api_key = api_key or getattr(settings, "ors_api_key", None)
-        if not self.api_key:
+        self.api_key = api_key or settings.ors_api_key
+        self.base_url = settings.ors_base_url
+        self.timeout = settings.provider_timeout_seconds
+        self.max_retries = settings.provider_retry_max
+        if not self.api_key and settings.enable_ors_validation:
             logger.warning("ORS API key is missing. Adapter will degrade to UNVALIDATED.")
-
-        self.base_url = "https://api.openrouteservice.org/v2/directions/driving-hgv"
 
     async def get_validation(
         self, origin_lng: float, origin_lat: float, dest_lng: float, dest_lat: float
     ) -> ORSValidationResult:
-        """Fetch ORS route to validate distance/duration."""
+        """Fetch an ORS route to validate distance and duration."""
+        if not settings.enable_ors_validation:
+            return ORSValidationResult(
+                distance=0.0,
+                duration=0.0,
+                status="UNVALIDATED",
+                message="ORS validation disabled",
+            )
+
         if not self.api_key:
             return ORSValidationResult(
                 distance=0.0,
                 duration=0.0,
-                end_location=(0.0, 0.0),
                 status="UNVALIDATED",
                 message="ORS API key missing",
             )
@@ -56,39 +63,37 @@ class ORSValidationClient:
             "Content-Type": "application/json",
         }
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            try:
-                response = await client.post(self.base_url, json=payload, headers=headers)
-                if response.status_code == 200:
-                    data = response.json()
-                    route = data.get("routes", [{}])[0]
-                    summary = route.get("summary", {})
-                    # Need end location, bounding box or last point
-                    bbox = route.get("bbox", [0, 0, 0, 0])
-                    end_loc = (bbox[2], bbox[3])  # Approximation
-
-                    return ORSValidationResult(
-                        distance=summary.get("distance", 0.0),
-                        duration=summary.get("duration", 0.0),
-                        end_location=end_loc,
-                        status="VALIDATED",
-                        message="OK",
-                    )
+        max_retries = max(self.max_retries, 0)
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            for attempt in range(max_retries + 1):
+                try:
+                    response = await client.post(self.base_url, json=payload, headers=headers)
+                except httpx.RequestError as exc:
+                    logger.warning("ORS API request error: %s", exc)
                 else:
-                    logger.warning(f"ORS API error {response.status_code}: {response.text}")
-                    return ORSValidationResult(
-                        distance=0.0,
-                        duration=0.0,
-                        end_location=(0.0, 0.0),
-                        status="UNVALIDATED",
-                        message=f"ORS API error {response.status_code}",
-                    )
-            except httpx.RequestError as exc:
-                logger.warning(f"ORS API request error: {exc}")
-                return ORSValidationResult(
-                    distance=0.0,
-                    duration=0.0,
-                    end_location=(0.0, 0.0),
-                    status="UNVALIDATED",
-                    message=f"ORS Request error: {exc}",
-                )
+                    if response.status_code == 200:
+                        data = response.json()
+                        route = data.get("routes", [{}])[0]
+                        summary = route.get("summary", {})
+                        return ORSValidationResult(
+                            distance=summary.get("distance", 0.0),
+                            duration=summary.get("duration", 0.0),
+                            status="VALIDATED",
+                            message="OK",
+                        )
+                    if response.status_code not in {429, 500, 502, 503, 504}:
+                        logger.warning("ORS API non-retryable error %s", response.status_code)
+                        break
+                    logger.warning("ORS API retryable error %s", response.status_code)
+
+                if attempt < max_retries:
+                    await asyncio.sleep(1.0 * (2**attempt))
+                    continue
+                break
+
+        return ORSValidationResult(
+            distance=0.0,
+            duration=0.0,
+            status="UNVALIDATED",
+            message="ORS validation unavailable",
+        )
