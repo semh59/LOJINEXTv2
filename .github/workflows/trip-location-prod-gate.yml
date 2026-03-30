@@ -15,6 +15,18 @@ on:
         description: "Skip soak test (smoke only)"
         type: boolean
         default: false
+  workflow_call:
+    secrets:
+      POSTGRES_PASSWORD:
+        required: true
+      TRIP_AUTH_JWT_SECRET:
+        required: true
+      LOCATION_AUTH_JWT_SECRET:
+        required: true
+      LOCATION_MAPBOX_API_KEY:
+        required: true
+      LOCATION_ORS_API_KEY:
+        required: false
 
 jobs:
   prod-gate:
