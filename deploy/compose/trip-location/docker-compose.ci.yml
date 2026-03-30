@@ -1,0 +1,59 @@
+# =============================================================================
+# CI overlay — strips monitoring, uses ephemeral volumes, adds test profile
+# =============================================================================
+# Usage:
+#   docker compose -f docker-compose.prod.yml -f docker-compose.ci.yml up -d
+#   docker compose -f docker-compose.prod.yml -f docker-compose.ci.yml \
+#       run --rm smoke python /app/smoke_stack.py
+#   docker compose -f docker-compose.prod.yml -f docker-compose.ci.yml down -v
+
+services:
+  # Override Trip services to use test environment
+  trip-api:
+    environment:
+      TRIP_ENVIRONMENT: prod
+      TRIP_ALLOW_PLAINTEXT_IN_PROD: "true"
+    profiles: ["default"]
+
+  trip-enrichment:
+    profiles: ["default"]
+
+  trip-outbox:
+    profiles: ["default"]
+
+  trip-cleanup:
+    profiles: ["default"]
+
+  # Override Location services to use test environment
+  location-api:
+    profiles: ["default"]
+
+  location-processing:
+    profiles: ["default"]
+
+  # Strip monitoring from CI
+  nginx:
+    profiles: ["default"]
+
+  prometheus:
+    profiles: ["monitoring"]
+
+  grafana:
+    profiles: ["monitoring"]
+
+  # Smoke test runner
+  smoke:
+    build:
+      context: ../../../
+      dockerfile: ops/trip_location/Dockerfile.smoke
+    environment:
+      TRIP_API_URL: http://trip-api:8101
+      LOCATION_API_URL: http://location-api:8103
+    depends_on:
+      trip-api:
+        condition: service_healthy
+      location-api:
+        condition: service_healthy
+    profiles: ["smoke"]
+    networks:
+      - backend

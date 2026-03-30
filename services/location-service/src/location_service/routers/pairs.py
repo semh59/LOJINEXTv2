@@ -7,6 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -16,6 +17,7 @@ from location_service.domain.normalization import normalize_en, normalize_tr
 from location_service.enums import PairStatus
 from location_service.errors import (
     ProblemDetailError,
+    invalid_filter_combination,
     internal_error,
     point_inactive_for_new_pair,
     route_origin_equals_destination,
@@ -49,6 +51,21 @@ _ALLOWED_SORTS = {
     "pair_code:desc",
 }
 _DEFAULT_SORT = "updated_at_utc:desc"
+
+
+def _constraint_name(exc: IntegrityError) -> str:
+    diag = getattr(getattr(exc, "orig", None), "diag", None)
+    name = getattr(diag, "constraint_name", None)
+    if isinstance(name, str):
+        return name
+    return str(exc.orig)
+
+
+def _map_integrity_error(exc: IntegrityError) -> ProblemDetailError:
+    name = _constraint_name(exc)
+    if "idx_route_pairs_live_unique" in name:
+        return route_pair_already_exists_active()
+    return internal_error()
 
 
 async def _get_point_by_code(session: AsyncSession, code: str) -> LocationPoint | None:
@@ -172,6 +189,9 @@ async def create_pair(
 
     try:
         await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise _map_integrity_error(exc) from exc
     except Exception as exc:
         await session.rollback()
         raise internal_error() from exc
@@ -217,12 +237,19 @@ async def list_pairs(
         .join(destination_point, destination_point.location_id == RoutePair.destination_location_id)
     )
 
+    if status is not None and is_active is True and status != PairStatus.ACTIVE:
+        raise invalid_filter_combination("`status` must be ACTIVE when `is_active=true` is provided.")
+    if status is not None and is_active is False and status != PairStatus.DRAFT:
+        raise invalid_filter_combination("`status` must be DRAFT when `is_active=false` is provided.")
+
     if status is not None:
         stmt = stmt.where(RoutePair.pair_status == status)
+    else:
+        stmt = stmt.where(RoutePair.pair_status != PairStatus.SOFT_DELETED)
     if is_active is True:
         stmt = stmt.where(RoutePair.pair_status == PairStatus.ACTIVE)
     elif is_active is False:
-        stmt = stmt.where(RoutePair.pair_status.in_([PairStatus.DRAFT, PairStatus.SOFT_DELETED]))
+        stmt = stmt.where(RoutePair.pair_status == PairStatus.DRAFT)
     if profile_code is not None:
         stmt = stmt.where(RoutePair.profile_code == profile_code)
     if search:
@@ -312,6 +339,9 @@ async def update_pair(
 
     try:
         await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise _map_integrity_error(exc) from exc
     except Exception as exc:
         await session.rollback()
         raise internal_error() from exc
@@ -339,6 +369,9 @@ async def soft_delete_pair(
 
     try:
         await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise _map_integrity_error(exc) from exc
     except Exception as exc:
         await session.rollback()
         raise internal_error() from exc

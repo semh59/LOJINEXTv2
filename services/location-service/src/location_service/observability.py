@@ -16,6 +16,7 @@ class JSONFormatter(logging.Formatter):
         log_entry: dict[str, Any] = {
             "timestamp": self.formatTime(record, self.datefmt),
             "level": record.levelname,
+            "service": "location-service",
             "logger": record.name,
             "message": record.getMessage(),
         }
@@ -86,6 +87,13 @@ API_REQUESTS_TOTAL = Counter(
     "location_api_requests_total",
     "Total API requests",
     ["method", "endpoint", "status_code"],
+)
+
+API_REQUEST_DURATION_SECONDS = Histogram(
+    "location_api_request_duration_seconds",
+    "Location API request duration",
+    ["method", "endpoint", "status_code"],
+    buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10],
 )
 
 RESOLVE_REQUESTS_TOTAL = Counter(

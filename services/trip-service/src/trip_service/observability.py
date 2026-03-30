@@ -17,11 +17,13 @@ from typing import Any, cast
 
 from prometheus_client import Counter, Histogram, Info
 from sqlalchemy import CursorResult, delete
+from sqlalchemy.exc import DBAPIError
 
 from trip_service.config import settings
 from trip_service.database import async_session_factory
 from trip_service.enums import OutboxPublishStatus
 from trip_service.models import TripIdempotencyRecord, TripOutbox
+from trip_service.worker_heartbeats import record_worker_heartbeat
 
 logger = logging.getLogger("trip_service.cleanup")
 
@@ -96,6 +98,17 @@ def _now_utc() -> datetime:
     return datetime.now(UTC)
 
 
+def _is_schema_not_ready(exc: Exception) -> bool:
+    """Return whether a DB error means cleanup ran before migrations completed."""
+    if not isinstance(exc, DBAPIError):
+        return False
+    message = str(exc).lower()
+    return (
+        any(table in message for table in ("trip_idempotency_records", "trip_outbox"))
+        and any(marker in message for marker in ("does not exist", "undefined table", "relation"))
+    )
+
+
 async def cleanup_idempotency_records() -> int:
     """Delete expired idempotency records.
 
@@ -152,13 +165,30 @@ async def cleanup_outbox_records() -> int:
 
 async def run_cleanup_loop(interval_seconds: int = 3600) -> None:
     """Run cleanup jobs periodically (default: every hour)."""
+    worker_name = "cleanup-worker"
     logger.info("Cleanup loop starting (interval: %ds)", interval_seconds)
 
     while True:
         try:
             await cleanup_idempotency_records()
             await cleanup_outbox_records()
+            record_worker_heartbeat(worker_name)
         except Exception as e:
-            logger.error("Cleanup error: %s", e)
+            if _is_schema_not_ready(e):
+                logger.warning("Cleanup skipped because the trip schema is not migrated yet")
+            else:
+                logger.error("Cleanup error: %s", e)
 
-        await asyncio.sleep(interval_seconds)
+        await _sleep_with_heartbeats(worker_name, interval_seconds)
+
+
+async def _sleep_with_heartbeats(worker_name: str, interval_seconds: int) -> None:
+    """Keep long-sleep workers healthy for readiness checks."""
+    heartbeat_interval = max(1, min(settings.worker_heartbeat_timeout_seconds // 2, interval_seconds))
+    remaining = interval_seconds
+
+    while remaining > 0:
+        record_worker_heartbeat(worker_name)
+        sleep_for = min(heartbeat_interval, remaining)
+        await asyncio.sleep(sleep_for)
+        remaining -= sleep_for

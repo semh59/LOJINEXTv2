@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import uuid
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select, update
-from sqlalchemy.exc import ProgrammingError
+from sqlalchemy import select
 
 from location_service.config import settings
 from location_service.database import async_session_factory
@@ -26,6 +25,7 @@ from location_service.domain.hashing import draft_set_hash
 from location_service.enums import (
     DirectionCode,
     ProcessingStatus,
+    RoadClass,
     RunStatus,
     SpeedLimitState,
     TriggerType,
@@ -48,29 +48,12 @@ from location_service.providers.ors_validation import ORSValidationClient
 logger = logging.getLogger(__name__)
 
 
-_background_tasks: set[asyncio.Task[None]] = set()
-
-
-def _task_done_callback(task: asyncio.Task[None]) -> None:
-    """Remove completed task from the strong-reference registry."""
-    _background_tasks.discard(task)
-    if not task.cancelled() and (exc := task.exception()):
-        logger.error("Unhandled background task exception: %s", exc, exc_info=exc)
-
-
-def _dispatch_processing_task(run_id: UUID, pair_id: UUID) -> None:
-    """Dispatch a processing run and keep a strong task reference."""
-    task = asyncio.create_task(_process_route_pair_safe(run_id, pair_id))
-    task.add_done_callback(_task_done_callback)
-    _background_tasks.add(task)
-
-
 async def trigger_processing(
     pair_id: UUID,
     trigger_type: TriggerType | str = TriggerType.INITIAL_CALCULATE,
     run_id: UUID | None = None,
 ) -> UUID:
-    """Create a ProcessingRun row and dispatch background execution."""
+    """Create a ProcessingRun row and leave execution to the dedicated worker."""
     run_uuid = run_id or uuid.uuid4()
 
     async with async_session_factory() as session:
@@ -83,77 +66,104 @@ async def trigger_processing(
         session.add(run)
         await session.commit()
 
-    _dispatch_processing_task(run_uuid, pair_id)
     return run_uuid
 
 
-async def recover_processing_runs() -> int:
-    """Re-dispatch queued or stale running processing runs at startup."""
-    now = datetime.now(UTC)
-    stale_cutoff = now - timedelta(minutes=settings.run_stuck_sla_minutes)
-    recovered: list[tuple[UUID, UUID]] = []
-
-    try:
-        async with async_session_factory() as session:
-            runs = (
-                await session.execute(
-                    select(ProcessingRun).where(ProcessingRun.run_status.in_([RunStatus.QUEUED, RunStatus.RUNNING]))
-                )
-            ).scalars().all()
-
-            for run in runs:
-                started_or_created = run.started_at_utc or run.created_at_utc
-                if run.run_status == RunStatus.QUEUED:
-                    recovered.append((run.processing_run_id, run.route_pair_id))
-                    continue
-                if started_or_created <= stale_cutoff:
-                    run.run_status = RunStatus.QUEUED
-                    run.started_at_utc = None
-                    recovered.append((run.processing_run_id, run.route_pair_id))
-
-            await session.commit()
-    except ProgrammingError as exc:
-        if "processing_runs" in str(exc).lower():
-            logger.warning("Skipping processing run recovery because the schema is not migrated yet")
-            return 0
-        raise
-
-    for run_id, pair_id in recovered:
-        _dispatch_processing_task(run_id, pair_id)
-
-    if recovered:
-        logger.info("Recovered %d queued/stale processing runs at startup", len(recovered))
-    return len(recovered)
+def _clear_claim(run: ProcessingRun) -> None:
+    """Clear claim fields once a run reaches a terminal state."""
+    run.claim_token = None
+    run.claim_expires_at_utc = None
+    run.claimed_by_worker = None
 
 
-async def _process_route_pair_safe(run_id: UUID, pair_id: UUID) -> None:
-    """Exception boundary wrapper for the background processing task."""
-    try:
-        await _process_route_pair(run_id, pair_id)
-    except Exception as exc:
-        logger.error("Processing failed for pair %s, run %s: %s", pair_id, run_id, exc, exc_info=True)
-        async with async_session_factory() as session:
-            await session.execute(
-                update(ProcessingRun)
-                .where(ProcessingRun.processing_run_id == run_id)
-                .values(
-                    run_status=RunStatus.FAILED,
-                    error_message=str(exc)[:1024],
-                    completed_at_utc=datetime.now(UTC),
-                )
+async def mark_processing_run_failed(
+    run_id: UUID,
+    error_message: str,
+    *,
+    claim_token: str | None = None,
+) -> None:
+    """Persist a terminal FAILED status for the given processing run."""
+    async with async_session_factory() as session:
+        if claim_token is None:
+            run = await session.get(ProcessingRun, run_id)
+            if run is None:
+                return
+        else:
+            stmt = select(ProcessingRun).where(
+                ProcessingRun.processing_run_id == run_id,
+                ProcessingRun.claim_token == claim_token,
             )
-            await session.commit()
+            run = (await session.execute(stmt)).scalar_one_or_none()
+            if run is None:
+                return
+
+        run.run_status = RunStatus.FAILED
+        run.error_message = error_message[:1024]
+        run.completed_at_utc = datetime.now(UTC)
+        _clear_claim(run)
+        await session.commit()
 
 
-def _validate_route(mb_resp: MapboxRouteResponse, ors_resp: Any) -> ValidationResult:
-    """Validate Mapbox route against ORS data."""
+@dataclass(frozen=True)
+class ValidationSummary:
+    """Persistable route-validation result and its supporting deltas."""
+
+    validation_result: ValidationResult
+    distance_validation_delta_pct: float | None
+    duration_validation_delta_pct: float | None
+
+
+@dataclass(frozen=True)
+class SegmentMetadata:
+    """Metadata applied to a route segment from the latest matching intersection."""
+
+    road_class: RoadClass
+    urban_class: UrbanClass
+    tunnel_flag: bool
+
+
+_DEFAULT_SEGMENT_METADATA = SegmentMetadata(
+    road_class=RoadClass.OTHER,
+    urban_class=UrbanClass.UNKNOWN,
+    tunnel_flag=False,
+)
+
+
+def _delta_pct(primary_value: float, comparison_value: float) -> float | None:
+    """Return the absolute percent-point delta when both values are positive."""
+    if primary_value <= 0 or comparison_value <= 0:
+        return None
+    return round(abs(primary_value - comparison_value) / primary_value * 100.0, 3)
+
+
+def _validate_route(mb_resp: MapboxRouteResponse, ors_resp: Any) -> ValidationSummary:
+    """Validate Mapbox route against ORS distance and duration thresholds."""
     if ors_resp.status == "UNVALIDATED":
-        return ValidationResult.UNVALIDATED
-    if mb_resp.distance > 0 and ors_resp.distance > 0:
-        delta = abs(mb_resp.distance - ors_resp.distance) / mb_resp.distance
-        if delta > 0.20:
-            return ValidationResult.FAIL
-    return ValidationResult.PASS_
+        return ValidationSummary(
+            validation_result=ValidationResult.UNVALIDATED,
+            distance_validation_delta_pct=None,
+            duration_validation_delta_pct=None,
+        )
+
+    distance_delta_pct = _delta_pct(float(mb_resp.distance), float(ors_resp.distance))
+    duration_delta_pct = _delta_pct(float(mb_resp.duration), float(ors_resp.duration))
+
+    result = ValidationResult.PASS_
+    if distance_delta_pct is not None and distance_delta_pct >= settings.distance_delta_fail_pct:
+        result = ValidationResult.FAIL
+    if duration_delta_pct is not None and duration_delta_pct >= settings.duration_delta_fail_pct:
+        result = ValidationResult.FAIL
+    if result != ValidationResult.FAIL:
+        if distance_delta_pct is not None and distance_delta_pct >= settings.distance_delta_warning_pct:
+            result = ValidationResult.WARNING
+        if duration_delta_pct is not None and duration_delta_pct >= settings.duration_delta_warning_pct:
+            result = ValidationResult.WARNING
+
+    return ValidationSummary(
+        validation_result=result,
+        distance_validation_delta_pct=distance_delta_pct,
+        duration_validation_delta_pct=duration_delta_pct,
+    )
 
 
 def _extract_speed_limit(maxspeed_entry: Any) -> int | None:
@@ -171,8 +181,75 @@ def _extract_speed_limit(maxspeed_entry: Any) -> int | None:
     return round(float(speed))
 
 
+def _segment_metadata_from_intersection(intersection: dict[str, Any]) -> SegmentMetadata:
+    """Map a Mapbox intersection object onto segment metadata defaults."""
+    streets = intersection.get("mapbox_streets_v8")
+    road_class_value = None
+    if isinstance(streets, dict):
+        road_class_value = streets.get("class")
+
+    is_urban = intersection.get("is_urban")
+    if is_urban is True:
+        urban_class = UrbanClass.URBAN
+    elif is_urban is False:
+        urban_class = UrbanClass.NON_URBAN
+    else:
+        urban_class = UrbanClass.UNKNOWN
+
+    classes = intersection.get("classes")
+    tunnel_flag = False
+    if isinstance(classes, list):
+        tunnel_flag = any(str(item).strip().lower() == "tunnel" for item in classes)
+    if not tunnel_flag and intersection.get("tunnel_name"):
+        tunnel_flag = True
+
+    return SegmentMetadata(
+        road_class=map_road_class(str(road_class_value)) if road_class_value is not None else RoadClass.OTHER,
+        urban_class=urban_class,
+        tunnel_flag=tunnel_flag,
+    )
+
+
+def _segment_metadata_by_index(segment_count: int, legs: list[dict[str, Any]]) -> list[SegmentMetadata]:
+    """Resolve the latest known intersection metadata for each segment index."""
+    if segment_count <= 0:
+        return []
+
+    markers: list[tuple[int, SegmentMetadata]] = []
+    for leg in legs:
+        if not isinstance(leg, dict):
+            continue
+        for step in leg.get("steps", []):
+            if not isinstance(step, dict):
+                continue
+            for intersection in step.get("intersections", []):
+                if not isinstance(intersection, dict):
+                    continue
+                geometry_index = intersection.get("geometry_index")
+                if isinstance(geometry_index, int):
+                    markers.append((geometry_index, _segment_metadata_from_intersection(intersection)))
+
+    if not markers:
+        return [_DEFAULT_SEGMENT_METADATA] * segment_count
+
+    markers.sort(key=lambda item: item[0])
+    metadata_by_index: list[SegmentMetadata] = []
+    latest = _DEFAULT_SEGMENT_METADATA
+    cursor = 0
+
+    for segment_index in range(segment_count):
+        while cursor < len(markers) and markers[cursor][0] <= segment_index:
+            latest = markers[cursor][1]
+            cursor += 1
+        metadata_by_index.append(latest)
+
+    return metadata_by_index
+
+
 def _generate_segments(
-    enriched_coords: list[tuple[float, float, float]], annotations: dict[str, Any]
+    enriched_coords: list[tuple[float, float, float]],
+    annotations: dict[str, Any],
+    legs: list[dict[str, Any]],
 ) -> tuple[list[RouteSegment], float]:
     """Convert coordinates and annotations into route segments and known-limit ratio."""
     distances = annotations.get("distance", [])
@@ -182,6 +259,7 @@ def _generate_segments(
     segments: list[RouteSegment] = []
     known_distance = 0.0
     total_distance = 0.0
+    metadata_by_index = _segment_metadata_by_index(max(len(enriched_coords) - 1, 0), legs)
 
     for i in range(len(enriched_coords) - 1):
         lng1, lat1, elev1 = enriched_coords[i]
@@ -195,8 +273,8 @@ def _generate_segments(
         grade_val = calculate_grade(elev1, elev2, dist)
         grade_klass = assign_grade_class(grade_val)
         speed_band = assign_speed_band(actual_speed_kph)
-        road_class = map_road_class("primary")
         speed_limit_state = SpeedLimitState.KNOWN if speed_limit is not None else SpeedLimitState.UNKNOWN
+        metadata = metadata_by_index[i] if i < len(metadata_by_index) else _DEFAULT_SEGMENT_METADATA
 
         seg = RouteSegment(
             segment_no=i + 1,
@@ -209,12 +287,12 @@ def _generate_segments(
             distance_m=dist,
             grade_pct=grade_val or 0.0,
             grade_class=grade_klass,
-            road_class=road_class,
-            urban_class=UrbanClass.UNKNOWN,
+            road_class=metadata.road_class,
+            urban_class=metadata.urban_class,
             speed_limit_state=speed_limit_state,
             speed_limit_kph=speed_limit,
             speed_band=speed_band,
-            tunnel_flag=False,
+            tunnel_flag=metadata.tunnel_flag,
         )
         segments.append(seg)
         total_distance += dist
@@ -225,20 +303,36 @@ def _generate_segments(
     return segments, ratio
 
 
-async def _process_route_pair(run_id: UUID, pair_id: UUID) -> None:
-    """Calculate both route directions, enrich them, and persist draft versions."""
-    mapbox_client = MapboxDirectionsClient()
-    terrain_client = MapboxTerrainClient()
-    ors_client = ORSValidationClient()
-
+async def _load_processing_context(
+    run_id: UUID,
+    pair_id: UUID,
+    *,
+    claim_token: str | None = None,
+) -> tuple[LocationPoint, LocationPoint, RoutePair] | None:
+    """Load the run and pair context needed for provider calls."""
     async with async_session_factory() as session:
-        run = await session.get(ProcessingRun, run_id)
-        if not run or run.run_status != RunStatus.QUEUED:
-            return
-        run.run_status = RunStatus.RUNNING
-        run.started_at_utc = datetime.now(UTC)
-        run.error_message = None
-        await session.commit()
+        if claim_token is None:
+            run = await session.get(ProcessingRun, run_id)
+            if not run or run.route_pair_id != pair_id or run.run_status not in (RunStatus.QUEUED, RunStatus.RUNNING):
+                return None
+            if run.run_status == RunStatus.QUEUED:
+                run.run_status = RunStatus.RUNNING
+                run.started_at_utc = datetime.now(UTC)
+                run.error_message = None
+                await session.commit()
+        else:
+            run = (
+                await session.execute(
+                    select(ProcessingRun).where(
+                        ProcessingRun.processing_run_id == run_id,
+                        ProcessingRun.route_pair_id == pair_id,
+                        ProcessingRun.run_status == RunStatus.RUNNING,
+                        ProcessingRun.claim_token == claim_token,
+                    )
+                )
+            ).scalar_one_or_none()
+            if run is None:
+                return None
 
         pair = await session.get(RoutePair, pair_id)
         if pair is None:
@@ -248,6 +342,20 @@ async def _process_route_pair(run_id: UUID, pair_id: UUID) -> None:
         dest = await session.get(LocationPoint, pair.destination_location_id)
         if origin is None or dest is None:
             raise ValueError("Pair references missing location points")
+
+    return origin, dest, pair
+
+
+async def _process_route_pair(run_id: UUID, pair_id: UUID, *, claim_token: str | None = None) -> None:
+    """Calculate both route directions, enrich them, and persist draft versions."""
+    mapbox_client = MapboxDirectionsClient()
+    terrain_client = MapboxTerrainClient()
+    ors_client = ORSValidationClient()
+
+    context = await _load_processing_context(run_id, pair_id, claim_token=claim_token)
+    if context is None:
+        return
+    origin, dest, pair = context
 
     directions = [
         (origin, dest, DirectionCode.FORWARD),
@@ -271,20 +379,20 @@ async def _process_route_pair(run_id: UUID, pair_id: UUID) -> None:
             dest_lat=float(end_pt.latitude_6dp),
         )
 
-        val_status = _validate_route(mb_resp, ors_resp)
+        validation_summary = _validate_route(mb_resp, ors_resp)
         coords = mb_resp.geometry.coordinates
         if not coords:
             raise ValueError(f"No coordinates in Mapbox response for {direction}")
 
         enriched_coords = await terrain_client.enrich_coordinates(coords)
-        segments, known_speed_limit_ratio = _generate_segments(enriched_coords, mb_resp.annotations)
+        segments, known_speed_limit_ratio = _generate_segments(enriched_coords, mb_resp.annotations, mb_resp.legs)
         dist_meta = calculate_distributions(segments)
 
         results.append(
             {
                 "direction": direction,
                 "mb_resp": mb_resp,
-                "val_status": val_status,
+                "validation_summary": validation_summary,
                 "segments": segments,
                 "dist_meta": dist_meta,
                 "known_speed_limit_ratio": known_speed_limit_ratio,
@@ -302,7 +410,7 @@ async def _process_route_pair(run_id: UUID, pair_id: UUID) -> None:
         for result in results:
             dir_code = result["direction"]
             mb_resp = result["mb_resp"]
-            val_status = result["val_status"]
+            validation_summary = result["validation_summary"]
             segments = result["segments"]
             dist_meta = result["dist_meta"]
             known_speed_limit_ratio = result["known_speed_limit_ratio"]
@@ -356,7 +464,9 @@ async def _process_route_pair(run_id: UUID, pair_id: UUID) -> None:
                 total_distance_m=mb_resp.distance,
                 total_duration_s=int(mb_resp.duration),
                 segment_count=len(segments),
-                validation_result=val_status,
+                validation_result=validation_summary.validation_result,
+                distance_validation_delta_pct=validation_summary.distance_validation_delta_pct,
+                duration_validation_delta_pct=validation_summary.duration_validation_delta_pct,
                 field_origin_matrix_hash=version_hash,
                 field_origin_matrix_json=version_payload,
                 road_type_distribution_json=dist_meta["road_type_distribution_json"],
@@ -385,12 +495,22 @@ async def _process_route_pair(run_id: UUID, pair_id: UUID) -> None:
         if pair_changed:
             pair.row_version += 1
 
-        run = await session.get(ProcessingRun, run_id)
-        if run is None:
-            return
+        if claim_token is None:
+            run = await session.get(ProcessingRun, run_id)
+            if run is None:
+                return
+        else:
+            stmt = select(ProcessingRun).where(
+                ProcessingRun.processing_run_id == run_id,
+                ProcessingRun.claim_token == claim_token,
+            )
+            run = (await session.execute(stmt)).scalar_one_or_none()
+            if run is None:
+                return
         run.run_status = RunStatus.SUCCEEDED
         run.completed_at_utc = datetime.now(UTC)
         run.error_message = None
+        _clear_claim(run)
         await session.commit()
 
     logger.info("Successfully processed bidirectional pair %s", pair_id)

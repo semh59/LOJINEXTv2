@@ -28,7 +28,7 @@ from trip_service.config import settings
 from trip_service.database import get_session
 from trip_service.dependencies import LocationRouteResolution, LocationTripContext
 from trip_service.errors import ProblemDetailError, problem_detail_handler, validation_exception_handler
-from trip_service.middleware import RequestIdMiddleware
+from trip_service.middleware import PrometheusMiddleware, RequestIdMiddleware
 from trip_service.routers import driver_statement, health, removed_endpoints, trips
 from trip_service.worker_heartbeats import record_worker_heartbeat
 
@@ -224,6 +224,7 @@ async def client(db_engine, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[A
 
     test_app = FastAPI(lifespan=noop_lifespan)
     test_app.add_middleware(RequestIdMiddleware)
+    test_app.add_middleware(PrometheusMiddleware)
     test_app.add_exception_handler(ProblemDetailError, problem_detail_handler)  # type: ignore[arg-type]
     test_app.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore[arg-type]
     test_app.include_router(health.router)
@@ -240,6 +241,7 @@ async def client(db_engine, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[A
 
     record_worker_heartbeat("enrichment-worker")
     record_worker_heartbeat("outbox-relay")
+    record_worker_heartbeat("cleanup-worker")
 
     test_app.dependency_overrides[get_session] = override_get_session
     monkeypatch.setattr("trip_service.routers.health.async_session_factory", session_factory)

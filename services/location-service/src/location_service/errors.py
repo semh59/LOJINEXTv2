@@ -248,6 +248,15 @@ def route_pair_version_mismatch() -> ProblemDetailError:
     return ProblemDetailError(412, "LOCATION_ROUTE_PAIR_VERSION_MISMATCH", "Precondition failed", "ETag mismatch.")
 
 
+def invalid_filter_combination(detail: str = "") -> ProblemDetailError:
+    return ProblemDetailError(
+        422,
+        "LOCATION_INVALID_FILTER_COMBINATION",
+        "Validation error",
+        detail or "The provided filters cannot be combined.",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Processing errors
 # ---------------------------------------------------------------------------

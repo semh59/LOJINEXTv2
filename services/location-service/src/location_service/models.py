@@ -111,12 +111,12 @@ class RoutePair(Base):
             name="chk_route_pairs_pending_pointers_atomic",
         ),
         Index(
-            "idx_route_pairs_active_unique",
+            "idx_route_pairs_live_unique",
             "origin_location_id",
             "destination_location_id",
             "profile_code",
             unique=True,
-            postgresql_where=text("pair_status = 'ACTIVE'"),
+            postgresql_where=text("pair_status IN ('ACTIVE', 'DRAFT')"),
         ),
     )
 
@@ -247,6 +247,9 @@ class ProcessingRun(Base):
 
     provider_mapbox_status: Mapped[str] = mapped_column(String(20), default="PENDING", nullable=False)
     provider_ors_status: Mapped[str] = mapped_column(String(20), default="PENDING", nullable=False)
+    claim_token: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    claim_expires_at_utc: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    claimed_by_worker: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     expected_forward_version_no: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     expected_reverse_version_no: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

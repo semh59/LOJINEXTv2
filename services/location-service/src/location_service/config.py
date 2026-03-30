@@ -36,6 +36,14 @@ class Settings(BaseSettings):
 
     provider_timeout_ms: int = 4000
     provider_retry_max: int = 3
+    provider_probe_ttl_seconds: int = 30
+    provider_probe_origin_lng: float = 28.9784
+    provider_probe_origin_lat: float = 41.0082
+    provider_probe_dest_lng: float = 28.9905
+    provider_probe_dest_lat: float = 41.0151
+    processing_poll_interval_seconds: float = 5.0
+    processing_claim_ttl_seconds: int = 300
+    worker_heartbeat_timeout_seconds: int = 60
 
     segment_max_length_m: int = 200
     elevation_sampling_max_spacing_m: int = 30
@@ -87,6 +95,14 @@ def validate_prod_settings(current: Settings) -> None:
         errors.append("LOCATION_PROVIDER_TIMEOUT_MS must be greater than zero.")
     if current.provider_retry_max < 0:
         errors.append("LOCATION_PROVIDER_RETRY_MAX cannot be negative.")
+    if current.provider_probe_ttl_seconds < 0:
+        errors.append("LOCATION_PROVIDER_PROBE_TTL_SECONDS cannot be negative.")
+    if current.processing_poll_interval_seconds <= 0:
+        errors.append("LOCATION_PROCESSING_POLL_INTERVAL_SECONDS must be greater than zero.")
+    if current.processing_claim_ttl_seconds <= 0:
+        errors.append("LOCATION_PROCESSING_CLAIM_TTL_SECONDS must be greater than zero.")
+    if current.worker_heartbeat_timeout_seconds <= 0:
+        errors.append("LOCATION_WORKER_HEARTBEAT_TIMEOUT_SECONDS must be greater than zero.")
 
     if errors:
         raise ValueError("Production settings invalid: " + " ".join(errors))

@@ -8,7 +8,6 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
-from location_service.config import settings
 from location_service.models import Base
 
 # Alembic Config object
@@ -20,9 +19,20 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
+def _resolve_database_url() -> str:
+    """Prefer the Alembic-configured URL, falling back to runtime settings."""
+    configured_url = config.get_main_option("sqlalchemy.url")
+    if configured_url:
+        return configured_url
+
+    from location_service.config import settings
+
+    return settings.database_url
+
+
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
-    url = settings.database_url
+    url = _resolve_database_url()
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -43,7 +53,7 @@ def do_run_migrations(connection: Connection) -> None:
 async def run_async_migrations() -> None:
     """Run migrations in 'online' mode with async engine."""
     configuration = config.get_section(config.config_ini_section, {})
-    configuration["sqlalchemy.url"] = settings.database_url
+    configuration["sqlalchemy.url"] = _resolve_database_url()
     connectable = async_engine_from_config(
         configuration,
         prefix="sqlalchemy.",

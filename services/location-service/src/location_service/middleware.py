@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ from fastapi import Request, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from location_service.errors import ProblemDetailError, if_match_required, point_version_mismatch
+from location_service.observability import API_REQUEST_DURATION_SECONDS, API_REQUESTS_TOTAL
 
 
 class RequestIdMiddleware:
@@ -45,6 +47,40 @@ class RequestIdMiddleware:
             await send(message)
 
         await self.app(scope, receive, send_with_request_id)
+
+
+class PrometheusMiddleware:
+    """Pure ASGI middleware that records request counters and latency."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        start_time = time.perf_counter()
+        method = scope["method"]
+        endpoint = scope["path"]
+        status_code = "500"
+
+        async def wrapped_send(message: Message) -> None:
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = str(message["status"])
+            await send(message)
+
+        try:
+            await self.app(scope, receive, wrapped_send)
+        finally:
+            duration = time.perf_counter() - start_time
+            API_REQUESTS_TOTAL.labels(method=method, endpoint=endpoint, status_code=status_code).inc()
+            API_REQUEST_DURATION_SECONDS.labels(
+                method=method,
+                endpoint=endpoint,
+                status_code=status_code,
+            ).observe(duration)
 
 
 def make_etag(row_version: int) -> str:

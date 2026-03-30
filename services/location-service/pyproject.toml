@@ -30,6 +30,10 @@ dev = [
     "mypy>=1.10.0",
 ]
 
+[project.scripts]
+location-api = "location_service.entrypoints.api:main"
+location-processing-worker = "location_service.entrypoints.processing_worker:main"
+
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"

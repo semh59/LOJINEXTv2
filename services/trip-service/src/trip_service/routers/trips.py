@@ -953,6 +953,7 @@ async def create_manual_trip(
         trip_no=body.trip_no,
         source_type=SourceType.ADMIN_MANUAL,
         review_reason_code=review_reason,
+        source_payload_hash=request_hash,
         driver_id=body.driver_id,
         vehicle_id=body.vehicle_id,
         trailer_id=body.trailer_id,
@@ -1063,6 +1064,8 @@ async def list_trips(
     stmt = select(TripTrip).options(selectinload(TripTrip.enrichment), selectinload(TripTrip.evidence))
     if status is not None:
         stmt = stmt.where(TripTrip.status == status)
+    else:
+        stmt = stmt.where(TripTrip.status != TripStatus.SOFT_DELETED)
     if source_type is not None:
         stmt = stmt.where(TripTrip.source_type == source_type)
     if driver_id is not None:
@@ -1400,6 +1403,7 @@ async def create_empty_return(
         source_type=SourceType.EMPTY_RETURN_ADMIN,
         review_reason_code=review_reason,
         base_trip_id=base_trip.id,
+        source_payload_hash=request_hash,
         driver_id=body.driver_id,
         vehicle_id=body.vehicle_id,
         trailer_id=body.trailer_id,
@@ -1499,12 +1503,14 @@ async def cancel_trip(
 ) -> Any:
     """Soft-delete a trip."""
     auth = _require_admin(auth)
+    current_version = require_trip_if_match(request, trip_id)
     trip = await _get_trip_or_404(session, trip_id)
     if trip.status == TripStatus.SOFT_DELETED:
+        if current_version != trip.version:
+            raise trip_version_mismatch()
         resource = trip_to_resource(trip)
         return _json_response(200, resource.model_dump(mode="json"), _response_headers_for_trip(trip))
 
-    current_version = require_trip_if_match(request, trip_id)
     if current_version != trip.version:
         raise trip_version_mismatch()
 
@@ -1594,8 +1600,7 @@ async def retry_enrichment(
 
     trip.enrichment.enrichment_status = EnrichmentStatus.PENDING
     trip.enrichment.route_status = RouteStatus.READY if trip.route_id else RouteStatus.PENDING
-    if trip.enrichment.enrichment_attempt_count >= settings.enrichment_max_attempts:
-        trip.enrichment.enrichment_attempt_count = 0
+    trip.enrichment.enrichment_attempt_count = 0
     trip.enrichment.claim_token = None
     trip.enrichment.claim_expires_at_utc = None
     trip.enrichment.claimed_by_worker = None

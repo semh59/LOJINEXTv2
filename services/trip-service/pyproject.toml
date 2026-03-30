@@ -19,6 +19,12 @@ dependencies = [
     "PyJWT>=2.10.1",
 ]
 
+[project.scripts]
+trip-api = "trip_service.entrypoints.api:main"
+trip-enrichment-worker = "trip_service.entrypoints.enrichment_worker:main"
+trip-outbox-worker = "trip_service.entrypoints.outbox_worker:main"
+trip-cleanup-worker = "trip_service.entrypoints.cleanup_worker:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.2.0",

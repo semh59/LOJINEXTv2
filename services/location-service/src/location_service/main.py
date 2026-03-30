@@ -15,8 +15,8 @@ from location_service.errors import (
     unexpected_exception_handler,
     validation_exception_handler,
 )
-from location_service.middleware import RequestIdMiddleware
-from location_service.processing.pipeline import recover_processing_runs
+from location_service.middleware import PrometheusMiddleware, RequestIdMiddleware
+from location_service.observability import setup_logging
 from location_service.routers import (
     approval,
     bulk_refresh,
@@ -34,8 +34,8 @@ from location_service.routers import (
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """FastAPI lifespan events."""
     del app
+    setup_logging()
     validate_prod_settings(settings)
-    await recover_processing_runs()
     yield
     await engine.dispose()
 
@@ -53,6 +53,7 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json" if docs_enabled else None,
     )
     app.add_middleware(RequestIdMiddleware)
+    app.add_middleware(PrometheusMiddleware)
     app.add_exception_handler(ProblemDetailError, problem_detail_handler)  # type: ignore[arg-type]
     app.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore[arg-type]
     app.add_exception_handler(Exception, unexpected_exception_handler)

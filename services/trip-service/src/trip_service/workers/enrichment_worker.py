@@ -20,8 +20,8 @@ import random
 import uuid
 from datetime import UTC, datetime, timedelta
 
-import httpx
 from sqlalchemy import and_, or_, select
+from sqlalchemy.exc import DBAPIError
 
 from trip_service.config import settings
 from trip_service.database import async_session_factory
@@ -32,6 +32,7 @@ from trip_service.enums import (
     RouteStatus,
     SourceType,
 )
+from trip_service.http_clients import get_worker_client
 from trip_service.models import TripTrip, TripTripEnrichment, TripTripEvidence
 from trip_service.observability import ENRICHMENT_CLAIMED_TOTAL, ENRICHMENT_COMPLETED_TOTAL, ENRICHMENT_FAILED_TOTAL
 from trip_service.worker_heartbeats import record_worker_heartbeat
@@ -68,6 +69,17 @@ def _enrichment_next_retry_at(attempt_count: int) -> datetime:
 def _now_utc() -> datetime:
     """Current UTC timestamp."""
     return datetime.now(UTC)
+
+
+def _is_schema_not_ready(exc: Exception) -> bool:
+    """Return whether a DB error means the trip schema is not migrated yet."""
+    if not isinstance(exc, DBAPIError):
+        return False
+    message = str(exc).lower()
+    return (
+        any(table in message for table in ("trip_trip_enrichment", "trip_trips", "trip_trip_evidence"))
+        and any(marker in message for marker in ("does not exist", "undefined table", "relation"))
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -137,33 +149,33 @@ async def _resolve_route(origin_name: str, destination_name: str) -> tuple[str |
     Returns (route_id, status) where status is READY/FAILED.
     """
     try:
-        async with httpx.AsyncClient(timeout=settings.dependency_timeout_seconds) as client:
-            resp = await client.post(
-                f"{settings.location_service_url}/internal/v1/routes/resolve",
-                json={
-                    "origin_name": origin_name,
-                    "destination_name": destination_name,
-                    "profile_code": "TIR",
-                    "language_hint": "AUTO",
-                },
-                headers=_location_service_headers(),
+        client = await get_worker_client()
+        resp = await client.post(
+            f"{settings.location_service_url}/internal/v1/routes/resolve",
+            json={
+                "origin_name": origin_name,
+                "destination_name": destination_name,
+                "profile_code": "TIR",
+                "language_hint": "AUTO",
+            },
+            headers=_location_service_headers(),
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            return data.get("route_id"), RouteStatus.READY
+        problem_code = _problem_code(resp)
+        if resp.status_code in {404, 422} and problem_code in {
+            "LOCATION_ROUTE_RESOLUTION_NOT_FOUND",
+            "ROUTE_AMBIGUOUS",
+        }:
+            logger.info(
+                "Route resolution skipped as business-invalid: status=%d code=%s",
+                resp.status_code,
+                problem_code,
             )
-            if resp.status_code == 200:
-                data = resp.json()
-                return data.get("route_id"), RouteStatus.READY
-            problem_code = _problem_code(resp)
-            if resp.status_code in {404, 422} and problem_code in {
-                "LOCATION_ROUTE_RESOLUTION_NOT_FOUND",
-                "ROUTE_AMBIGUOUS",
-            }:
-                logger.info(
-                    "Route resolution skipped as business-invalid: status=%d code=%s",
-                    resp.status_code,
-                    problem_code,
-                )
-                return None, RouteStatus.SKIPPED
-            logger.warning("Route resolution failed: status=%d code=%s", resp.status_code, problem_code)
-            return None, RouteStatus.FAILED
+            return None, RouteStatus.SKIPPED
+        logger.warning("Route resolution failed: status=%d code=%s", resp.status_code, problem_code)
+        return None, RouteStatus.FAILED
     except Exception as e:
         logger.error("Route resolution error: %s", e)
         return None, RouteStatus.FAILED
@@ -399,6 +411,9 @@ async def run_enrichment_worker(worker_id: str | None = None) -> None:
                 logger.info("Worker %s: processed %d enrichment rows", worker_id, processed)
             record_worker_heartbeat("enrichment-worker")
         except Exception as e:
-            logger.error("Worker %s: batch error: %s", worker_id, e)
+            if _is_schema_not_ready(e):
+                logger.warning("Worker %s: schema not migrated yet, skipping this interval", worker_id)
+            else:
+                logger.error("Worker %s: batch error: %s", worker_id, e)
 
         await asyncio.sleep(settings.enrichment_poll_interval_seconds)

@@ -19,7 +19,7 @@ from location_service.errors import ProblemDetailError, problem_detail_handler, 
 from location_service.main import create_app
 from location_service.models import LocationPoint, ProcessingRun, RoutePair
 from location_service.processing.approval import approve_route_versions
-from location_service.processing.pipeline import _background_tasks, _task_done_callback
+from location_service.processing.pipeline import trigger_processing
 from location_service.routers.pairs import router as pairs_router
 from location_service.routers.points import router as points_router
 from location_service.routers.processing import router as processing_router
@@ -315,29 +315,34 @@ async def test_approve_soft_deleted_pair_rejected() -> None:
 
 
 def test_import_export_routes_removed_from_openapi_and_runtime() -> None:
-    with patch("location_service.main.recover_processing_runs", new=AsyncMock(return_value=0)):
-        app = create_app()
-        app.dependency_overrides[user_auth_dependency] = lambda: None
-        app.dependency_overrides[trip_service_auth_dependency] = lambda: None
-        with TestClient(app, raise_server_exceptions=False) as client:
-            openapi = client.get("/openapi.json")
-            assert openapi.status_code == 200
-            paths = openapi.json()["paths"]
-            assert "/v1/import" not in paths
-            assert "/v1/export" not in paths
+    app = create_app()
+    app.dependency_overrides[user_auth_dependency] = lambda: None
+    app.dependency_overrides[trip_service_auth_dependency] = lambda: None
+    with TestClient(app, raise_server_exceptions=False) as client:
+        openapi = client.get("/openapi.json")
+        assert openapi.status_code == 200
+        paths = openapi.json()["paths"]
+        assert "/v1/import" not in paths
+        assert "/v1/export" not in paths
 
-            import_response = client.post("/v1/import")
-            export_response = client.get("/v1/export")
-            assert import_response.status_code == 404
-            assert export_response.status_code == 404
+        import_response = client.post("/v1/import")
+        export_response = client.get("/v1/export")
+        assert import_response.status_code == 404
+        assert export_response.status_code == 404
 
 
-def test_background_task_registry_behaviour() -> None:
-    mock_task = MagicMock(spec=asyncio.Task)
-    mock_task.cancelled.return_value = True
+@pytest.mark.asyncio
+async def test_trigger_processing_only_enqueues_run(mock_session) -> None:
+    pair_id = uuid.uuid4()
+    run_id = uuid.uuid4()
 
-    _background_tasks.add(mock_task)
-    assert mock_task in _background_tasks
+    with patch("location_service.processing.pipeline.async_session_factory", return_value=mock_session):
+        created_run_id = await trigger_processing(pair_id=pair_id, run_id=run_id)
 
-    _task_done_callback(mock_task)
-    assert mock_task not in _background_tasks
+    assert created_run_id == run_id
+    created_run = mock_session.add.call_args.args[0]
+    assert isinstance(created_run, ProcessingRun)
+    assert created_run.processing_run_id == run_id
+    assert created_run.route_pair_id == pair_id
+    assert created_run.run_status == "QUEUED"
+    mock_session.commit.assert_awaited_once()

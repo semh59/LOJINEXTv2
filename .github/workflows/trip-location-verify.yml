@@ -1,0 +1,120 @@
+# Trip/Location — PR & Branch Verification Gate
+# Triggers on pushes to dev and PRs touching service code.
+# Runs lint, type-check, and unit tests for both services.
+
+name: "Trip/Location Verify"
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - "services/trip-service/**"
+      - "services/location-service/**"
+  pull_request:
+    branches: [dev, main]
+    paths:
+      - "services/trip-service/**"
+      - "services/location-service/**"
+
+jobs:
+  trip-service:
+    name: "Trip Service — Lint + Type-Check + Tests"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/trip-service
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: trip_service_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+    env:
+      TRIP_DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/trip_service_test
+      TRIP_ENVIRONMENT: test
+      TRIP_AUTH_JWT_SECRET: test-secret-at-least-32-bytes-long
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check src/ tests/
+
+      - name: Type check (mypy)
+        run: mypy src/trip_service/ --ignore-missing-imports
+
+      - name: Run migrations
+        run: alembic upgrade head
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short
+
+  location-service:
+    name: "Location Service — Lint + Type-Check + Tests"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/location-service
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: location_service_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+    env:
+      LOCATION_DATABASE_URL: postgresql+asyncpg://test:test@localhost:5433/location_service_test
+      LOCATION_ENVIRONMENT: test
+      LOCATION_AUTH_JWT_SECRET: test-secret-at-least-32-bytes-long
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check src/ tests/
+
+      - name: Type check (mypy)
+        run: mypy src/location_service/ --ignore-missing-imports
+
+      - name: Run migrations
+        run: alembic upgrade head
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short

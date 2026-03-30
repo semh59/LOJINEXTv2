@@ -286,7 +286,7 @@ We accept the duplicate-publish window as an at-least-once delivery tradeoff. Do
 
 ### Status
 
-active
+superseded by [2026-03-30, Trip outbox remediation uses per-event commits with stale-claim recovery]
 ---
 
 ## [2026-03-28] Location Service no longer owns import/export responsibilities
@@ -429,6 +429,122 @@ The frontend contract needs a closed, testable `profile_code` surface. `location
 - Future frontend clients can render a closed selection set for profile choice.
 - Any new public profile code will require an explicit schema and contract update.
 - Internal Location data storage remains unchanged; only the public contract is tightened here.
+
+### Status
+
+active
+
+
+## [2026-03-30] TASK-0033 stays separate from TASK-0020
+
+### Context
+
+The requested audit remediation spans Trip Service public/admin behavior, Trip worker reliability, and Location Service correctness gaps. `TASKS/TASK-0020` already exists for deferred Location cleanup and explicitly excludes Trip API changes.
+
+### Decision
+
+`TASK-0033` owns the current-HEAD audit remediation across Trip and Location services. `TASK-0020` remains the separate deferred architecture/cleanup task and is not expanded to absorb this work.
+
+### Alternatives Considered
+
+- Fold the work into `TASK-0020`: rejected because it would blur scope, re-open a deferred task, and mix Trip API changes into a Location-only cleanup track.
+- Leave the work undocumented and patch directly: rejected because it would hide the remediation scope from future agents.
+
+### Consequences
+
+- TASK tracking now reflects a dedicated cross-service remediation task.
+- Future agents should keep TASK-0033 and TASK-0020 concerns separate.
+
+### Status
+
+active
+
+---
+
+## [2026-03-30] Trip outbox remediation uses per-event commits with stale-claim recovery
+
+### Context
+
+Current HEAD still has a duplicate-publish blast radius when multiple outbox rows are claimed in one transaction and their final states are committed together. The ORM model also drifted from the schema by omitting `TripOutbox.last_error_code`.
+
+### Decision
+
+- `TripOutbox` keeps explicit `PUBLISHING` claim metadata plus a mapped `last_error_code` column.
+- The relay claims a batch once, then reloads and commits each published row independently.
+- Stale `PUBLISHING` rows remain recoverable through claim expiry.
+- Delivery remains at-least-once; downstream consumers must still de-duplicate by `event_id`.
+
+### Alternatives Considered
+
+- Keep a single end-of-batch commit: rejected because one failed row or process crash broadens the duplicate/replay window for the whole batch.
+- Move to broker transactions: rejected because that is larger infrastructure work than this remediation task.
+
+### Consequences
+
+- Successful publishes are durably recorded one row at a time.
+- Crash recovery remains automatic through expired claims instead of manual stuck-row cleanup only.
+- Worker tests must cover mixed-success batches and persisted `last_error_code`.
+
+### Status
+
+active
+
+---
+
+## [2026-03-30] Audit remediation defaults hide tombstones, cache provider probes, and use hybrid concurrency
+
+### Context
+
+TASK-0033 had to lock several behavioral defaults before implementation: how list endpoints treat soft-deleted rows, how readiness probes external providers, and how to close race conditions in Trip and Location services.
+
+### Decision
+
+- Admin list endpoints hide soft-deleted rows by default unless explicitly filtered for them.
+- Location readiness uses cached live provider probes with a short TTL rather than config-only checks or uncached probes on every request.
+- Trip overlap protection uses advisory transaction locks; Location live-pair races use a DB unique index plus friendly prechecks.
+
+### Alternatives Considered
+
+- Include tombstones by default: rejected because it leaks deleted records into normal admin views.
+- Config-only readiness: rejected because it cannot detect dead or unauthorized upstream providers.
+- App-only or DB-only concurrency strategy everywhere: rejected because Trip overlap is a better fit for advisory locks while pair uniqueness is a better fit for a DB uniqueness guard.
+
+### Consequences
+
+- Clients must explicitly request tombstones.
+- `/ready` gains cached live-provider status and can return 503 for real provider outages.
+- Concurrency behavior becomes more deterministic without taking on a heavier Trip exclusion-constraint design.
+
+### Status
+
+active
+
+---
+
+## [2026-03-30] TASK-0034 locks full production packaging for Trip and Location
+
+### Context
+
+After TASK-0033, both services were materially closer to production correctness, but they still ran with development-shaped topology and ad hoc operational tooling. The user explicitly asked for full production readiness rather than another incremental cleanup pass.
+
+### Decision
+
+- `TASK-0034` owns the release packaging layer for `trip-service` and `location-service`.
+- Production packaging includes split API/worker processes, full-stack Docker Compose assets, bundled Nginx + Prometheus + Grafana, internal unauthenticated `/metrics`, repo-owned smoke/soak/backup/restore tooling, and dedicated GitHub Actions verify/prod-gate workflows.
+- Location processing must move from API-managed in-process tasks to a durable claimed worker loop.
+- The prod-gate workflow must require live provider proof and fail when mandatory secrets are absent.
+
+### Alternatives Considered
+
+- Stop at code correctness and rely on manual ops setup: rejected because it leaves the system short of the requested prod-ready bar.
+- Fold this work into TASK-0033 or TASK-0020: rejected because it mixes correctness remediation with packaging/ops scope and obscures review boundaries.
+- Keep `/metrics` authenticated or public by default: rejected because internal unauthenticated metrics behind reverse-proxy/network isolation is the chosen operational model.
+
+### Consequences
+
+- Production readiness is now judged on packaged deployment and verification assets, not only service code.
+- Compose, workflow, and runbook changes are first-class deliverables of this task.
+- API lifecycles must remain narrow; long-running workers are separate processes going forward.
 
 ### Status
 

@@ -209,6 +209,7 @@ async def test_list_pairs_filters_search_profile_pagination_and_sort(client: Asy
     inactive_response = await client.get("/v1/pairs?is_active=false")
     assert inactive_response.status_code == 200
     assert len(inactive_response.json()["data"]) == 3
+    assert {item["status"] for item in inactive_response.json()["data"]} == {"DRAFT"}
 
     profile_response = await client.get("/v1/pairs?profile_code=VAN")
     assert profile_response.status_code == 200
@@ -254,6 +255,37 @@ async def test_list_pairs_filters_search_profile_pagination_and_sort(client: Asy
 
 
 @pytest.mark.asyncio
+async def test_list_pairs_hides_soft_deleted_by_default(client: AsyncClient) -> None:
+    await _create_point(client, code="SOFTLIST_O1", latitude=60.0, longitude=60.0)
+    await _create_point(client, code="SOFTLIST_D1", latitude=61.0, longitude=61.0)
+    await _create_point(client, code="SOFTLIST_O2", latitude=62.0, longitude=62.0)
+    await _create_point(client, code="SOFTLIST_D2", latitude=63.0, longitude=63.0)
+
+    live_pair = await _create_pair(client, origin_code="SOFTLIST_O1", destination_code="SOFTLIST_D1")
+    deleted_pair = await _create_pair(client, origin_code="SOFTLIST_O2", destination_code="SOFTLIST_D2")
+
+    delete_response = await client.delete(
+        f"/v1/pairs/{deleted_pair['pair_id']}",
+        headers={"If-Match": f'"{deleted_pair["row_version"]}"'},
+    )
+    default_list = await client.get("/v1/pairs")
+    draft_list = await client.get("/v1/pairs?is_active=false")
+    deleted_list = await client.get("/v1/pairs?status=SOFT_DELETED")
+
+    assert delete_response.status_code == 204
+    assert {item["pair_id"] for item in default_list.json()["data"]} == {live_pair["pair_id"]}
+    assert {item["pair_id"] for item in draft_list.json()["data"]} == {live_pair["pair_id"]}
+    assert {item["pair_id"] for item in deleted_list.json()["data"]} == {deleted_pair["pair_id"]}
+
+
+@pytest.mark.asyncio
+async def test_list_pairs_rejects_conflicting_status_and_is_active_filters(client: AsyncClient) -> None:
+    response = await client.get("/v1/pairs?status=ACTIVE&is_active=false")
+    assert response.status_code == 422
+    assert response.json()["code"] == "LOCATION_INVALID_FILTER_COMBINATION"
+
+
+@pytest.mark.asyncio
 async def test_patch_pair_requires_if_match_and_increments_row_version(client: AsyncClient) -> None:
     await _create_point(client, code="PATCH_O", latitude=40.0, longitude=40.0)
     await _create_point(client, code="PATCH_D", latitude=41.0, longitude=41.0)
@@ -296,6 +328,28 @@ async def test_patch_pair_requires_if_match_and_increments_row_version(client: A
     )
     assert duplicate_after_update.status_code == 409
     assert duplicate_after_update.json()["code"] == "LOCATION_ROUTE_PAIR_ALREADY_EXISTS_ACTIVE"
+
+
+@pytest.mark.asyncio
+async def test_create_pair_maps_live_unique_index_violation_to_conflict(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _create_point(client, code="RACE_O", latitude=64.0, longitude=64.0)
+    await _create_point(client, code="RACE_D", latitude=65.0, longitude=65.0)
+    await _create_pair(client, origin_code="RACE_O", destination_code="RACE_D")
+
+    async def skip_uniqueness(*args, **kwargs) -> None:
+        return None
+
+    monkeypatch.setattr("location_service.routers.pairs._assert_pair_uniqueness", skip_uniqueness)
+
+    response = await client.post(
+        "/v1/pairs",
+        json={"origin_code": "RACE_O", "destination_code": "RACE_D", "profile_code": "TIR"},
+    )
+    assert response.status_code == 409
+    assert response.json()["code"] == "LOCATION_ROUTE_PAIR_ALREADY_EXISTS_ACTIVE"
 
 
 @pytest.mark.asyncio

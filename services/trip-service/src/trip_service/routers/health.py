@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import text
 
 from trip_service.config import settings
@@ -18,6 +19,12 @@ router = APIRouter(tags=["health"])
 async def health() -> dict[str, str]:
     """Process liveness only."""
     return {"status": "ok"}
+
+
+@router.get("/metrics")
+async def metrics() -> Response:
+    """Expose Prometheus metrics for internal scraping."""
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @router.get("/ready")
@@ -67,6 +74,13 @@ async def readiness(request: Request) -> JSONResponse:
     )
     checks["outbox_relay"] = outbox_heartbeat.status
     overall = overall and outbox_heartbeat.status == "ok"
+
+    cleanup_heartbeat = get_worker_heartbeat_snapshot(
+        "cleanup-worker",
+        stale_after_seconds=settings.worker_heartbeat_timeout_seconds,
+    )
+    checks["cleanup_worker"] = cleanup_heartbeat.status
+    overall = overall and cleanup_heartbeat.status == "ok"
 
     return JSONResponse(
         status_code=200 if overall else 503,

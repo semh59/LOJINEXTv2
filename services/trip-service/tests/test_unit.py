@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
 from trip_service.dependencies import LocationTripContext
 from trip_service.models import TripTrip, TripTripEvidence
+from trip_service.observability import _sleep_with_heartbeats
 from trip_service.trip_helpers import apply_trip_context, latest_evidence, trip_complete_errors, utc_now
 
 
@@ -108,3 +111,24 @@ def test_trip_complete_errors_lists_missing_fields() -> None:
 
 def test_utc_now_is_timezone_aware() -> None:
     assert utc_now().tzinfo == UTC
+
+
+@pytest.mark.asyncio
+async def test_cleanup_heartbeat_sleep_chunks_long_intervals(monkeypatch: pytest.MonkeyPatch) -> None:
+    heartbeat_calls: list[str] = []
+    sleep_calls: list[int] = []
+
+    def fake_record_worker_heartbeat(worker_name: str, recorded_at_utc: datetime | None = None) -> None:
+        del recorded_at_utc
+        heartbeat_calls.append(worker_name)
+
+    async def fake_sleep(seconds: float) -> None:
+        sleep_calls.append(int(seconds))
+
+    monkeypatch.setattr("trip_service.observability.record_worker_heartbeat", fake_record_worker_heartbeat)
+    monkeypatch.setattr("trip_service.observability.asyncio.sleep", fake_sleep)
+
+    await _sleep_with_heartbeats("cleanup-worker", 35)
+
+    assert heartbeat_calls == ["cleanup-worker", "cleanup-worker", "cleanup-worker"]
+    assert sleep_calls == [15, 15, 5]

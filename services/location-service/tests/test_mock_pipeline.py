@@ -24,7 +24,10 @@ async def test_manual_verify_logic():
     pair_id = uuid.uuid4()
 
     run = ProcessingRun(
-        processing_run_id=run_id, run_status=RunStatus.QUEUED, trigger_type=TriggerType.INITIAL_CALCULATE
+        processing_run_id=run_id,
+        route_pair_id=pair_id,
+        run_status=RunStatus.QUEUED,
+        trigger_type=TriggerType.INITIAL_CALCULATE,
     )
     origin_id = uuid.uuid4()
     dest_id = uuid.uuid4()
@@ -86,10 +89,26 @@ async def test_manual_verify_logic():
         "speed": [1.6],
         "maxspeed": [{"speed": 70, "unit": "km/h"}],
     }
+    mock_mb_resp.legs = [
+        {
+            "steps": [
+                {
+                    "intersections": [
+                        {
+                            "geometry_index": 0,
+                            "mapbox_streets_v8": {"class": "primary"},
+                            "is_urban": True,
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
 
     mock_ors_resp = AsyncMock()
     mock_ors_resp.status = "VALIDATED"
     mock_ors_resp.distance = 1000.0
+    mock_ors_resp.duration = 600.0
 
     mock_enrich = AsyncMock(return_value=[(0, 0, 0), (1, 1, 0)])
 

@@ -8,13 +8,14 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy.exc import ProgrammingError
 
-from location_service.enums import DirectionCode, PairStatus, RunStatus
-from location_service.models import LocationPoint, ProcessingRun, Route, RoutePair
+from location_service.enums import DirectionCode, PairStatus, RunStatus, TriggerType
+from location_service.enums import RoadClass, UrbanClass, ValidationResult
+from location_service.models import LocationPoint, ProcessingRun, Route, RoutePair, RouteSegment, RouteVersion
 from location_service.processing.approval import approve_route_versions, discard_route_versions
 from location_service.processing.bulk import trigger_bulk_refresh
-from location_service.processing.pipeline import _process_route_pair, recover_processing_runs
+from location_service.processing.pipeline import _process_route_pair, trigger_processing
+from location_service.processing.worker import ClaimedProcessingRun, claim_next_processing_run, process_claimed_run
 
 
 @pytest.mark.asyncio
@@ -64,12 +65,30 @@ async def test_processing_flow_full_mock() -> None:
     mock_mb_resp.geometry = SimpleNamespace(coordinates=[(29.0, 41.0), (28.0, 40.0)])
     mock_mb_resp.annotations = {
         "distance": [1000.0],
+        "duration": [600.0],
         "speed": [1.66],
         "maxspeed": [{"speed": 70, "unit": "km/h"}],
     }
+    mock_mb_resp.legs = [
+        {
+            "steps": [
+                {
+                    "intersections": [
+                        {
+                            "geometry_index": 0,
+                            "mapbox_streets_v8": {"class": "motorway"},
+                            "is_urban": False,
+                            "classes": ["tunnel"],
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
 
     mock_ors_resp = MagicMock()
     mock_ors_resp.distance = 1005.0
+    mock_ors_resp.duration = 660.0
     mock_ors_resp.status = "OK"
 
     with (
@@ -86,86 +105,127 @@ async def test_processing_flow_full_mock() -> None:
 
         await _process_route_pair(run_id, pair_id)
 
+    route_versions = [call.args[0] for call in mock_session.add.call_args_list if isinstance(call.args[0], RouteVersion)]
+    route_segments = [call.args[0] for call in mock_session.add.call_args_list if isinstance(call.args[0], RouteSegment)]
+
     assert mock_run.run_status == RunStatus.SUCCEEDED
     assert mock_pair.pending_forward_version_no == 1
     assert mock_pair.pending_reverse_version_no == 1
     assert mock_pair.forward_route_id is not None
     assert mock_pair.reverse_route_id is not None
     assert mock_pair.row_version == 2
+    assert len(route_versions) == 2
+    assert all(version.validation_result == ValidationResult.WARNING for version in route_versions)
+    assert all(version.distance_validation_delta_pct == 0.5 for version in route_versions)
+    assert all(version.duration_validation_delta_pct == 10.0 for version in route_versions)
+    assert len(route_segments) == 2
+    assert all(segment.road_class == RoadClass.MOTORWAY for segment in route_segments)
+    assert all(segment.urban_class == UrbanClass.NON_URBAN for segment in route_segments)
+    assert all(segment.tunnel_flag is True for segment in route_segments)
     assert mock_session.add.call_count >= 8
     assert mock_session.commit.call_count >= 2
 
 
 @pytest.mark.asyncio
-async def test_recover_processing_runs_requeues_queued_and_stale_running() -> None:
+async def test_trigger_processing_only_queues_run() -> None:
+    pair_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+
+    mock_session = AsyncMock()
+    mock_session.add = MagicMock()
+    mock_session.__aenter__.return_value = mock_session
+    mock_session.__aexit__.return_value = None
+
+    with patch("location_service.processing.pipeline.async_session_factory", return_value=mock_session):
+        created_run_id = await trigger_processing(
+            pair_id=pair_id,
+            trigger_type=TriggerType.INITIAL_CALCULATE,
+            run_id=run_id,
+        )
+
+    assert created_run_id == run_id
+    created_run = mock_session.add.call_args.args[0]
+    assert isinstance(created_run, ProcessingRun)
+    assert created_run.processing_run_id == run_id
+    assert created_run.route_pair_id == pair_id
+    assert created_run.run_status == RunStatus.QUEUED
+    assert created_run.trigger_type == TriggerType.INITIAL_CALCULATE
+    mock_session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_claim_next_processing_run_claims_queued_then_reclaims_stale_running() -> None:
     queued_run = ProcessingRun(
         processing_run_id=uuid.uuid4(),
         route_pair_id=uuid.uuid4(),
         run_status=RunStatus.QUEUED,
-        trigger_type="INITIAL_CALCULATE",
+        trigger_type=TriggerType.INITIAL_CALCULATE,
+        attempt_no=1,
         created_at_utc=datetime.now(UTC),
     )
     stale_run = ProcessingRun(
         processing_run_id=uuid.uuid4(),
         route_pair_id=uuid.uuid4(),
         run_status=RunStatus.RUNNING,
-        trigger_type="INITIAL_CALCULATE",
+        trigger_type=TriggerType.INITIAL_CALCULATE,
+        attempt_no=3,
         started_at_utc=datetime.now(UTC) - timedelta(minutes=45),
         created_at_utc=datetime.now(UTC) - timedelta(minutes=45),
     )
-    fresh_run = ProcessingRun(
-        processing_run_id=uuid.uuid4(),
-        route_pair_id=uuid.uuid4(),
-        run_status=RunStatus.RUNNING,
-        trigger_type="INITIAL_CALCULATE",
-        started_at_utc=datetime.now(UTC) - timedelta(minutes=5),
-        created_at_utc=datetime.now(UTC) - timedelta(minutes=5),
-    )
 
     mock_session = AsyncMock()
     mock_session.__aenter__.return_value = mock_session
     mock_session.__aexit__.return_value = None
-    result = MagicMock()
-    result.scalars.return_value.all.return_value = [queued_run, stale_run, fresh_run]
-    mock_session.execute.return_value = result
-
-    dispatched: list[tuple[uuid.UUID, uuid.UUID]] = []
+    queued_result = MagicMock()
+    queued_result.scalar_one_or_none.return_value = queued_run
+    stale_result = MagicMock()
+    stale_result.scalar_one_or_none.return_value = stale_run
 
     with (
-        patch("location_service.processing.pipeline.async_session_factory", return_value=mock_session),
-        patch(
-            "location_service.processing.pipeline._dispatch_processing_task",
-            side_effect=lambda run_id, pair_id: dispatched.append((run_id, pair_id)),
-        ),
+        patch("location_service.processing.worker.async_session_factory", return_value=mock_session),
+        patch("location_service.processing.worker._worker_identity", return_value="worker-1"),
     ):
-        recovered = await recover_processing_runs()
+        mock_session.execute.side_effect = [queued_result, stale_result]
+        queued_claim = await claim_next_processing_run()
+        stale_claim = await claim_next_processing_run()
 
-    assert recovered == 2
-    assert queued_run.run_status == RunStatus.QUEUED
-    assert stale_run.run_status == RunStatus.QUEUED
-    assert stale_run.started_at_utc is None
-    assert fresh_run.run_status == RunStatus.RUNNING
-    assert dispatched == [
-        (queued_run.processing_run_id, queued_run.route_pair_id),
-        (stale_run.processing_run_id, stale_run.route_pair_id),
-    ]
+    assert queued_claim is not None
+    assert queued_claim.run_id == queued_run.processing_run_id
+    assert queued_run.run_status == RunStatus.RUNNING
+    assert queued_run.claim_token == queued_claim.claim_token
+    assert queued_run.claimed_by_worker == "worker-1"
+    assert queued_run.attempt_no == 1
+
+    assert stale_claim is not None
+    assert stale_claim.run_id == stale_run.processing_run_id
+    assert stale_run.run_status == RunStatus.RUNNING
+    assert stale_run.claim_token == stale_claim.claim_token
+    assert stale_run.claimed_by_worker == "worker-1"
+    assert stale_run.attempt_no == 4
+    assert mock_session.commit.await_count == 2
 
 
 @pytest.mark.asyncio
-async def test_recover_processing_runs_skips_before_schema_exists() -> None:
-    mock_session = AsyncMock()
-    mock_session.__aenter__.return_value = mock_session
-    mock_session.__aexit__.return_value = None
-    mock_session.execute.side_effect = ProgrammingError(
-        "SELECT ... FROM processing_runs",
-        {},
-        Exception('relation "processing_runs" does not exist'),
+async def test_process_claimed_run_marks_failures() -> None:
+    claimed_run = ClaimedProcessingRun(
+        run_id=uuid.uuid4(),
+        pair_id=uuid.uuid4(),
+        trigger_type=str(TriggerType.INITIAL_CALCULATE),
+        claim_token="claim-token",
     )
 
-    with patch("location_service.processing.pipeline.async_session_factory", return_value=mock_session):
-        recovered = await recover_processing_runs()
+    with (
+        patch("location_service.processing.worker._process_route_pair", new_callable=AsyncMock) as mock_process,
+        patch("location_service.processing.worker.mark_processing_run_failed", new_callable=AsyncMock) as mock_fail,
+    ):
+        mock_process.side_effect = RuntimeError("provider timeout")
+        await process_claimed_run(claimed_run)
 
-    assert recovered == 0
+    mock_fail.assert_awaited_once_with(
+        claimed_run.run_id,
+        "provider timeout",
+        claim_token=claimed_run.claim_token,
+    )
 
 
 @pytest.mark.asyncio

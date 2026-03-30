@@ -39,8 +39,7 @@ async def trigger_bulk_refresh(pair_ids: List[UUID] | None = None) -> int:
         logger.warning("Bulk refresh triggered but no target pairs found.")
         return 0
 
-    # Trigger processing for each target
-    # trigger_processing handles its own session and asyncio task creation
+    # trigger_processing only enqueues the run; the dedicated worker drains the queue.
     for pid in targets:
         try:
             await trigger_processing(pair_id=pid, trigger_type=TriggerType.BULK_REFRESH_ITEM)

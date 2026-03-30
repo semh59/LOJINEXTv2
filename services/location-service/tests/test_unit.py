@@ -151,6 +151,14 @@ def test_normalization_empty() -> None:
     assert normalize_tr("") == ""
 
 
+def test_normalization_handles_dotted_i_and_nfkc_forms() -> None:
+    """Normalization keeps Turkish I-rules while collapsing compatibility forms."""
+    assert normalize_en("i\u0307zmir") == "\u0130ZMIR"
+    assert normalize_tr("i\u0307zmir") == "\u0130ZM\u0130R"
+    assert normalize_en("\uff49\uff53\uff54\uff41\uff4e\uff42\uff55\uff4c") == "ISTANBUL"
+    assert normalize_tr("\uff49\uff53\uff54\uff41\uff4e\uff42\uff55\uff4c") == "ISTANBUL"
+
+
 def test_codes_generation_invalid_direction() -> None:
     """Test invalid direction raises error."""
     with pytest.raises(ValueError):

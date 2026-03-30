@@ -12,7 +12,7 @@ from trip_service.config import settings
 from trip_service.enums import EnrichmentStatus, RouteStatus
 from trip_service.models import TripOutbox, TripTrip, TripTripEnrichment, TripTripEvidence
 from trip_service.workers.enrichment_worker import _claim_and_process_batch
-from trip_service.workers.outbox_relay import _outbox_next_attempt_at, _publish_single, _relay_batch
+from trip_service.workers.outbox_relay import _outbox_next_attempt_at, _relay_batch
 
 
 class FailingBroker(MessageBroker):
@@ -44,8 +44,33 @@ class RecordingBroker(MessageBroker):
         return None
 
 
+class SelectiveFailBroker(MessageBroker):
+    """Broker stub that fails selected event ids while recording successes."""
+
+    def __init__(self, failing_event_ids: set[str]) -> None:
+        self.failing_event_ids = failing_event_ids
+        self.messages: list[OutboxMessage] = []
+
+    async def publish(self, message: OutboxMessage) -> None:
+        if message.event_id in self.failing_event_ids:
+            raise RuntimeError(f"publish failed for {message.event_id}")
+        self.messages.append(message)
+
+    async def close(self) -> None:
+        return None
+
+    async def check_health(self) -> None:
+        return None
+
+
 @pytest.mark.asyncio
-async def test_outbox_first_failure_backoff_is_five_seconds(test_session):
+async def test_outbox_first_failure_backoff_is_five_seconds(
+    test_session,
+    db_engine,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    monkeypatch.setattr("trip_service.workers.outbox_relay.async_session_factory", session_factory)
     row = TripOutbox(
         event_id="01JATWORKEROUTBOX000000001",
         aggregate_type="TRIP",
@@ -59,20 +84,32 @@ async def test_outbox_first_failure_backoff_is_five_seconds(test_session):
         attempt_count=0,
         created_at_utc=datetime.now(UTC),
     )
+    test_session.add(row)
+    await test_session.commit()
 
     before = datetime.now(UTC)
-    success = await _publish_single(FailingBroker(), test_session, row)
+    processed = await _relay_batch(FailingBroker(), worker_id="test-worker", batch_size=10)
     after = datetime.now(UTC)
 
-    assert success is False
-    assert row.publish_status == "FAILED"
-    assert row.next_attempt_at_utc is not None
-    assert before + timedelta(seconds=4) <= row.next_attempt_at_utc <= after + timedelta(seconds=6)
+    assert processed == 0
+    async with session_factory() as session:
+        refreshed = await session.get(TripOutbox, row.event_id)
+    assert refreshed is not None
+    assert refreshed.publish_status == "FAILED"
+    assert refreshed.last_error_code == "publish failed"
+    assert refreshed.next_attempt_at_utc is not None
+    assert before + timedelta(seconds=4) <= refreshed.next_attempt_at_utc <= after + timedelta(seconds=6)
 
 
 @pytest.mark.asyncio
-async def test_outbox_dead_letters_at_configured_ceiling(test_session, monkeypatch: pytest.MonkeyPatch):
+async def test_outbox_dead_letters_at_configured_ceiling(
+    test_session,
+    db_engine,
+    monkeypatch: pytest.MonkeyPatch,
+):
     monkeypatch.setattr(settings, "outbox_relay_max_failures", 2)
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    monkeypatch.setattr("trip_service.workers.outbox_relay.async_session_factory", session_factory)
     row = TripOutbox(
         event_id="01JATWORKEROUTBOX000000002",
         aggregate_type="TRIP",
@@ -86,11 +123,18 @@ async def test_outbox_dead_letters_at_configured_ceiling(test_session, monkeypat
         attempt_count=1,
         created_at_utc=datetime.now(UTC),
     )
+    test_session.add(row)
+    await test_session.commit()
 
-    success = await _publish_single(FailingBroker(), test_session, row)
-    assert success is False
-    assert row.publish_status == "DEAD_LETTER"
-    assert row.next_attempt_at_utc is None
+    processed = await _relay_batch(FailingBroker(), worker_id="test-worker", batch_size=10)
+    assert processed == 0
+
+    async with session_factory() as session:
+        refreshed = await session.get(TripOutbox, row.event_id)
+    assert refreshed is not None
+    assert refreshed.publish_status == "DEAD_LETTER"
+    assert refreshed.next_attempt_at_utc is None
+    assert refreshed.last_error_code == "publish failed"
 
 
 @pytest.mark.asyncio
@@ -431,3 +475,59 @@ async def test_outbox_relay_reclaims_stale_claim(test_session, db_engine, monkey
     assert refreshed.publish_status == "PUBLISHED"
     assert refreshed.claim_token is None
     assert refreshed.claimed_by_worker is None
+
+
+@pytest.mark.asyncio
+async def test_outbox_relay_commits_each_event_independently(test_session, db_engine, monkeypatch: pytest.MonkeyPatch):
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    monkeypatch.setattr("trip_service.workers.outbox_relay.async_session_factory", session_factory)
+
+    now = datetime.now(UTC)
+    first = TripOutbox(
+        event_id="01JATOUTBOXISOLATION000001",
+        aggregate_type="TRIP",
+        aggregate_id="TRIP-ISOLATION-001",
+        aggregate_version=1,
+        event_name="trip.created.v1",
+        schema_version=1,
+        payload_json="{}",
+        partition_key="TRIP-ISOLATION-001",
+        publish_status="PENDING",
+        attempt_count=0,
+        created_at_utc=now,
+    )
+    second = TripOutbox(
+        event_id="01JATOUTBOXISOLATION000002",
+        aggregate_type="TRIP",
+        aggregate_id="TRIP-ISOLATION-002",
+        aggregate_version=1,
+        event_name="trip.created.v1",
+        schema_version=1,
+        payload_json="{}",
+        partition_key="TRIP-ISOLATION-002",
+        publish_status="PENDING",
+        attempt_count=0,
+        created_at_utc=now + timedelta(seconds=1),
+    )
+    test_session.add_all([first, second])
+    await test_session.commit()
+
+    broker = SelectiveFailBroker({second.event_id})
+    processed = await _relay_batch(broker, worker_id="test-worker", batch_size=10)
+
+    assert processed == 1
+    assert [message.event_id for message in broker.messages] == [first.event_id]
+
+    async with session_factory() as session:
+        refreshed_first = await session.get(TripOutbox, first.event_id)
+        refreshed_second = await session.get(TripOutbox, second.event_id)
+
+    assert refreshed_first is not None
+    assert refreshed_first.publish_status == "PUBLISHED"
+    assert refreshed_first.last_error_code is None
+    assert refreshed_first.claim_token is None
+
+    assert refreshed_second is not None
+    assert refreshed_second.publish_status == "FAILED"
+    assert refreshed_second.last_error_code == f"publish failed for {second.event_id}"[:100]
+    assert refreshed_second.claim_token is None

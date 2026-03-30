@@ -1,0 +1,119 @@
+# Trip/Location — Production Release Gate
+# Triggers on release tags and manual dispatch.
+# Stands up the full Compose stack, runs smoke tests, tears down.
+# REQUIRES live provider secrets — fails hard when missing.
+
+name: "Trip/Location Prod Gate"
+
+on:
+  push:
+    tags:
+      - "release/trip-location/*"
+  workflow_dispatch:
+    inputs:
+      skip_soak:
+        description: "Skip soak test (smoke only)"
+        type: boolean
+        default: false
+
+jobs:
+  prod-gate:
+    name: "Full Stack Smoke + Soak"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        env:
+          POSTGRES_PASSWORD: ${{ secrets['POSTGRES_PASSWORD'] }}
+          TRIP_AUTH_JWT_SECRET: ${{ secrets['TRIP_AUTH_JWT_SECRET'] }}
+          LOCATION_AUTH_JWT_SECRET: ${{ secrets['LOCATION_AUTH_JWT_SECRET'] }}
+          LOCATION_MAPBOX_API_KEY: ${{ secrets['LOCATION_MAPBOX_API_KEY'] }}
+        run: |
+          missing=()
+          [ -z "$POSTGRES_PASSWORD" ] && missing+=("POSTGRES_PASSWORD")
+          [ -z "$TRIP_AUTH_JWT_SECRET" ] && missing+=("TRIP_AUTH_JWT_SECRET")
+          [ -z "$LOCATION_AUTH_JWT_SECRET" ] && missing+=("LOCATION_AUTH_JWT_SECRET")
+          [ -z "$LOCATION_MAPBOX_API_KEY" ] && missing+=("LOCATION_MAPBOX_API_KEY")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secrets: ${missing[*]}"
+            echo "The prod gate requires live provider secrets. This is by design."
+            exit 1
+          fi
+
+      - name: Create .env
+        working-directory: deploy/compose/trip-location
+        env:
+          POSTGRES_PASSWORD: ${{ secrets['POSTGRES_PASSWORD'] }}
+          TRIP_AUTH_JWT_SECRET: ${{ secrets['TRIP_AUTH_JWT_SECRET'] }}
+          LOCATION_AUTH_JWT_SECRET: ${{ secrets['LOCATION_AUTH_JWT_SECRET'] }}
+          LOCATION_MAPBOX_API_KEY: ${{ secrets['LOCATION_MAPBOX_API_KEY'] }}
+          LOCATION_ORS_API_KEY: ${{ secrets['LOCATION_ORS_API_KEY'] }}
+          LOCATION_ENABLE_ORS_VALIDATION: ${{ secrets['LOCATION_ORS_API_KEY'] != '' && 'true' || 'false' }}
+        run: |
+          cat > .env << EOF
+          POSTGRES_USER=lojinext
+          POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+          TRIP_AUTH_JWT_SECRET=$TRIP_AUTH_JWT_SECRET
+          TRIP_BROKER_TYPE=kafka
+          TRIP_ALLOW_PLAINTEXT_IN_PROD=true
+          LOCATION_AUTH_JWT_SECRET=$LOCATION_AUTH_JWT_SECRET
+          LOCATION_MAPBOX_API_KEY=$LOCATION_MAPBOX_API_KEY
+          LOCATION_ORS_API_KEY=$LOCATION_ORS_API_KEY
+          LOCATION_ENABLE_ORS_VALIDATION=$LOCATION_ENABLE_ORS_VALIDATION
+          GRAFANA_PASSWORD=ci-admin
+          EOF
+
+      - name: Build and start stack
+        working-directory: deploy/compose/trip-location
+        run: |
+          docker compose -f docker-compose.prod.yml up -d --build --wait
+          echo "Waiting 15s for services to initialize..."
+          sleep 15
+
+      - name: Run Alembic migrations — Trip
+        working-directory: deploy/compose/trip-location
+        run: |
+          docker compose -f docker-compose.prod.yml exec -T trip-api \
+            alembic upgrade head
+
+      - name: Run Alembic migrations — Location
+        working-directory: deploy/compose/trip-location
+        run: |
+          docker compose -f docker-compose.prod.yml exec -T location-api \
+            alembic upgrade head
+
+      - name: Wait for readiness
+        run: |
+          for i in $(seq 1 30); do
+            trip_ok=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8101/health || true)
+            loc_ok=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8103/health || true)
+            if [ "$trip_ok" = "200" ] && [ "$loc_ok" = "200" ]; then
+              echo "Both services healthy after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run smoke test
+        run: python ops/trip_location/smoke_stack.py
+
+      - name: Run soak test
+        if: ${{ !inputs.skip_soak }}
+        run: python ops/trip_location/soak_e2e.py --duration-minutes 3
+
+      - name: Collect logs on failure
+        if: failure()
+        working-directory: deploy/compose/trip-location
+        run: docker compose -f docker-compose.prod.yml logs --tail=200
+
+      - name: Tear down
+        if: always()
+        working-directory: deploy/compose/trip-location
+        run: docker compose -f docker-compose.prod.yml down -v --remove-orphans

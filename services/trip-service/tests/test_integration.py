@@ -22,7 +22,7 @@ from tests.conftest import (
 )
 from trip_service.dependencies import fetch_trip_context, probe_location_service, resolve_route_by_names
 from trip_service.errors import ProblemDetailError
-from trip_service.models import TripIdempotencyRecord, TripOutbox, TripTrip, TripTripDeleteAudit
+from trip_service.models import TripIdempotencyRecord, TripOutbox, TripTrip, TripTripDeleteAudit, TripTripEnrichment
 from trip_service.routers.trips import _merged_payload_hash
 
 
@@ -273,6 +273,200 @@ async def test_overlap_conflict_returns_stable_driver_code(client: AsyncClient):
     assert first.status_code == 201
     assert second.status_code == 409
     assert second.json()["code"] == "TRIP_DRIVER_OVERLAP"
+
+
+@pytest.mark.asyncio
+async def test_overlap_conflict_is_serialized_under_concurrency(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from trip_service import trip_helpers
+
+    original_acquire = trip_helpers._acquire_overlap_locks
+    first_lock_acquired = asyncio.Event()
+    release_first_request = asyncio.Event()
+    first_entry = True
+    overlap_start_local = (datetime.now().astimezone().replace(microsecond=0) - timedelta(minutes=5)).strftime(
+        "%Y-%m-%dT%H:%M"
+    )
+
+    async def delayed_acquire(session, *, driver_id: str, vehicle_id: str, trailer_id: str | None) -> None:
+        nonlocal first_entry
+        await original_acquire(session, driver_id=driver_id, vehicle_id=vehicle_id, trailer_id=trailer_id)
+        if first_entry:
+            first_entry = False
+            first_lock_acquired.set()
+            await release_first_request.wait()
+
+    monkeypatch.setattr("trip_service.trip_helpers._acquire_overlap_locks", delayed_acquire)
+
+    first_task = asyncio.create_task(
+        client.post(
+            "/api/v1/trips",
+            json=make_manual_trip_payload(
+                trip_no="TR-OVERLAP-CONCURRENT-1",
+                trip_start_local=overlap_start_local,
+            ),
+            headers=ADMIN_HEADERS,
+        )
+    )
+    await asyncio.wait_for(first_lock_acquired.wait(), timeout=5)
+
+    second_task = asyncio.create_task(
+        client.post(
+            "/api/v1/trips",
+            json=make_manual_trip_payload(
+                trip_no="TR-OVERLAP-CONCURRENT-2",
+                trip_start_local=overlap_start_local,
+            ),
+            headers=ADMIN_HEADERS,
+        )
+    )
+    await asyncio.sleep(0.1)
+    release_first_request.set()
+
+    first_response, second_response = await asyncio.gather(first_task, second_task)
+    statuses = sorted([first_response.status_code, second_response.status_code])
+    assert statuses == [201, 409]
+    conflict = first_response if first_response.status_code == 409 else second_response
+    assert conflict.json()["code"] == "TRIP_DRIVER_OVERLAP"
+
+
+@pytest.mark.asyncio
+async def test_list_trips_hides_soft_deleted_by_default(client: AsyncClient) -> None:
+    active = await client.post(
+        "/api/v1/trips",
+        json=make_manual_trip_payload(trip_no="TR-LIST-ACTIVE"),
+        headers=SUPER_ADMIN_HEADERS,
+    )
+    deleted = await client.post(
+        "/api/v1/trips",
+        json=make_manual_trip_payload(trip_no="TR-LIST-DELETED", trip_start_local="2026-03-30T11:00"),
+        headers=SUPER_ADMIN_HEADERS,
+    )
+    cancelled = await client.post(
+        f"/api/v1/trips/{deleted.json()['id']}/cancel",
+        headers={**SUPER_ADMIN_HEADERS, "If-Match": deleted.headers["etag"]},
+    )
+
+    default_list = await client.get("/api/v1/trips", headers=ADMIN_HEADERS)
+    deleted_list = await client.get("/api/v1/trips", params={"status": "SOFT_DELETED"}, headers=ADMIN_HEADERS)
+
+    assert active.status_code == 201
+    assert cancelled.status_code == 200
+    assert {item["id"] for item in default_list.json()["items"]} == {active.json()["id"]}
+    assert {item["id"] for item in deleted_list.json()["items"]} == {deleted.json()["id"]}
+
+
+@pytest.mark.asyncio
+async def test_cancel_soft_deleted_trip_requires_current_etag(client: AsyncClient) -> None:
+    created = await client.post(
+        "/api/v1/trips",
+        json=make_manual_trip_payload(trip_no="TR-CANCEL-ETAG"),
+        headers=SUPER_ADMIN_HEADERS,
+    )
+    cancelled = await client.post(
+        f"/api/v1/trips/{created.json()['id']}/cancel",
+        headers={**SUPER_ADMIN_HEADERS, "If-Match": created.headers["etag"]},
+    )
+    stale_retry = await client.post(
+        f"/api/v1/trips/{created.json()['id']}/cancel",
+        headers={**SUPER_ADMIN_HEADERS, "If-Match": created.headers["etag"]},
+    )
+    current_retry = await client.post(
+        f"/api/v1/trips/{created.json()['id']}/cancel",
+        headers={**SUPER_ADMIN_HEADERS, "If-Match": cancelled.headers["etag"]},
+    )
+
+    assert cancelled.status_code == 200
+    assert stale_retry.status_code == 412
+    assert stale_retry.json()["code"] == "TRIP_VERSION_MISMATCH"
+    assert current_retry.status_code == 200
+    assert current_retry.headers["etag"] == cancelled.headers["etag"]
+
+
+@pytest.mark.asyncio
+async def test_manual_create_persists_source_payload_hash(client: AsyncClient, db_engine) -> None:
+    payload = make_manual_trip_payload(trip_no="TR-SOURCE-HASH")
+    request_hash = _merged_payload_hash(payload)
+    created = await client.post("/api/v1/trips", json=payload, headers=ADMIN_HEADERS)
+
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with session_factory() as session:
+        trip = await session.get(TripTrip, created.json()["id"])
+
+    assert created.status_code == 201
+    assert trip is not None
+    assert trip.source_payload_hash == request_hash
+
+
+@pytest.mark.asyncio
+async def test_empty_return_persists_source_payload_hash(client: AsyncClient, db_engine) -> None:
+    base_start = (datetime.now().astimezone().replace(microsecond=0) - timedelta(hours=7)).strftime("%Y-%m-%dT%H:%M")
+    return_start = (datetime.now().astimezone().replace(microsecond=0) - timedelta(minutes=10)).strftime(
+        "%Y-%m-%dT%H:%M"
+    )
+    base = await client.post(
+        "/api/v1/trips",
+        json=make_manual_trip_payload(trip_no="TR-ER-SOURCE-HASH", trip_start_local=base_start),
+        headers=SUPER_ADMIN_HEADERS,
+    )
+    payload = {
+        "trip_start_local": return_start,
+        "trip_timezone": "Europe/Istanbul",
+        "driver_id": "driver-001",
+        "vehicle_id": "vehicle-001",
+        "tare_weight_kg": 14000,
+        "gross_weight_kg": 14000,
+        "net_weight_kg": 0,
+    }
+    request_hash = _merged_payload_hash(payload)
+    created = await client.post(
+        f"/api/v1/trips/{base.json()['id']}/empty-return",
+        json=payload,
+        headers={**SUPER_ADMIN_HEADERS, "If-Match": base.headers["etag"]},
+    )
+
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with session_factory() as session:
+        trip = await session.get(TripTrip, created.json()["id"])
+
+    assert created.status_code == 201
+    assert trip is not None
+    assert trip.source_payload_hash == request_hash
+
+
+@pytest.mark.asyncio
+async def test_retry_enrichment_resets_attempt_counter(client: AsyncClient, db_engine) -> None:
+    created = await client.post(
+        "/internal/v1/trips/slips/ingest",
+        json=make_slip_payload(source_slip_no="SLIP-RETRY-RESET-01", source_reference_key="telegram-retry-reset-01"),
+        headers=TELEGRAM_SERVICE_HEADERS,
+    )
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with session_factory() as session:
+        enrichment = (
+            await session.execute(select(TripTripEnrichment).where(TripTripEnrichment.trip_id == created.json()["id"]))
+        ).scalar_one()
+        enrichment.enrichment_status = "FAILED"
+        enrichment.route_status = "FAILED"
+        enrichment.enrichment_attempt_count = 4
+        enrichment.next_retry_at_utc = None
+        await session.commit()
+
+    retried = await client.post(
+        f"/api/v1/trips/{created.json()['id']}/retry-enrichment",
+        headers=ADMIN_HEADERS,
+    )
+
+    async with session_factory() as session:
+        refreshed = (
+            await session.execute(select(TripTripEnrichment).where(TripTripEnrichment.trip_id == created.json()["id"]))
+        ).scalar_one()
+
+    assert retried.status_code == 202
+    assert refreshed.enrichment_attempt_count == 0
+    assert refreshed.enrichment_status == "PENDING"
 
 
 @pytest.mark.asyncio

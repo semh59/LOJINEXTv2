@@ -1,0 +1,170 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "Trip API — Request Rate (req/s)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(http_request_duration_seconds_count[5m])) by (endpoint)",
+          "legendFormat": "{{endpoint}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps" },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Location API — Request Rate (req/s)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(location_api_request_duration_seconds_count[5m])) by (endpoint)",
+          "legendFormat": "{{endpoint}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps" },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Trip — Enrichment Claims & Completions",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "rate(enrichment_claimed_total[5m])",
+          "legendFormat": "claimed",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(enrichment_completed_total[5m])",
+          "legendFormat": "completed ({{result}})",
+          "refId": "B"
+        },
+        {
+          "expr": "rate(enrichment_failed_total[5m])",
+          "legendFormat": "failed (max retries)",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "title": "Location — Processing Run Duration (p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(location_processing_run_duration_seconds_bucket[5m])) by (le, trigger_type))",
+          "legendFormat": "p95 — {{trigger_type}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s" },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Trip — Outbox Events Published",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "expr": "rate(outbox_published_total[5m])",
+          "legendFormat": "{{event_name}}",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(outbox_dead_letter_total[5m])",
+          "legendFormat": "dead_letter",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "title": "Location — Provider Call Duration (p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(location_provider_call_duration_seconds_bucket[5m])) by (le, provider))",
+          "legendFormat": "p95 — {{provider}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s" },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Trip — Trips Created",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 24 },
+      "targets": [
+        {
+          "expr": "sum(trip_created_total)",
+          "legendFormat": "total",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Trip — Trips Completed",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 24 },
+      "targets": [
+        {
+          "expr": "sum(trip_completed_total)",
+          "legendFormat": "total",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Location — Processing Runs Total",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 24 },
+      "targets": [
+        {
+          "expr": "sum(location_processing_runs_total)",
+          "legendFormat": "total",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Location — Processing Failures",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 24 },
+      "targets": [
+        {
+          "expr": "sum(location_processing_run_failures_total)",
+          "legendFormat": "total",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["trip", "location", "production"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Trip/Location — Production Overview",
+  "uid": "trip-location-overview",
+  "version": 1
+}

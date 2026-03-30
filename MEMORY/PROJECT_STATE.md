@@ -13,7 +13,7 @@ Update it at the end of any session that changes project state.
 ## Next Task ID
 
 ```
-TASK-0034
+TASK-0035
 ```
 
 Use this when creating the next task. Then increment this counter.
@@ -25,7 +25,7 @@ Never reuse a retired ID.
 
 ```
 Phase: Phase 7 - Production Ready
-Status: completed
+Status: in_progress
 ```
 
 ---
@@ -56,6 +56,10 @@ Phase 5   Idempotency & Observability
 Phase 6   Testing
           Produces: All 44 mandatory tests from V8 spec Section 23
           Gate: All unit, integration, and contract tests pass
+
+Phase 7   Production Ready
+          Produces: split worker topology, durable processing worker, release compose stack, monitoring package, smoke/soak automation, release gate workflows
+          Gate: targeted tests pass, full-stack smoke succeeds, release gate assets exist
 ```
 
 ---
@@ -85,6 +89,8 @@ Phase 6   Testing
 | TASK-0030 | Driver Service Final Test Matrix + Observability | completed        | 2026-03-30       | Antigravity |
 | TASK-0031 | Driver Service Refining tasks & Import Tests     | completed        | 2026-03-30       | Antigravity |
 | TASK-0032 | Driver Service Production Audit & Hardening      | completed        | 2026-03-30       | Antigravity |
+| TASK-0033 | Trip/Location Audit Remediation                  | completed        | 2026-03-30       | Codex       |
+| TASK-0034 | Trip/Location Full Production Readiness          | ready_for_review | 2026-03-30       | Antigravity |
 
 ---
 
@@ -92,6 +98,7 @@ Phase 6   Testing
 
 | Task ID   | Description                                 | Status    | Last Updated | Last Agent  |
 | --------- | ------------------------------------------- | --------- | ------------ | ----------- |
+| TASK-0033 | Trip/Location Audit Remediation             | completed | 2026-03-30   | Codex       |
 | TASK-0032 | Driver Service Production Audit & Hardening | completed | 2026-03-30   | Antigravity |
 | TASK-0017 | Trip Service Full Remediation               | completed | 2026-03-28   | Codex       |
 | TASK-0016 | Trip Service Release-Hardening Fixes        | completed | 2026-03-28   | Codex       |
@@ -100,17 +107,15 @@ Phase 6   Testing
 | TASK-0008 | Location Service Bulk                       | completed | 2026-03-26   | Antigravity |
 | TASK-0007 | Location Service Approval                   | completed | 2026-03-26   | Antigravity |
 | TASK-0005 | Location Service API Endp                   | completed | 2026-03-25   | Antigravity |
-| TASK-0004 | Location Service Domain                     | completed | 2026-03-24   | Antigravity |
-| TASK-0003 | Location Service Scaffo                     | completed | 2026-03-24   | Antigravity |
 
 ---
 
 ## What Comes Next
 
 ```
-Task:   TASK-0020 - Location Cleanup and Architecture Hardening
-Why:    TASK-0019 and TASK-0021 closed the release blockers and frontend public-contract gaps; the remaining work is the deferred P2 cleanup and persistent worker redesign.
-Brief:  Remove dead surface, replace in-process recovery with a durable worker model, and finish the remaining Location Service cleanup without reopening the hardened public contract.
+Task:   TASK-0034 - Trip/Location Full Production Readiness
+Why:    The services now need production packaging beyond correctness fixes: split runtimes, durable worker execution, full-stack compose assets, monitoring, and release-gated verification.
+Brief:  Separate API/worker processes, move Location processing onto claimed workers, add production deploy/ops assets, and wire release verification into the repo.
 ```
 
 ---
@@ -129,8 +134,7 @@ Parts of the system that are fragile, incomplete, or temporary.
 
 | Area                                  | Issue                                                                                                           | Task      |
 | ------------------------------------- | --------------------------------------------------------------------------------------------------------------- | --------- |
-| Trip service public contract          | TASK-0011 changes public auth and request shapes; downstream callers must migrate before release                | TASK-0011 |
-| Location processing runtime           | TASK-0019 keeps in-process processing plus startup recovery; a durable DB-backed worker is still deferred       | TASK-0020 |
+| Trip/location production packaging    | Compose stack, ops scripts, CI workflows, and runbooks created but not Docker-integration-tested                | TASK-0034 |
 | Location public compatibility aliases | TASK-0021 intentionally keeps `limit` and the deprecated pair-prefixed processing-run detail path for one cycle | TASK-0020 |
 
 ---

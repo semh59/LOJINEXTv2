@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from httpx import AsyncClient
 
@@ -12,6 +14,8 @@ from tests.conftest import (
     TELEGRAM_SERVICE_HEADERS,
     make_manual_trip_payload,
 )
+from trip_service.config import settings
+from trip_service.worker_heartbeats import record_worker_heartbeat
 
 
 @pytest.mark.asyncio
@@ -130,3 +134,26 @@ async def test_driver_statement_range_over_31_days_returns_422(client: AsyncClie
 async def test_excel_service_token_is_required_for_export_feed(client: AsyncClient):
     response = await client.get("/internal/v1/trips/excel/export-feed", headers=EXCEL_SERVICE_HEADERS)
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_metrics_endpoint_exposes_prometheus_payload(client: AsyncClient):
+    await client.get("/health")
+
+    response = await client.get("/metrics")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    assert "trip_created_total" in response.text
+    assert "http_request_duration_seconds" in response.text
+
+
+@pytest.mark.asyncio
+async def test_readiness_requires_cleanup_worker_heartbeat(client: AsyncClient):
+    stale_at = datetime.now(UTC) - timedelta(seconds=settings.worker_heartbeat_timeout_seconds + 5)
+    record_worker_heartbeat("cleanup-worker", recorded_at_utc=stale_at)
+
+    response = await client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["cleanup_worker"] == "stale"

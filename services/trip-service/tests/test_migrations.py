@@ -56,6 +56,19 @@ def test_alembic_upgrade_head_on_empty_postgres() -> None:
                             )
                         )
                     ]
+                    outbox_columns = [
+                        row[0]
+                        for row in await conn.execute(
+                            text(
+                                """
+                                SELECT column_name
+                                FROM information_schema.columns
+                                WHERE table_name = 'trip_outbox'
+                                ORDER BY column_name
+                                """
+                            )
+                        )
+                    ]
                     trip_indexes = [
                         row[0]
                         for row in await conn.execute(
@@ -90,6 +103,7 @@ def test_alembic_upgrade_head_on_empty_postgres() -> None:
             assert "planned_end_utc" in trip_columns
             assert "review_reason_code" in trip_columns
             assert "source_reference_key" in trip_columns
+            assert "last_error_code" in outbox_columns
             assert "uq_trips_empty_return_base_trip" in trip_indexes
             assert "uq_trips_source_reference_key" in trip_indexes
 

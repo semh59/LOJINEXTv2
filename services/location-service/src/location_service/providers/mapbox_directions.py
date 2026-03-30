@@ -47,6 +47,7 @@ class MapboxDirectionsClient:
             "access_token": self.api_key,
             "geometries": "geojson",
             "overview": "full",
+            "steps": "true",
             "annotations": "distance,duration,speed,maxspeed",
         }
 

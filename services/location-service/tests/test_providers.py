@@ -45,6 +45,7 @@ async def test_mapbox_directions_success_parses_geojson() -> None:
     assert result.geometry.coordinates == [(10.0, 10.0), (20.0, 20.0)]
     assert result.annotations["speed"] == [10, 15]
     mock_get.assert_called_once()
+    assert mock_get.await_args.kwargs["params"]["steps"] == "true"
 
 
 @pytest.mark.asyncio

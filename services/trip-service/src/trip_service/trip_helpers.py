@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from trip_service.dependencies import LocationTripContext
@@ -127,6 +128,30 @@ def apply_trip_context(trip: TripTrip, context: LocationTripContext, *, reverse:
     )
 
 
+def _advisory_lock_key(resource_type: str, resource_id: str) -> int:
+    """Derive a stable signed 64-bit advisory lock key for a trip resource."""
+    digest = hashlib.sha256(f"{resource_type}:{resource_id}".encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], byteorder="big", signed=True)
+
+
+async def _acquire_overlap_locks(
+    session: AsyncSession,
+    *,
+    driver_id: str,
+    vehicle_id: str | None,
+    trailer_id: str | None,
+) -> None:
+    """Lock trip resources in sorted order so concurrent writers serialize cleanly."""
+    keys = {_advisory_lock_key("driver", driver_id)}
+    if vehicle_id is not None:
+        keys.add(_advisory_lock_key("vehicle", vehicle_id))
+    if trailer_id is not None:
+        keys.add(_advisory_lock_key("trailer", trailer_id))
+
+    for key in sorted(keys):
+        await session.execute(select(func.pg_advisory_xact_lock(key)))
+
+
 async def _find_overlap(
     session: AsyncSession,
     *,
@@ -163,6 +188,13 @@ async def assert_no_trip_overlap(
     exclude_trip_id: str | None = None,
 ) -> None:
     """Raise a stable 409 error when driver, vehicle, or trailer windows overlap."""
+    await _acquire_overlap_locks(
+        session,
+        driver_id=driver_id,
+        vehicle_id=vehicle_id,
+        trailer_id=trailer_id,
+    )
+
     driver_overlap = await _find_overlap(
         session,
         field_name="driver_id",

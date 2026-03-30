@@ -304,6 +304,7 @@ class TripOutbox(Base):
     publish_status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING")
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     next_attempt_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     claim_token: Mapped[str | None] = mapped_column(String(50), nullable=True)
     claim_expires_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     claimed_by_worker: Mapped[str | None] = mapped_column(String(50), nullable=True)

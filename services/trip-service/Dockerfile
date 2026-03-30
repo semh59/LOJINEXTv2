@@ -23,4 +23,4 @@ USER appuser
 
 EXPOSE 8101
 
-CMD ["uvicorn", "trip_service.main:app", "--host", "0.0.0.0", "--port", "8101"]
+CMD ["trip-api"]

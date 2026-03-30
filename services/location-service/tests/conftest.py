@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 
 import jwt
 import pytest
@@ -17,6 +18,8 @@ from location_service.config import settings
 from location_service.database import get_db
 from location_service.main import create_app
 from location_service.models import Base
+from location_service.provider_health import ProviderProbeResult, reset_provider_probe_cache
+from location_service.worker_heartbeats import clear_worker_heartbeats, record_worker_heartbeat
 
 _pg_url: str = ""
 TEST_AUTH_SECRET = "location-service-test-secret-please-change-me-32b"
@@ -92,6 +95,15 @@ async def test_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
                 pass
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def reset_provider_probe() -> AsyncGenerator[None, None]:
+    await reset_provider_probe_cache()
+    clear_worker_heartbeats()
+    yield
+    await reset_provider_probe_cache()
+    clear_worker_heartbeats()
+
+
 @pytest_asyncio.fixture
 async def raw_client(db_engine, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[AsyncClient, None]:
     """Provide an unauthenticated test client for auth and health checks."""
@@ -109,7 +121,18 @@ async def raw_client(db_engine, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerat
     monkeypatch.setattr("location_service.processing.pipeline.async_session_factory", session_factory)
     monkeypatch.setattr("location_service.processing.approval.async_session_factory", session_factory)
     monkeypatch.setattr("location_service.processing.bulk.async_session_factory", session_factory)
-    monkeypatch.setattr("location_service.processing.pipeline._dispatch_processing_task", lambda *_args: None)
+    monkeypatch.setattr("location_service.processing.worker.async_session_factory", session_factory)
+    record_worker_heartbeat("processing-worker", datetime.now(UTC))
+
+    async def healthy_probe() -> ProviderProbeResult:
+        return ProviderProbeResult(
+            mapbox_live="ok",
+            ors_live="disabled" if not settings.enable_ors_validation else "ok",
+            checked_at_utc=datetime.now(UTC),
+        )
+
+    monkeypatch.setattr("location_service.routers.health.get_provider_probe_result", healthy_probe)
+    monkeypatch.setattr("location_service.routers.health.provider_probe_age_seconds", lambda _result: 0)
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

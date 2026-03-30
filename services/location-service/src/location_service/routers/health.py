@@ -3,11 +3,14 @@
 import logging
 
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import text
 
 from location_service.config import settings
 from location_service.database import async_session_factory
+from location_service.provider_health import get_provider_probe_result, provider_probe_age_seconds
+from location_service.worker_heartbeats import get_worker_heartbeat_snapshot
 
 logger = logging.getLogger("location_service.health")
 
@@ -18,6 +21,12 @@ router = APIRouter(tags=["health"])
 async def health() -> dict[str, str]:
     """Liveness probe that only checks whether the process is running."""
     return {"status": "ok", "service": settings.service_name}
+
+
+@router.get("/metrics")
+async def metrics() -> Response:
+    """Prometheus metrics scrape endpoint."""
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @router.get("/ready")
@@ -33,16 +42,37 @@ async def ready() -> JSONResponse:
         logger.warning("Readiness check failed: database - %s", exc)
         checks["database"] = "unavailable"
 
+    probe_result = await get_provider_probe_result()
+
     checks["mapbox"] = "ok" if settings.mapbox_api_key else "missing"
+    checks["mapbox_live"] = probe_result.mapbox_live
     if settings.enable_ors_validation:
         checks["ors_api_key"] = "ok" if settings.ors_api_key else "missing"
         checks["ors_base_url"] = "ok" if settings.ors_base_url else "missing"
+        checks["ors_live"] = probe_result.ors_live
     else:
         checks["ors_validation"] = "disabled"
+    checks["provider_probe_age_s"] = provider_probe_age_seconds(probe_result)
 
-    all_ok = checks.get("database") == "ok" and checks.get("mapbox") == "ok"
+    worker_heartbeat = get_worker_heartbeat_snapshot(
+        "processing-worker",
+        stale_after_seconds=settings.worker_heartbeat_timeout_seconds,
+    )
+    checks["processing_worker"] = worker_heartbeat.status
+
+    all_ok = (
+        checks.get("database") == "ok"
+        and checks.get("mapbox") == "ok"
+        and checks.get("mapbox_live") == "ok"
+        and checks.get("processing_worker") == "ok"
+    )
     if settings.enable_ors_validation:
-        all_ok = all_ok and checks.get("ors_api_key") == "ok" and checks.get("ors_base_url") == "ok"
+        all_ok = (
+            all_ok
+            and checks.get("ors_api_key") == "ok"
+            and checks.get("ors_base_url") == "ok"
+            and checks.get("ors_live") == "ok"
+        )
 
     return JSONResponse(
         status_code=200 if all_ok else 503,

@@ -13,6 +13,7 @@ from trip_service.errors import (
     trip_invalid_route_pair,
     trip_validation_error,
 )
+from trip_service.http_clients import get_dependency_client
 
 
 @dataclass(frozen=True)
@@ -110,8 +111,8 @@ async def validate_trip_references(
         "trailer_id": trailer_id,
     }
     try:
-        async with httpx.AsyncClient(timeout=settings.dependency_timeout_seconds) as client:
-            response = await client.post(_fleet_validation_url(), json=payload)
+        client = await get_dependency_client()
+        response = await client.post(_fleet_validation_url(), json=payload)
     except httpx.HTTPError as exc:
         raise trip_dependency_unavailable("Fleet Service validation is unavailable.") from exc
 
@@ -165,8 +166,8 @@ async def resolve_route_by_names(
         "language_hint": language_hint,
     }
     try:
-        async with httpx.AsyncClient(timeout=settings.dependency_timeout_seconds) as client:
-            response = await client.post(_location_resolve_url(), json=payload, headers=_location_service_headers())
+        client = await get_dependency_client()
+        response = await client.post(_location_resolve_url(), json=payload, headers=_location_service_headers())
     except httpx.HTTPError as exc:
         raise trip_dependency_unavailable("Location Service route resolution is unavailable.") from exc
 
@@ -190,9 +191,10 @@ async def resolve_route_by_names(
 
 async def fetch_trip_context(pair_id: str, *, field_name: str = "body.route_pair_id") -> LocationTripContext:
     """Fetch forward and reverse trip context for a route pair."""
+    del field_name
     try:
-        async with httpx.AsyncClient(timeout=settings.dependency_timeout_seconds) as client:
-            response = await client.get(_location_trip_context_url(pair_id), headers=_location_service_headers())
+        client = await get_dependency_client()
+        response = await client.get(_location_trip_context_url(pair_id), headers=_location_service_headers())
     except httpx.HTTPError as exc:
         raise trip_dependency_unavailable("Location Service trip context is unavailable.") from exc
 
@@ -231,8 +233,8 @@ async def probe_fleet_service() -> bool:
     """Check that Fleet Service accepts the validation contract."""
     payload = {"driver_id": "healthcheck-driver", "vehicle_id": None, "trailer_id": None}
     try:
-        async with httpx.AsyncClient(timeout=settings.dependency_timeout_seconds) as client:
-            response = await client.post(_fleet_validation_url(), json=payload)
+        client = await get_dependency_client()
+        response = await client.post(_fleet_validation_url(), json=payload)
     except httpx.HTTPError:
         return False
     return response.status_code == 200
@@ -248,12 +250,12 @@ async def probe_location_service() -> bool:
     }
     headers = _location_service_headers()
     try:
-        async with httpx.AsyncClient(timeout=settings.dependency_timeout_seconds) as client:
-            resolve_response = await client.post(_location_resolve_url(), json=resolve_payload, headers=headers)
-            context_response = await client.get(
-                _location_trip_context_url("00000000-0000-0000-0000-000000000000"),
-                headers=headers,
-            )
+        client = await get_dependency_client()
+        resolve_response = await client.post(_location_resolve_url(), json=resolve_payload, headers=headers)
+        context_response = await client.get(
+            _location_trip_context_url("00000000-0000-0000-0000-000000000000"),
+            headers=headers,
+        )
     except httpx.HTTPError:
         return False
     return resolve_response.status_code in {200, 404, 422} and context_response.status_code in {200, 404, 409}

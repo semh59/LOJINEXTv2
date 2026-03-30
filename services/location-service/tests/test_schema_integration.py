@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
@@ -8,6 +10,8 @@ from httpx import ASGITransport, AsyncClient
 from location_service.config import settings
 from location_service.errors import unexpected_exception_handler
 from location_service.main import create_app
+from location_service.provider_health import ProviderProbeResult, get_provider_probe_result
+from location_service.worker_heartbeats import clear_worker_heartbeats
 
 
 @pytest.mark.asyncio
@@ -25,6 +29,18 @@ async def test_ready_endpoint(raw_client: AsyncClient) -> None:
     assert data["status"] == "ready"
     assert data["checks"]["database"] == "ok"
     assert data["checks"]["mapbox"] == "ok"
+    assert data["checks"]["mapbox_live"] == "ok"
+    assert data["checks"]["provider_probe_age_s"] == 0
+    assert data["checks"]["processing_worker"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_metrics_endpoint_exposes_prometheus_payload(raw_client: AsyncClient) -> None:
+    response = await raw_client.get("/metrics")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    assert "location_api_requests_total" in response.text
 
 
 @pytest.mark.asyncio
@@ -36,6 +52,66 @@ async def test_ready_returns_503_when_mapbox_key_missing(
     response = await raw_client.get("/ready")
     assert response.status_code == 503
     assert response.json()["checks"]["mapbox"] == "missing"
+
+
+@pytest.mark.asyncio
+async def test_ready_returns_503_when_cached_provider_probe_is_unavailable(
+    raw_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def unhealthy_probe() -> ProviderProbeResult:
+        return ProviderProbeResult(
+            mapbox_live="unavailable",
+            ors_live="disabled",
+            checked_at_utc=datetime.now(UTC),
+        )
+
+    monkeypatch.setattr("location_service.routers.health.get_provider_probe_result", unhealthy_probe)
+    monkeypatch.setattr("location_service.routers.health.provider_probe_age_seconds", lambda _result: 4)
+
+    response = await raw_client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["mapbox_live"] == "unavailable"
+    assert response.json()["checks"]["provider_probe_age_s"] == 4
+
+
+@pytest.mark.asyncio
+async def test_ready_returns_503_when_processing_worker_heartbeat_missing(raw_client: AsyncClient) -> None:
+    clear_worker_heartbeats()
+
+    response = await raw_client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["processing_worker"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_provider_probe_result_uses_ttl_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    mapbox_calls = 0
+    ors_calls = 0
+
+    async def probe_mapbox() -> str:
+        nonlocal mapbox_calls
+        mapbox_calls += 1
+        return "ok"
+
+    async def probe_ors() -> str:
+        nonlocal ors_calls
+        ors_calls += 1
+        return "disabled"
+
+    monkeypatch.setattr(settings, "provider_probe_ttl_seconds", 30)
+    monkeypatch.setattr("location_service.provider_health._probe_mapbox", probe_mapbox)
+    monkeypatch.setattr("location_service.provider_health._probe_ors", probe_ors)
+
+    first = await get_provider_probe_result()
+    second = await get_provider_probe_result()
+
+    assert first.mapbox_live == "ok"
+    assert second.mapbox_live == "ok"
+    assert mapbox_calls == 1
+    assert ors_calls == 1
 
 
 def test_docs_are_disabled_in_prod(monkeypatch: pytest.MonkeyPatch) -> None:

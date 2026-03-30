@@ -1,0 +1,91 @@
+# Trip/Location reverse proxy — Nginx config template
+# Environment variables are substituted at container start by envsubst.
+
+upstream trip_api {
+    server ${TRIP_API_UPSTREAM};
+}
+
+upstream location_api {
+    server ${LOCATION_API_UPSTREAM};
+}
+
+server {
+    listen 80;
+    server_name _;
+
+    # -------------------------------------------------------------------------
+    # Trip Service
+    # -------------------------------------------------------------------------
+    location /api/v1/trips {
+        proxy_pass http://trip_api;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $request_id;
+    }
+
+    location /internal/v1/ {
+        # Internal endpoints — restrict to internal network in production
+        proxy_pass http://trip_api;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Request-ID $request_id;
+    }
+
+    # Trip health/ready — public for load balancers
+    location = /trip/health {
+        rewrite ^/trip/health$ /health break;
+        proxy_pass http://trip_api;
+    }
+
+    location = /trip/ready {
+        rewrite ^/trip/ready$ /ready break;
+        proxy_pass http://trip_api;
+    }
+
+    # -------------------------------------------------------------------------
+    # Location Service
+    # -------------------------------------------------------------------------
+    location /v1/ {
+        proxy_pass http://location_api;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $request_id;
+    }
+
+    location = /location/health {
+        rewrite ^/location/health$ /health break;
+        proxy_pass http://location_api;
+    }
+
+    location = /location/ready {
+        rewrite ^/location/ready$ /ready break;
+        proxy_pass http://location_api;
+    }
+
+    # -------------------------------------------------------------------------
+    # Block metrics from external access — internal-only via direct ports
+    # -------------------------------------------------------------------------
+    location = /metrics {
+        return 403;
+    }
+
+    location = /trip/metrics {
+        return 403;
+    }
+
+    location = /location/metrics {
+        return 403;
+    }
+
+    # -------------------------------------------------------------------------
+    # Default
+    # -------------------------------------------------------------------------
+    location / {
+        return 404 '{"error": "not_found"}';
+        add_header Content-Type application/json;
+    }
+}
