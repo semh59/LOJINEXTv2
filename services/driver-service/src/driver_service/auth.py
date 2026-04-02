@@ -156,3 +156,22 @@ def admin_or_internal_auth_dependency(
 ) -> AuthContext:
     """FastAPI dependency for ADMIN or internal service endpoints."""
     return require_admin_or_internal_token(authorization)
+
+
+def generate_internal_service_token() -> str:
+    """Generate a JWT token for internal service-to-service calls."""
+    import time
+
+    now = int(time.time())
+    payload = {
+        "sub": "driver-service-internal",
+        "role": ActorRole.INTERNAL_SERVICE,
+        "service": settings.service_name,
+        "iat": now,
+        "exp": now + 300,  # 5 minutes
+    }
+    return jwt.encode(
+        payload,
+        settings.auth_jwt_secret,
+        algorithm=settings.auth_jwt_algorithm,
+    )

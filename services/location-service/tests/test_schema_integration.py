@@ -6,12 +6,13 @@ import pytest
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from location_service.config import settings
 from location_service.errors import unexpected_exception_handler
 from location_service.main import create_app
 from location_service.provider_health import ProviderProbeResult, get_provider_probe_result
-from location_service.worker_heartbeats import clear_worker_heartbeats
 
 
 @pytest.mark.asyncio
@@ -77,8 +78,11 @@ async def test_ready_returns_503_when_cached_provider_probe_is_unavailable(
 
 
 @pytest.mark.asyncio
-async def test_ready_returns_503_when_processing_worker_heartbeat_missing(raw_client: AsyncClient) -> None:
-    clear_worker_heartbeats()
+async def test_ready_returns_503_when_processing_worker_heartbeat_missing(
+    raw_client: AsyncClient, test_session: AsyncSession
+) -> None:
+    await test_session.execute(text("DELETE FROM worker_heartbeats"))
+    await test_session.commit()
 
     response = await raw_client.get("/ready")
 

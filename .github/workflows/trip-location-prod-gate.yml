@@ -27,6 +27,8 @@ on:
         required: true
       LOCATION_ORS_API_KEY:
         required: false
+      DRIVER_AUTH_JWT_SECRET:
+        required: true
 
 jobs:
   prod-gate:
@@ -49,6 +51,7 @@ jobs:
           [ -z "$TRIP_AUTH_JWT_SECRET" ] && missing+=("TRIP_AUTH_JWT_SECRET")
           [ -z "$LOCATION_AUTH_JWT_SECRET" ] && missing+=("LOCATION_AUTH_JWT_SECRET")
           [ -z "$LOCATION_MAPBOX_API_KEY" ] && missing+=("LOCATION_MAPBOX_API_KEY")
+          [ -z "$DRIVER_AUTH_JWT_SECRET" ] && missing+=("DRIVER_AUTH_JWT_SECRET")
           if [ ${#missing[@]} -gt 0 ]; then
             echo "::error::Missing required secrets: ${missing[*]}"
             echo "The prod gate requires live provider secrets. This is by design."
@@ -75,13 +78,14 @@ jobs:
           LOCATION_MAPBOX_API_KEY=$LOCATION_MAPBOX_API_KEY
           LOCATION_ORS_API_KEY=$LOCATION_ORS_API_KEY
           LOCATION_ENABLE_ORS_VALIDATION=$LOCATION_ENABLE_ORS_VALIDATION
+          DRIVER_AUTH_JWT_SECRET=${{ secrets['DRIVER_AUTH_JWT_SECRET'] }}
           GRAFANA_PASSWORD=ci-admin
           EOF
 
       - name: Build and start stack
         working-directory: deploy/compose/trip-location
         run: |
-          docker compose -f docker-compose.prod.yml up -d --build --wait
+          docker compose -f docker-compose.prod.yml up -d --build
           echo "Waiting 15s for services to initialize..."
           sleep 15
 
@@ -97,13 +101,20 @@ jobs:
           docker compose -f docker-compose.prod.yml exec -T location-api \
             alembic upgrade head
 
+      - name: Run Alembic migrations — Driver
+        working-directory: deploy/compose/trip-location
+        run: |
+          docker compose -f docker-compose.prod.yml exec -T driver-api \
+            alembic upgrade head
+
       - name: Wait for readiness
         run: |
           for i in $(seq 1 30); do
-            trip_ok=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8101/health || true)
-            loc_ok=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8103/health || true)
-            if [ "$trip_ok" = "200" ] && [ "$loc_ok" = "200" ]; then
-              echo "Both services healthy after ${i}s"
+            trip_ok=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8101/ready || true)
+            loc_ok=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8103/ready || true)
+            driver_ok=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8104/ready || true)
+            if [ "$trip_ok" = "200" ] && [ "$loc_ok" = "200" ] && [ "$driver_ok" = "200" ]; then
+              echo "All services healthy after ${i}s"
               break
             fi
             sleep 1

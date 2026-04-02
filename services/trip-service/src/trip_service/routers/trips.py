@@ -18,6 +18,7 @@ from ulid import ULID
 
 from trip_service.auth import (
     AuthContext,
+    admin_or_internal_auth_dependency,
     excel_service_auth_dependency,
     telegram_service_auth_dependency,
     user_auth_dependency,
@@ -481,6 +482,42 @@ def _maybe_require_change_reason(
             raise trip_change_reason_required("SUPER_ADMIN must provide change_reason to reassign imported driver.")
         return
     raise trip_source_locked_field("ADMIN cannot change driver_id on imported trips.")
+
+
+@router.get("/internal/v1/trips/driver-check/{driver_id}", status_code=200)
+async def check_driver_reference(
+    driver_id: str,
+    session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(admin_or_internal_auth_dependency),
+) -> dict:
+    """Check if a driver is referenced by any active trips."""
+    from trip_service.enums import TripStatus
+    from trip_service.models import TripTrip
+
+    # Check for any trip that is NOT in a terminal state
+    stmt = (
+        select(TripTrip)
+        .where(
+            TripTrip.driver_id == driver_id,
+            TripTrip.status.in_(
+                [
+                    TripStatus.CREATED.value,
+                    TripStatus.ASSIGNED.value,
+                    TripStatus.DISPATCHED.value,
+                    TripStatus.STARTED.value,
+                    TripStatus.ARRIVED_AT_PICKUP.value,
+                    TripStatus.PICKED_UP.value,
+                    TripStatus.ARRIVED_AT_DROPOFF.value,
+                ]
+            ),
+        )
+        .limit(1)
+    )
+
+    result = await session.execute(stmt)
+    has_active_trip = result.scalar_one_or_none() is not None
+
+    return {"driver_id": driver_id, "is_referenced": has_active_trip, "active_trip_count": 1 if has_active_trip else 0}
 
 
 @router.post("/internal/v1/trips/slips/ingest", status_code=201)

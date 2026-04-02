@@ -118,7 +118,7 @@ async def test_cleanup_heartbeat_sleep_chunks_long_intervals(monkeypatch: pytest
     heartbeat_calls: list[str] = []
     sleep_calls: list[int] = []
 
-    def fake_record_worker_heartbeat(worker_name: str, recorded_at_utc: datetime | None = None) -> None:
+    async def fake_record_worker_heartbeat(worker_name: str, recorded_at_utc: datetime | None = None) -> None:
         del recorded_at_utc
         heartbeat_calls.append(worker_name)
 

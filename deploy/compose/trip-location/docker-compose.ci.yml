@@ -24,8 +24,22 @@ services:
   trip-cleanup:
     profiles: ["default"]
 
+  # Mock fleet service to satisfy Trip API readiness probes
+  fleet-api:
+    image: nginx:alpine
+    profiles: ["default"]
+    volumes:
+      - ./nginx-mock.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - backend
+
   # Override Location services to use test environment
   location-api:
+    environment:
+      LOCATION_MAPBOX_API_KEY: mock_key
+      LOCATION_MAPBOX_DIRECTIONS_BASE_URL: http://fleet-api:8102/mapbox/driving
+      LOCATION_ORS_API_KEY: mock_key
+      LOCATION_ORS_BASE_URL: http://fleet-api:8102/v2/directions/driving-car
     profiles: ["default"]
 
   location-processing:

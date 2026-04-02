@@ -121,3 +121,27 @@ def excel_service_auth_dependency(
 ) -> AuthContext:
     """FastAPI dependency for Excel-owned internal endpoints."""
     return require_service_token(authorization, {"excel-service"})
+
+
+def admin_or_internal_auth_dependency(
+    authorization: str | None = Header(None, alias="Authorization"),
+    x_actor_type: str | None = Header(None, alias="X-Actor-Type"),
+    x_actor_id: str | None = Header(None, alias="X-Actor-Id"),
+) -> AuthContext:
+    """FastAPI dependency for ADMIN or internal service endpoints."""
+    if authorization is None:
+        return _legacy_header_context(x_actor_type, x_actor_id)
+
+    payload = _decode_token(_parse_authorization_header(authorization))
+    role = str(payload.get("role", ""))
+    if role in {ActorType.ADMIN, ActorType.SUPER_ADMIN}:
+        actor_id = str(payload.get("sub", "")).strip()
+        return AuthContext(actor_id=actor_id, actor_type=role, role=role)
+
+    # Fallback to service token check
+    service_name = str(payload.get("service", "")).strip()
+    if role == ActorType.SERVICE and service_name:
+        actor_id = str(payload.get("sub", "")).strip()
+        return AuthContext(actor_id=actor_id, actor_type=role, role=role, service_name=service_name)
+
+    raise trip_forbidden("ADMIN or internal service role required.")

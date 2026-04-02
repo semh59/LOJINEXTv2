@@ -56,9 +56,10 @@ async def engine(database_url: str):
         await conn.run_sync(Base.metadata.create_all)
 
     # Patch global factories for background tasks
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
     import driver_service.database
     import driver_service.routers.import_jobs
-    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     test_factory = async_sessionmaker(bind=engine, expire_on_commit=False)
     driver_service.database.async_session_factory = test_factory

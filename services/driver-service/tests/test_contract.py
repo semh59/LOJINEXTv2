@@ -83,9 +83,9 @@ async def test_trip_client_check_usage():
 
     driver_id = "01HYY"
     mock_response = httpx.Response(
-        200, json={"driver_id": driver_id, "has_references": True, "safe_to_delete": True, "active_trip_count": 1}
+        200, json={"driver_id": driver_id, "is_referenced": True, "safe_to_delete": False, "active_trip_count": 1}
     )
 
     with patch("httpx.AsyncClient.get", return_value=mock_response):
         result = await _check_trip_references(driver_id)
-        assert result is True
+        assert result is False

@@ -151,7 +151,7 @@ async def test_metrics_endpoint_exposes_prometheus_payload(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_readiness_requires_cleanup_worker_heartbeat(client: AsyncClient):
     stale_at = datetime.now(UTC) - timedelta(seconds=settings.worker_heartbeat_timeout_seconds + 5)
-    record_worker_heartbeat("cleanup-worker", recorded_at_utc=stale_at)
+    await record_worker_heartbeat("cleanup-worker", recorded_at_utc=stale_at)
 
     response = await client.get("/ready")
 

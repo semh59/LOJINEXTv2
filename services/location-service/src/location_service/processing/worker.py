@@ -178,14 +178,14 @@ async def run_processing_worker(
 
     while True:
         try:
-            record_worker_heartbeat(WORKER_NAME)
+            await record_worker_heartbeat(WORKER_NAME)
             claimed_run = await claim_next_processing_run(worker_name=claimed_by)
             if claimed_run is None:
                 await asyncio.sleep(interval)
                 continue
 
             await process_claimed_run(claimed_run)
-            record_worker_heartbeat(WORKER_NAME)
+            await record_worker_heartbeat(WORKER_NAME)
         except asyncio.CancelledError:
             logger.info("Processing worker cancelled")
             raise

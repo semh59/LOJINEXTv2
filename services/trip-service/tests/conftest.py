@@ -40,6 +40,7 @@ TRUNCATE_TABLES = (
     "trip_outbox",
     "trip_idempotency_records",
     "trip_trips",
+    "worker_heartbeats",
 )
 
 _pg_url: str = ""
@@ -239,17 +240,18 @@ async def client(db_engine, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[A
         async with session_factory() as session:
             yield session
 
-    record_worker_heartbeat("enrichment-worker")
-    record_worker_heartbeat("outbox-relay")
-    record_worker_heartbeat("cleanup-worker")
-
     test_app.dependency_overrides[get_session] = override_get_session
     monkeypatch.setattr("trip_service.routers.health.async_session_factory", session_factory)
+    monkeypatch.setattr("trip_service.worker_heartbeats.async_session_factory", session_factory)
     monkeypatch.setattr("trip_service.routers.health.probe_location_service", dependency_ok)
     monkeypatch.setattr("trip_service.routers.health.probe_fleet_service", dependency_ok)
     monkeypatch.setattr("trip_service.routers.trips.ensure_trip_references_valid", allow_all_trip_references)
     monkeypatch.setattr("trip_service.routers.trips.fetch_trip_context", stub_fetch_trip_context)
     monkeypatch.setattr("trip_service.routers.trips.resolve_route_by_names", stub_resolve_route_by_names)
+
+    await record_worker_heartbeat("enrichment-worker")
+    await record_worker_heartbeat("outbox-relay")
+    await record_worker_heartbeat("cleanup-worker")
 
     transport = ASGITransport(app=test_app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:

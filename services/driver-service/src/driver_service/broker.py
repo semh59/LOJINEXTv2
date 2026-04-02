@@ -58,15 +58,20 @@ class KafkaBroker(EventBroker):
         self._producer = Producer(config)
 
     async def publish(self, topic: str, key: str, payload: dict) -> None:
+        import asyncio
+
         self._producer.produce(
             topic,
             key=key.encode(),
             value=json.dumps(payload).encode(),
         )
-        self._producer.flush(timeout=5)
+        # Offload blocking flush to a thread to avoid event loop starvation
+        await asyncio.to_thread(self._producer.flush, timeout=5)
 
     async def close(self) -> None:
-        self._producer.flush(timeout=10)
+        import asyncio
+
+        await asyncio.to_thread(self._producer.flush, timeout=10)
 
 
 def create_broker(broker_type: Literal["kafka", "log", "noop"]) -> EventBroker:

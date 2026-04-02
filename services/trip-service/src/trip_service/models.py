@@ -334,3 +334,12 @@ class TripIdempotencyRecord(Base):
     expires_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     __table_args__ = (Index("ix_idempotency_expires", "expires_at_utc"),)
+
+
+class WorkerHeartbeat(Base):
+    """Persisted worker heartbeats for cross-service and multi-process readiness."""
+
+    __tablename__ = "worker_heartbeats"
+
+    worker_name: Mapped[str] = mapped_column(String(100), primary_key=True)
+    recorded_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

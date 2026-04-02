@@ -62,13 +62,9 @@ async def test_create_import_job_success(client: AsyncClient, db_session: AsyncS
 
     # Manually trigger the background task logic for the test
     # (Since BackgroundTasks run in a separate session that can't see the rollback-based test transaction)
-    from driver_service.routers.import_jobs import _process_import_job
-    from driver_service.schemas import ImportRowInput
+    from driver_service.workers.import_worker import _run_job_logic
 
-    rows_objs = [ImportRowInput.model_validate(r) for r in payload["rows"]]
-    await _process_import_job(
-        job_id=job_id, rows_data=rows_objs, actor_id="test-admin-id", strict_mode=False, session_override=db_session
-    )
+    await _run_job_logic(session=db_session, job_id=job_id)
 
     # Fetch final state to verify
     detail_resp = await client.get(f"/internal/v1/driver-import-jobs/{job_id}", headers=auth_admin)

@@ -103,9 +103,8 @@ def _is_schema_not_ready(exc: Exception) -> bool:
     if not isinstance(exc, DBAPIError):
         return False
     message = str(exc).lower()
-    return (
-        any(table in message for table in ("trip_idempotency_records", "trip_outbox"))
-        and any(marker in message for marker in ("does not exist", "undefined table", "relation"))
+    return any(table in message for table in ("trip_idempotency_records", "trip_outbox")) and any(
+        marker in message for marker in ("does not exist", "undefined table", "relation")
     )
 
 
@@ -172,7 +171,7 @@ async def run_cleanup_loop(interval_seconds: int = 3600) -> None:
         try:
             await cleanup_idempotency_records()
             await cleanup_outbox_records()
-            record_worker_heartbeat(worker_name)
+            await record_worker_heartbeat(worker_name)
         except Exception as e:
             if _is_schema_not_ready(e):
                 logger.warning("Cleanup skipped because the trip schema is not migrated yet")
@@ -188,7 +187,7 @@ async def _sleep_with_heartbeats(worker_name: str, interval_seconds: int) -> Non
     remaining = interval_seconds
 
     while remaining > 0:
-        record_worker_heartbeat(worker_name)
+        await record_worker_heartbeat(worker_name)
         sleep_for = min(heartbeat_interval, remaining)
         await asyncio.sleep(sleep_for)
         remaining -= sleep_for

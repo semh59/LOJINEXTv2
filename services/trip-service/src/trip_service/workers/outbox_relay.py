@@ -247,7 +247,7 @@ async def run_outbox_relay(broker: MessageBroker, worker_id: str | None = None) 
                 published = await _relay_batch(broker, worker_id)
                 if published > 0:
                     logger.info("Relay %s: published %d events", worker_id, published)
-                record_worker_heartbeat("outbox-relay")
+                await record_worker_heartbeat("outbox-relay")
             except Exception as exc:
                 if _is_schema_not_ready(exc):
                     logger.warning("Relay %s: schema not migrated yet, skipping this interval", worker_id)

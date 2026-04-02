@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     default_page_size: int = 50
     max_page_size: int = 200
 
+    # --- Maintenance / Imports ---
+    maintenance_poll_interval_seconds: int = 60
+
     # --- Dependencies ---
     trip_service_base_url: str = "http://localhost:8101"
     dependency_timeout_seconds: float = 5.0

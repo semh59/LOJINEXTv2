@@ -14,6 +14,8 @@
 #   location-processing   → Durable processing worker
 # =============================================================================
 
+name: lojinextv2
+
 x-trip-common: &trip-common
   build:
     context: ../../../services/trip-service
@@ -89,7 +91,8 @@ services:
     volumes:
       - redpanda_data:/var/lib/redpanda/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9644/v1/status/ready || exit 1"]
+      test:
+        ["CMD-SHELL", "curl -f http://localhost:9644/v1/status/ready || exit 1"]
       interval: 5s
       timeout: 10s
       retries: 20
@@ -106,7 +109,11 @@ services:
     ports:
       - "${TRIP_API_PORT:-8101}:8101"
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8101/health')\""]
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8101/ready'')"',
+        ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -132,7 +139,11 @@ services:
     ports:
       - "${LOCATION_API_PORT:-8103}:8103"
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8103/health')\""]
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8103/ready'')"',
+        ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -140,6 +151,64 @@ services:
   location-processing:
     <<: *location-common
     command: ["location-processing-worker"]
+
+  # ---------------------------------------------------------------------------
+  # Driver Service — Multi-process
+  # ---------------------------------------------------------------------------
+  driver-api:
+    build:
+      context: ../../../services/driver-service
+      dockerfile: Dockerfile
+    command: ["driver-api"]
+    env_file: .env
+    environment:
+      DRIVER_ENVIRONMENT: prod
+      DRIVER_BROKER_TYPE: kafka
+      DRIVER_AUTH_JWT_SECRET: ${DRIVER_AUTH_JWT_SECRET:-driver-production-secret-override-in-env}
+      DRIVER_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-lojinext}:${POSTGRES_PASSWORD}@postgres:5432/${DRIVER_DB_NAME:-driver_service}
+      DRIVER_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      DRIVER_ALLOW_PLAINTEXT_IN_PROD: ${DRIVER_ALLOW_PLAINTEXT_IN_PROD:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    ports:
+      - "${DRIVER_API_PORT:-8104}:8104"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8104/ready'')"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - backend
+
+  driver-worker:
+    build:
+      context: ../../../services/driver-service
+      dockerfile: Dockerfile
+    command: ["driver-worker"]
+    env_file: .env
+    environment:
+      DRIVER_ENVIRONMENT: prod
+      DRIVER_BROKER_TYPE: kafka
+      DRIVER_AUTH_JWT_SECRET: ${DRIVER_AUTH_JWT_SECRET:-driver-production-secret-override-in-env}
+      DRIVER_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-lojinext}:${POSTGRES_PASSWORD}@postgres:5432/${DRIVER_DB_NAME:-driver_service}
+      DRIVER_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      DRIVER_ALLOW_PLAINTEXT_IN_PROD: ${DRIVER_ALLOW_PLAINTEXT_IN_PROD:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - backend
 
   # ---------------------------------------------------------------------------
   # Reverse Proxy

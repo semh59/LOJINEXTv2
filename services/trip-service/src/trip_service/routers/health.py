@@ -61,21 +61,21 @@ async def readiness(request: Request) -> JSONResponse:
     checks["fleet_service"] = "ok" if fleet_ok else "unavailable"
     overall = overall and fleet_ok
 
-    enrichment_heartbeat = get_worker_heartbeat_snapshot(
+    enrichment_heartbeat = await get_worker_heartbeat_snapshot(
         "enrichment-worker",
         stale_after_seconds=settings.worker_heartbeat_timeout_seconds,
     )
     checks["enrichment_worker"] = enrichment_heartbeat.status
     overall = overall and enrichment_heartbeat.status == "ok"
 
-    outbox_heartbeat = get_worker_heartbeat_snapshot(
+    outbox_heartbeat = await get_worker_heartbeat_snapshot(
         "outbox-relay",
         stale_after_seconds=settings.worker_heartbeat_timeout_seconds,
     )
     checks["outbox_relay"] = outbox_heartbeat.status
     overall = overall and outbox_heartbeat.status == "ok"
 
-    cleanup_heartbeat = get_worker_heartbeat_snapshot(
+    cleanup_heartbeat = await get_worker_heartbeat_snapshot(
         "cleanup-worker",
         stale_after_seconds=settings.worker_heartbeat_timeout_seconds,
     )

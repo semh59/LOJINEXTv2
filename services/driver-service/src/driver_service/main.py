@@ -1,6 +1,5 @@
 """Driver Service FastAPI application entry point."""
 
-import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -23,7 +22,6 @@ from driver_service.routers.internal import router as internal_router
 from driver_service.routers.lifecycle import router as lifecycle_router
 from driver_service.routers.maintenance import router as maintenance_router
 from driver_service.routers.public import router as public_router
-from driver_service.workers import run_outbox_relay
 
 logger = logging.getLogger("driver_service")
 
@@ -39,23 +37,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     broker = create_broker(settings.resolved_broker_type)
     app.state.broker = broker
 
-    worker_tasks: list[asyncio.Task[None]] = []
-    if settings.outbox_worker_enabled:
-        worker_tasks.append(asyncio.create_task(run_outbox_relay(broker), name="outbox-relay"))
-
     logger.info(
-        "Driver Service starting on port %s (env=%s, broker=%s, workers=%d)",
+        "Driver Service starting on port %s (env=%s, broker=%s)",
         settings.service_port,
         settings.environment,
         settings.resolved_broker_type,
-        len(worker_tasks),
     )
 
     yield
 
-    for task in worker_tasks:
-        task.cancel()
-    await asyncio.gather(*worker_tasks, return_exceptions=True)
     await broker.close()
     await engine.dispose()
     logger.info("Shutdown complete")

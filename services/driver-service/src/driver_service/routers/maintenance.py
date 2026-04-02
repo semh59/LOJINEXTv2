@@ -11,12 +11,17 @@ import json
 import logging
 from datetime import datetime, timezone
 
+import httpx
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
-from driver_service.auth import AuthContext, admin_or_internal_auth_dependency
+from driver_service.auth import (
+    AuthContext,
+    admin_or_internal_auth_dependency,
+    generate_internal_service_token,
+)
 from driver_service.config import settings
 from driver_service.database import get_session
 from driver_service.enums import AuditActionType
@@ -66,23 +71,26 @@ async def _write_outbox(session: AsyncSession, driver_id: str, event_name: str, 
 
 
 async def _check_trip_references(driver_id: str) -> bool:
-    """Check with Trip Service if driver has active/historical trip references.
+    """Check with Trip Service if driver has active trips.
 
-    Returns True if safe to delete (no references), False if blocked.
-    Raises on connectivity failure.
+    Returns True if safe to delete (no active trips), False if blocked.
     """
-    import httpx
+    token = generate_internal_service_token()
+    url = f"{settings.trip_service_base_url}/internal/v1/trips/driver-check/{driver_id}"
 
-    url = f"{settings.trip_service_base_url}/internal/v1/trips/driver-reference-check"
     try:
         async with httpx.AsyncClient(timeout=settings.dependency_timeout_seconds) as client:
-            resp = await client.get(url, params={"driver_id": driver_id})
+            resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
             if resp.status_code == 200:
                 data = resp.json()
-                return data.get("safe_to_delete", False)
-            # Trip service returned non-200 — treat as unsafe
+                # is_referenced=True means there ARE active trips, so NOT safe to delete
+                return not data.get("is_referenced", True)
+
+            # Trip service returned error — fail closed (unsafe)
+            logger.error("Trip Service reference check failed: %d %s", resp.status_code, resp.text)
             return False
-    except httpx.HTTPError:
+    except Exception:
+        logger.exception("Connectivity error during Trip Service reference check")
         raise driver_trip_check_unavailable()
 
 
@@ -203,6 +211,10 @@ async def merge_drivers(
     if not safe:
         raise driver_merge_source_has_active_trips()
 
+    # Capture OLD snapshots before mutation
+    old_source_snapshot = serialize_driver_admin(source)
+    old_target_snapshot = serialize_driver_admin(target)
+
     # Soft-delete the source
     source.soft_deleted_at_utc = now
     source.soft_deleted_by_actor_id = auth.actor_id
@@ -229,13 +241,14 @@ async def merge_drivers(
     )
     session.add(merge_record)
 
-    # Audit for both source and target with snapshots
-    source_snapshot = serialize_driver_admin(source)
-    target_snapshot = serialize_driver_admin(target)
+    # Capture NEW snapshots after mutation
+    new_source_snapshot = serialize_driver_admin(source)
+    new_target_snapshot = serialize_driver_admin(target)
 
-    for driver_obj, action, snapshot in [
-        (source, "MERGE_SOURCE", source_snapshot),
-        (target, "MERGE_TARGET", target_snapshot),
+    # Audit for both source and target with both snapshots
+    for driver_obj, action, old_snap, new_snap in [
+        (source, "MERGE_SOURCE", old_source_snapshot, new_source_snapshot),
+        (target, "MERGE_TARGET", old_target_snapshot, new_target_snapshot),
     ]:
         audit = DriverAuditLogModel(
             audit_id=_new_ulid(),
@@ -248,7 +261,8 @@ async def merge_drivers(
                     "target_driver_id": target.driver_id,
                 }
             ),
-            old_snapshot_json=json.dumps(snapshot),
+            old_snapshot_json=json.dumps(old_snap) if old_snap else None,
+            new_snapshot_json=json.dumps(new_snap) if new_snap else None,
             actor_id=auth.actor_id,
             actor_role=auth.role,
             reason=body.reason,

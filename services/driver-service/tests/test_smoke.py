@@ -20,7 +20,7 @@ async def test_full_lifecycle_smoke(client: AsyncClient, auth_admin: dict[str, s
     import httpx
 
     mock_response = httpx.Response(
-        200, json={"driver_id": "mock_id", "has_references": False, "safe_to_delete": True, "active_trip_count": 0}
+        200, json={"driver_id": "mock_id", "is_referenced": False, "safe_to_delete": True, "active_trip_count": 0}
     )
 
     # 1. Create Driver

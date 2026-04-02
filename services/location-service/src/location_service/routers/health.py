@@ -54,7 +54,7 @@ async def ready() -> JSONResponse:
         checks["ors_validation"] = "disabled"
     checks["provider_probe_age_s"] = provider_probe_age_seconds(probe_result)
 
-    worker_heartbeat = get_worker_heartbeat_snapshot(
+    worker_heartbeat = await get_worker_heartbeat_snapshot(
         "processing-worker",
         stale_after_seconds=settings.worker_heartbeat_timeout_seconds,
     )

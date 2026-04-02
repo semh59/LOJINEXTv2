@@ -13,11 +13,20 @@ Update it at the end of any session that changes project state.
 ## Next Task ID
 
 ```
-TASK-0035
+TASK-0036
 ```
 
 Use this when creating the next task. Then increment this counter.
 Never reuse a retired ID.
+
+---
+
+## Active Tasks
+
+| ID        | Title                                | Status           | Started    | Agent       |
+| --------- | ------------------------------------ | ---------------- | ---------- | ----------- |
+| TASK-0034 | Trip/Location Full Prod Readiness    | ready_for_review | 2026-03-30 | Antigravity |
+| TASK-0035 | Audit Remediation Phase 1: Readiness | in_progress      | 2026-04-02 | Antigravity |
 
 ---
 

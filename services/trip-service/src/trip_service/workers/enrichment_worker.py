@@ -76,9 +76,8 @@ def _is_schema_not_ready(exc: Exception) -> bool:
     if not isinstance(exc, DBAPIError):
         return False
     message = str(exc).lower()
-    return (
-        any(table in message for table in ("trip_trip_enrichment", "trip_trips", "trip_trip_evidence"))
-        and any(marker in message for marker in ("does not exist", "undefined table", "relation"))
+    return any(table in message for table in ("trip_trip_enrichment", "trip_trips", "trip_trip_evidence")) and any(
+        marker in message for marker in ("does not exist", "undefined table", "relation")
     )
 
 
@@ -409,7 +408,7 @@ async def run_enrichment_worker(worker_id: str | None = None) -> None:
             processed = await _claim_and_process_batch(worker_id)
             if processed > 0:
                 logger.info("Worker %s: processed %d enrichment rows", worker_id, processed)
-            record_worker_heartbeat("enrichment-worker")
+            await record_worker_heartbeat("enrichment-worker")
         except Exception as e:
             if _is_schema_not_ready(e):
                 logger.warning("Worker %s: schema not migrated yet, skipping this interval", worker_id)

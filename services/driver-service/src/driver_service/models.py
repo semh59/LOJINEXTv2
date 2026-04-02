@@ -289,3 +289,19 @@ class DriverImportJobRowModel(Base):
         Index("idx_driver_import_rows_job_seq", "import_job_id", "row_no"),
         Index("idx_driver_import_rows_status", "import_job_id", "row_status"),
     )
+
+
+# ---------------------------------------------------------------------------
+# 2.7  driver_worker_heartbeats — readiness telemetry
+# ---------------------------------------------------------------------------
+
+
+class WorkerHeartbeat(Base):
+    """DB-backed heartbeat for driver workers (outbox, import, etc.)."""
+
+    __tablename__ = "driver_worker_heartbeats"
+
+    worker_name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    last_heartbeat_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    worker_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    worker_metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)

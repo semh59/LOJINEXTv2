@@ -36,6 +36,32 @@ If reversed: mark the old one superseded, write a new entry explaining the chang
 
 ---
 
+## [2026-04-02] Fleet validation uses aggregation facade architecture
+
+### Context
+
+Trip Service requires validation of driver, vehicle, and trailer IDs. Fleet is the logical owner, but exposing Trip to individual entity validation creates complexity and partial failure risks.
+
+### Decision
+
+Option 1 (Aggregation facade) is locked per ADR-001. Trip will hit a single `/internal/v1/trip-references/validate` endpoint on the Fleet service. Fleet will aggregate the data (calling Driver internally if needed). In this phase, Fleet is treated as an external/optional dependency for readiness if not fully deployed.
+
+### Alternatives Considered
+
+- Direct Trip -> Driver and Trip -> Fleet queries: rejected due to duplicate hops and branching failure logic in Trip.
+
+### Consequences
+
+- ADR-001 is locked.
+- Trip requires a live Fleet boundary for readiness.
+- Internal auth between Fleet and Driver will require service JWTs.
+
+### Status
+
+active
+
+---
+
 ## [YYYY-MM-DD] Agent memory lives in repository files, not in conversation
 
 ### Context
@@ -217,6 +243,10 @@ Trip enrichment was already calling an internal location resolve endpoint that d
 - Resolve routes inside Trip Service: rejected because route authority belongs to Location Service.
 - Delay fleet validation to async processing: rejected because the user locked validate-on-write semantics.
 
+### ADR Reference
+
+See [ADR-001: Fleet V1 Validation Architecture](file:///d:/PROJECT/LOJINEXTv2/docs/adr/001-fleet-validation-architecture.md) for the formal architecture lock.
+
 ### Consequences
 
 - Trip Service startup and readiness are now meaningfully coupled to downstream contracts.
@@ -286,8 +316,7 @@ We accept the duplicate-publish window as an at-least-once delivery tradeoff. Do
 
 ### Status
 
-superseded by [2026-03-30, Trip outbox remediation uses per-event commits with stale-claim recovery]
----
+## superseded by [2026-03-30, Trip outbox remediation uses per-event commits with stale-claim recovery]
 
 ## [2026-03-28] Location Service no longer owns import/export responsibilities
 
@@ -433,7 +462,6 @@ The frontend contract needs a closed, testable `profile_code` surface. `location
 ### Status
 
 active
-
 
 ## [2026-03-30] TASK-0033 stays separate from TASK-0020
 

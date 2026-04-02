@@ -70,8 +70,7 @@ def main() -> None:
     if not _check("health", f"{trip}/health"):
         failures.append("trip /health")
     if not _check("ready", f"{trip}/ready"):
-        # Readiness may fail if workers aren't running — warn but don't hard-fail
-        print("    ⚠ /ready failure may be expected if workers are not running")
+        failures.append("trip /ready")
     if not _check("metrics", f"{trip}/metrics", body_contains="trip_created_total"):
         failures.append("trip /metrics")
 
@@ -80,9 +79,7 @@ def main() -> None:
     if not _check("health", f"{loc}/health"):
         failures.append("location /health")
     if not _check("ready", f"{loc}/ready"):
-        print(
-            "    ⚠ /ready failure may be expected if processing worker is not running"
-        )
+        failures.append("location /ready")
     if not _check(
         "metrics", f"{loc}/metrics", body_contains="location_processing_runs_total"
     ):

@@ -16,7 +16,12 @@ dependencies = [
     "prometheus-client>=0.20.0",
     "phonenumbers>=8.13.0",
     "PyJWT>=2.10.1",
+    "confluent-kafka>=2.13.2",
 ]
+
+[project.scripts]
+driver-api = "driver_service.entrypoints.api:main"
+driver-worker = "driver_service.entrypoints.worker:main"
 
 [project.optional-dependencies]
 dev = [
