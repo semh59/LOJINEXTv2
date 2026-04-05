@@ -13,6 +13,7 @@ from ulid import ULID
 
 from platform_auth import TokenClaims
 
+
 from trip_service.dependencies import LocationTripContext
 from trip_service.enums import TripStatus
 from trip_service.errors import (
