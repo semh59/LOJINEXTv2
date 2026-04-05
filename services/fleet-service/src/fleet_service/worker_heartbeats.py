@@ -1,7 +1,4 @@
-"""Async worker heartbeat helpers for fleet-service.
-
-Records worker heartbeats in the DB for readiness probes.
-"""
+"""Async worker heartbeat helpers for fleet-service."""
 
 from __future__ import annotations
 
@@ -13,6 +10,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from fleet_service.database import async_session_factory
 from fleet_service.models import FleetWorkerHeartbeat
+from fleet_service.timestamps import to_utc_aware, to_utc_naive, utc_now_naive
 
 
 @dataclass(frozen=True)
@@ -22,10 +20,9 @@ class HeartbeatSnapshot:
     status: str  # "ok" | "stale" | "unavailable"
     recorded_at_utc: datetime | None
 
-
 async def record_worker_heartbeat(worker_name: str, recorded_at_utc: datetime | None = None) -> None:
     """Persist the latest successful loop timestamp for a worker in the DB."""
-    timestamp = recorded_at_utc or datetime.now(UTC)
+    timestamp = to_utc_naive(recorded_at_utc or datetime.now(UTC))
     async with async_session_factory() as session:
         stmt = insert(FleetWorkerHeartbeat).values(
             worker_name=worker_name,
@@ -53,7 +50,8 @@ async def get_worker_heartbeat_snapshot(worker_name: str, stale_after_seconds: i
     if recorded_at is None:
         return HeartbeatSnapshot(status="unavailable", recorded_at_utc=None)
 
+    normalized_recorded_at = to_utc_aware(recorded_at)
     stale_after = timedelta(seconds=stale_after_seconds)
-    if datetime.now(UTC) - recorded_at > stale_after:
-        return HeartbeatSnapshot(status="stale", recorded_at_utc=recorded_at)
-    return HeartbeatSnapshot(status="ok", recorded_at_utc=recorded_at)
+    if utc_now_naive().replace(tzinfo=UTC) - normalized_recorded_at > stale_after:
+        return HeartbeatSnapshot(status="stale", recorded_at_utc=normalized_recorded_at)
+    return HeartbeatSnapshot(status="ok", recorded_at_utc=normalized_recorded_at)

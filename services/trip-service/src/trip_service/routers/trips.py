@@ -20,6 +20,7 @@ from trip_service.auth import (
     AuthContext,
     admin_or_internal_auth_dependency,
     excel_service_auth_dependency,
+    reference_service_auth_dependency,
     telegram_service_auth_dependency,
     user_auth_dependency,
 )
@@ -85,6 +86,8 @@ from trip_service.observability import (
 )
 from trip_service.schemas import (
     ApproveRequest,
+    AssetReferenceCheckRequest,
+    AssetReferenceCheckResponse,
     EditTripRequest,
     EmptyReturnRequest,
     ExcelIngestRequest,
@@ -110,6 +113,12 @@ from trip_service.trip_helpers import (
 )
 
 router = APIRouter(tags=["trips"])
+
+_REFERENCE_ALLOWED_SERVICES = {"driver-service", "fleet-service"}
+_REFERENCE_EXCLUDED_STATUSES = (
+    TripStatus.REJECTED.value,
+    TripStatus.SOFT_DELETED.value,
+)
 
 
 def _generate_id() -> str:
@@ -148,6 +157,12 @@ def _require_super_admin(auth: AuthContext) -> AuthContext:
     if not auth.is_super_admin:
         raise trip_forbidden("Only SUPER_ADMIN can perform this action.")
     return auth
+
+
+def _require_reference_service_access(auth: AuthContext) -> None:
+    """Restrict internal reference endpoints to the known service callers."""
+    if auth.role != ActorType.SERVICE or auth.service_name not in _REFERENCE_ALLOWED_SERVICES:
+        raise trip_forbidden("Service token is not allowed for reference-check endpoints.")
 
 
 def _validate_trip_weights(tare_weight_kg: int | None, gross_weight_kg: int | None, net_weight_kg: int | None) -> None:
@@ -259,6 +274,47 @@ def _coerce_actor_type(role: str) -> str:
 def _merged_payload_hash(payload: dict[str, Any]) -> str:
     """Compute a canonical request hash for source dedupe and idempotency."""
     return _canonicalize_body(payload)
+
+
+def _reference_column_for_asset_type(asset_type: str):  # noqa: ANN001
+    """Map an asset type to the TripTrip ORM column used for active-reference checks."""
+    mapping = {
+        "DRIVER": TripTrip.driver_id,
+        "VEHICLE": TripTrip.vehicle_id,
+        "TRAILER": TripTrip.trailer_id,
+    }
+    return mapping[asset_type]
+
+
+async def _active_trip_reference_count(
+    session: AsyncSession,
+    *,
+    asset_type: str,
+    asset_id: str,
+) -> int:
+    """Count live and historical non-rejected trips that still reference the given asset."""
+    column = _reference_column_for_asset_type(asset_type)
+    stmt = select(func.count()).select_from(TripTrip).where(
+        column == asset_id,
+        TripTrip.status.notin_(_REFERENCE_EXCLUDED_STATUSES),
+    )
+    return int((await session.execute(stmt)).scalar_one())
+
+
+async def _asset_reference_response(
+    session: AsyncSession,
+    *,
+    asset_type: str,
+    asset_id: str,
+) -> AssetReferenceCheckResponse:
+    """Build the normalized active-reference response payload."""
+    active_trip_count = await _active_trip_reference_count(session, asset_type=asset_type, asset_id=asset_id)
+    return AssetReferenceCheckResponse(
+        asset_type=asset_type,
+        asset_id=asset_id,
+        is_referenced=active_trip_count > 0,
+        active_trip_count=active_trip_count,
+    )
 
 
 async def _get_trip_or_404(session: AsyncSession, trip_id: str) -> TripTrip:
@@ -488,36 +544,27 @@ def _maybe_require_change_reason(
 async def check_driver_reference(
     driver_id: str,
     session: AsyncSession = Depends(get_session),
-    auth: AuthContext = Depends(admin_or_internal_auth_dependency),
-) -> dict:
+    auth: AuthContext = Depends(reference_service_auth_dependency),
+) -> dict[str, Any]:
     """Check if a driver is referenced by any active trips."""
-    from trip_service.enums import TripStatus
-    from trip_service.models import TripTrip
+    _require_reference_service_access(auth)
+    result = await _asset_reference_response(session, asset_type="DRIVER", asset_id=driver_id)
+    return {
+        "driver_id": driver_id,
+        "is_referenced": result.is_referenced,
+        "active_trip_count": result.active_trip_count,
+    }
 
-    # Check for any trip that is NOT in a terminal state
-    stmt = (
-        select(TripTrip)
-        .where(
-            TripTrip.driver_id == driver_id,
-            TripTrip.status.in_(
-                [
-                    TripStatus.CREATED.value,
-                    TripStatus.ASSIGNED.value,
-                    TripStatus.DISPATCHED.value,
-                    TripStatus.STARTED.value,
-                    TripStatus.ARRIVED_AT_PICKUP.value,
-                    TripStatus.PICKED_UP.value,
-                    TripStatus.ARRIVED_AT_DROPOFF.value,
-                ]
-            ),
-        )
-        .limit(1)
-    )
 
-    result = await session.execute(stmt)
-    has_active_trip = result.scalar_one_or_none() is not None
-
-    return {"driver_id": driver_id, "is_referenced": has_active_trip, "active_trip_count": 1 if has_active_trip else 0}
+@router.post("/internal/v1/assets/reference-check", status_code=200)
+async def check_asset_reference(
+    body: AssetReferenceCheckRequest,
+    session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(reference_service_auth_dependency),
+) -> AssetReferenceCheckResponse:
+    """Check whether a driver, vehicle, or trailer is referenced by active trips."""
+    _require_reference_service_access(auth)
+    return await _asset_reference_response(session, asset_type=body.asset_type, asset_id=body.asset_id)
 
 
 @router.post("/internal/v1/trips/slips/ingest", status_code=201)

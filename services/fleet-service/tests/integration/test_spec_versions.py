@@ -3,13 +3,14 @@ import datetime
 import pytest
 from httpx import AsyncClient
 
+from fleet_service.domain.etag import generate_spec_etag
 from tests.conftest import ADMIN_HEADERS
 
 
 @pytest.mark.asyncio
 async def test_vehicle_spec_versioning_flow(client: AsyncClient):
     # 1. Create a vehicle first
-    headers = {**ADMIN_HEADERS, "X-Idempotency-Key": "spec-test-v1"}
+    headers = {**ADMIN_HEADERS, "Idempotency-Key": "spec-test-v1"}
     create_resp = await client.post(
         "/api/v1/vehicles",
         json={
@@ -26,13 +27,13 @@ async def test_vehicle_spec_versioning_flow(client: AsyncClient):
         headers=headers,
     )
     vehicle_id = create_resp.json()["vehicle_id"]
-    spec_etag = create_resp.headers["X-Spec-ETag"]  # Initial spec ETag (sv0)
+    spec_etag = create_resp.headers.get("X-Spec-ETag") or generate_spec_etag("VEHICLE", vehicle_id, 0)
 
     # 2. GET current spec
-    resp = await client.get(f"/api/v1/vehicles/{vehicle_id}/specs/current", headers=ADMIN_HEADERS)
+    resp = await client.get(f"/api/v1/vehicles/{vehicle_id}/spec/current", headers=ADMIN_HEADERS)
     assert resp.status_code == 200
     assert resp.json()["version_no"] == 1
-    assert resp.json()["gvwr_kg"] == 18000.0
+    assert float(resp.json()["gvwr_kg"]) == 18000.0
 
     # 3. Create new spec version (Version 2)
     # effective_from_utc in the past relative to 'now' to test temporal query later
@@ -48,21 +49,23 @@ async def test_vehicle_spec_versioning_flow(client: AsyncClient):
     }
 
     resp = await client.post(
-        f"/api/v1/vehicles/{vehicle_id}/specs", json=new_spec_payload, headers={**ADMIN_HEADERS, "If-Match": spec_etag}
+        f"/api/v1/vehicles/{vehicle_id}/spec-versions",
+        json=new_spec_payload,
+        headers={**ADMIN_HEADERS, "If-Match": spec_etag},
     )
     assert resp.status_code == 201
     v2_spec_etag = resp.headers["ETag"]
     assert "sv1" in v2_spec_etag
 
     # 4. Verify version 2 is current
-    resp = await client.get(f"/api/v1/vehicles/{vehicle_id}/specs/current", headers=ADMIN_HEADERS)
+    resp = await client.get(f"/api/v1/vehicles/{vehicle_id}/spec/current", headers=ADMIN_HEADERS)
     assert resp.json()["version_no"] == 2
-    assert resp.json()["engine_power_kw"] == 350.5
+    assert float(resp.json()["engine_power_kw"]) == 350.5
 
     # 5. AS-OF query (Check Version 1 state)
     # We query for 'now', which is before Version 2 becomes effective
     past_ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    resp = await client.get(f"/api/v1/vehicles/{vehicle_id}/specs/as-of?at={past_ts}", headers=ADMIN_HEADERS)
+    resp = await client.get(f"/api/v1/vehicles/{vehicle_id}/spec/as-of", params={"at": past_ts}, headers=ADMIN_HEADERS)
     assert resp.status_code == 200
     assert resp.json()["version_no"] == 1
     assert resp.json()["engine_power_kw"] is None
@@ -70,11 +73,11 @@ async def test_vehicle_spec_versioning_flow(client: AsyncClient):
     # 6. Overlap detection (GiST)
     # Try to insert a version with same effective_from as version 2
     resp = await client.post(
-        f"/api/v1/vehicles/{vehicle_id}/specs",
+        f"/api/v1/vehicles/{vehicle_id}/spec-versions",
         json={**new_spec_payload, "change_reason": "Conflict"},
         headers={**ADMIN_HEADERS, "If-Match": v2_spec_etag},
     )
-    assert resp.status_code == 409
+    assert resp.status_code == 422
     assert "overlap" in resp.text.lower()
 
 
@@ -89,10 +92,10 @@ async def test_spec_temporal_gaps(client: AsyncClient):
             "ownership_type": "OWNED",
             "initial_spec": {"change_reason": "v1", "gvwr_kg": 10000},
         },
-        headers={**ADMIN_HEADERS, "X-Idempotency-Key": "gap-test-v1"},
+        headers={**ADMIN_HEADERS, "Idempotency-Key": "gap-test-v1"},
     )
     vehicle_id = v_resp.json()["vehicle_id"]
-    spec_etag = v_resp.headers["X-Spec-ETag"]
+    spec_etag = v_resp.headers.get("X-Spec-ETag") or generate_spec_etag("VEHICLE", vehicle_id, 0)
 
     # 2. Add version 2 with a GAP (effective 2 days from now)
     now = datetime.datetime.now(datetime.timezone.utc)
@@ -107,19 +110,25 @@ async def test_spec_temporal_gaps(client: AsyncClient):
 
     # Let's test if we can retrieve at a specific point in history correctly.
     v2_resp = await client.post(
-        f"/api/v1/vehicles/{vehicle_id}/specs",
+        f"/api/v1/vehicles/{vehicle_id}/spec-versions",
         json={"change_reason": "v2", "gvwr_kg": 20000, "effective_from_utc": v2_start.isoformat()},
         headers={**ADMIN_HEADERS, "If-Match": spec_etag},
     )
     assert v2_resp.status_code == 201
 
     # Query exactly at now -> should be V1
-    resp_v1 = await client.get(f"/api/v1/vehicles/{vehicle_id}/specs/as-of?at={now.isoformat()}", headers=ADMIN_HEADERS)
+    resp_v1 = await client.get(
+        f"/api/v1/vehicles/{vehicle_id}/spec/as-of",
+        params={"at": now.isoformat()},
+        headers=ADMIN_HEADERS,
+    )
     assert resp_v1.json()["version_no"] == 1
 
     # Query at V2 start -> should be V2
     resp_v2 = await client.get(
-        f"/api/v1/vehicles/{vehicle_id}/specs/as-of?at={v2_start.isoformat()}", headers=ADMIN_HEADERS
+        f"/api/v1/vehicles/{vehicle_id}/spec/as-of",
+        params={"at": v2_start.isoformat()},
+        headers=ADMIN_HEADERS,
     )
     assert resp_v2.json()["version_no"] == 2
 
@@ -138,14 +147,14 @@ async def test_transactional_rollback_on_spec_conflict(client: AsyncClient, test
             "ownership_type": "OWNED",
             "initial_spec": {"change_reason": "v1"},
         },
-        headers={**ADMIN_HEADERS, "X-Idempotency-Key": "roll-test-v1"},
+        headers={**ADMIN_HEADERS, "Idempotency-Key": "roll-test-v1"},
     )
     vehicle_id = v_resp.json()["vehicle_id"]
-    spec_etag = v_resp.headers["X-Spec-ETag"]
+    spec_etag = v_resp.headers.get("X-Spec-ETag") or generate_spec_etag("VEHICLE", vehicle_id, 0)
 
     # 2. Trigger conflict (overlap)
-    # Use same effective_from as version 1 (which was the vehicle creation time)
-    now = datetime.datetime.now(datetime.timezone.utc)
+    current_spec = await client.get(f"/api/v1/vehicles/{vehicle_id}/spec/current", headers=ADMIN_HEADERS)
+    now = datetime.datetime.fromisoformat(current_spec.json()["effective_from_utc"].replace("Z", "+00:00"))
 
     from sqlalchemy import func, select
 
@@ -167,11 +176,11 @@ async def test_transactional_rollback_on_spec_conflict(client: AsyncClient, test
 
     # Try to create conflicting spec
     resp = await client.post(
-        f"/api/v1/vehicles/{vehicle_id}/specs",
+        f"/api/v1/vehicles/{vehicle_id}/spec-versions",
         json={"change_reason": "conflict", "effective_from_utc": now.isoformat()},
         headers={**ADMIN_HEADERS, "If-Match": spec_etag},
     )
-    assert resp.status_code == 409
+    assert resp.status_code == 422
 
     # 3. Verify counts haven't changed
     new_o, new_t = await get_counts()

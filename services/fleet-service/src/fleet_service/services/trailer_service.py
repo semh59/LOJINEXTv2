@@ -69,11 +69,17 @@ from fleet_service.schemas.responses import (
     TrailerListItemResponse,
     TrailerSpecResponse,
 )
+from fleet_service.timestamps import to_utc_naive, utc_now_naive
 
 logger = logging.getLogger("fleet_service.trailer_service")
 
 _TRAILER_CREATE_FINGERPRINT = compute_endpoint_fingerprint("POST", "/api/v1/trailers")
 _IDEMPOTENCY_TTL_HOURS = 72
+
+
+def _utc_now() -> datetime.datetime:
+    """Return the current naive UTC timestamp for the Fleet schema."""
+    return utc_now_naive()
 
 
 # === CREATE ===
@@ -95,7 +101,7 @@ async def create_trailer(
     if not idempotency_key:
         raise IdempotencyKeyRequiredError()
 
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = _utc_now()
 
     request_hash = compute_request_hash(body.model_dump())
     existing = await idempotency_repo.find_existing_record(session, idempotency_key, _TRAILER_CREATE_FINGERPRINT)
@@ -291,7 +297,7 @@ async def patch_trailer(
     if trailer.soft_deleted_at_utc is not None:
         raise TrailerSoftDeletedError()
 
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = _utc_now()
     changes: dict[str, Any] = {}
 
     if body.plate is not None:
@@ -455,7 +461,7 @@ async def soft_delete_trailer(
     if trailer.soft_deleted_at_utc is not None:
         raise AssetAlreadyInTargetStateError("SOFT_DELETED")
 
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = _utc_now()
     trailer.soft_deleted_at_utc = now
     trailer.soft_deleted_by_actor_type = auth.actor_type
     trailer.soft_deleted_by_actor_id = auth.actor_id
@@ -529,7 +535,7 @@ async def hard_delete_trailer(
     trip_reference_checker: Any = None,
 ) -> dict[str, Any]:
     """Hard-delete with 4-stage pipeline."""
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = _utc_now()
 
     if not if_match:
         raise EtagRequiredError("master")
@@ -749,13 +755,11 @@ async def create_trailer_spec_version(
     if trailer.spec_stream_version != expected_spec_version:
         raise SpecEtagMismatchError()
 
-    now = datetime.datetime.now(datetime.timezone.utc)
-    effective_from = body.effective_from_utc or now
+    now = _utc_now()
+    effective_from = to_utc_naive(body.effective_from_utc) if body.effective_from_utc else now
 
     max_version = await trailer_spec_repo.get_max_version_no(session, trailer_id)
     new_version_no = max_version + 1
-
-    await trailer_spec_repo.close_current_spec(session, trailer_id, effective_from)
 
     spec_version_id = str(ULID())
     spec = FleetTrailerSpecVersion(
@@ -791,6 +795,7 @@ async def create_trailer_spec_version(
     )
 
     try:
+        await trailer_spec_repo.close_current_spec(session, trailer_id, effective_from)
         await trailer_spec_repo.insert_spec_version(session, spec)
     except IntegrityError as exc:
         mapped = map_integrity_error(exc, "TRAILER")
@@ -891,7 +896,7 @@ async def get_spec_as_of(
     if not trailer:
         raise TrailerNotFoundError(trailer_id)
 
-    spec = await trailer_spec_repo.get_spec_as_of(session, trailer_id, at)
+    spec = await trailer_spec_repo.get_spec_as_of(session, trailer_id, to_utc_naive(at))
     if not spec:
         raise SpecNotFoundForInstantError(at.isoformat())
 
@@ -936,7 +941,7 @@ async def _lifecycle_transition(
     if trailer.status not in valid_from:
         raise InvalidStatusTransitionError(f"Cannot transition from {trailer.status} to {target_status}")
 
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = _utc_now()
     trailer.status = target_status
     trailer.row_version += 1
     trailer.updated_at_utc = now
@@ -1027,6 +1032,7 @@ async def _audit_hard_delete(
 
 def _build_trailer_detail_response(trailer: FleetTrailer, current_spec: Any | None) -> TrailerDetailResponse:
     """Build a TrailerDetailResponse from ORM model."""
+    is_selectable = trailer.soft_deleted_at_utc is None and trailer.status == MasterStatus.ACTIVE
     spec_summary = None
     if current_spec:
         spec_summary = TrailerCurrentSpecSummary(
@@ -1051,7 +1057,7 @@ def _build_trailer_detail_response(trailer: FleetTrailer, current_spec: Any | No
         notes=trailer.notes,
         row_version=trailer.row_version,
         spec_stream_version=trailer.spec_stream_version,
-        is_selectable=trailer.is_selectable,
+        is_selectable=is_selectable,
         current_spec_summary=spec_summary,
         created_at_utc=trailer.created_at_utc,
         created_by_actor_type=trailer.created_by_actor_type,
@@ -1068,6 +1074,7 @@ def _build_trailer_detail_response(trailer: FleetTrailer, current_spec: Any | No
 
 def _build_trailer_list_response(trailer: FleetTrailer) -> TrailerListItemResponse:
     """Build a TrailerListItemResponse from ORM model."""
+    is_selectable = trailer.soft_deleted_at_utc is None and trailer.status == MasterStatus.ACTIVE
     return TrailerListItemResponse(
         trailer_id=trailer.trailer_id,
         asset_code=trailer.asset_code,
@@ -1081,7 +1088,7 @@ def _build_trailer_list_response(trailer: FleetTrailer) -> TrailerListItemRespon
         lifecycle_state=trailer.lifecycle_state,
         row_version=trailer.row_version,
         spec_stream_version=trailer.spec_stream_version,
-        is_selectable=trailer.is_selectable,
+        is_selectable=is_selectable,
         created_at_utc=trailer.created_at_utc,
         updated_at_utc=trailer.updated_at_utc,
     )

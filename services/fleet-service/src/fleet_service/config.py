@@ -1,13 +1,13 @@
 """Application configuration via environment variables (Fleet Service v1.5, Section 13)."""
 
+import os
+
 from typing import Literal
 
 from pydantic_settings import BaseSettings
 
 DEFAULT_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/fleet_service"
 DEFAULT_AUTH_JWT_SECRET = "fleet-service-dev-secret-please-change-me-32b"
-DEFAULT_DRIVER_JWT_SECRET = "fleet-to-driver-dev-secret-32b"
-DEFAULT_TRIP_JWT_SECRET = "fleet-to-trip-dev-secret-32b"
 
 
 class Settings(BaseSettings):
@@ -24,6 +24,15 @@ class Settings(BaseSettings):
     # --- Auth ---
     auth_jwt_secret: str = DEFAULT_AUTH_JWT_SECRET
     auth_jwt_algorithm: str = "HS256"
+    auth_issuer: str = ""
+    auth_audience: str = ""
+    auth_public_key: str = ""
+    auth_private_key: str = ""
+    auth_jwks_url: str = ""
+    auth_jwks_cache_ttl_seconds: int = 300
+    auth_service_token_url: str = ""
+    auth_service_client_id: str = "fleet-service"
+    auth_service_client_secret: str = ""
 
     # --- Feature flags ---
     enable_hard_delete: bool = False
@@ -31,11 +40,9 @@ class Settings(BaseSettings):
 
     # --- Dependencies: Driver Service ---
     driver_service_base_url: str = "http://localhost:8104"
-    driver_service_jwt_secret: str = DEFAULT_DRIVER_JWT_SECRET
 
     # --- Dependencies: Trip Service ---
     trip_service_base_url: str = "http://localhost:8101"
-    trip_service_jwt_secret: str = DEFAULT_TRIP_JWT_SECRET
 
     # --- HTTP Client ---
     http_connect_timeout: float = 0.5
@@ -89,6 +96,11 @@ class Settings(BaseSettings):
             return "noop"
         return "log"
 
+    @property
+    def resolved_auth_jwt_secret(self) -> str:
+        """Return the recovery-time shared secret if set, otherwise the local auth secret."""
+        return os.getenv("PLATFORM_JWT_SECRET") or self.auth_jwt_secret
+
     model_config = {"env_prefix": "FLEET_", "env_file": ".env", "extra": "ignore"}
 
 
@@ -101,14 +113,21 @@ def validate_prod_settings(current: Settings) -> None:
         return
 
     errors: list[str] = []
-    if not current.auth_jwt_secret or current.auth_jwt_secret == DEFAULT_AUTH_JWT_SECRET:
+    if current.auth_jwt_algorithm.upper().startswith("HS") and (
+        not current.resolved_auth_jwt_secret or current.resolved_auth_jwt_secret == DEFAULT_AUTH_JWT_SECRET
+    ):
         errors.append("FLEET_AUTH_JWT_SECRET must be set to a non-default value in prod.")
+    if current.auth_jwt_algorithm.upper().startswith("RS"):
+        if not current.auth_jwks_url and not current.auth_public_key:
+            errors.append("FLEET_AUTH_JWKS_URL or FLEET_AUTH_PUBLIC_KEY must be set for RS* auth in prod.")
+        if current.auth_private_key:
+            errors.append("FLEET_AUTH_PRIVATE_KEY must not be set in prod; signing belongs to identity-service.")
+        if not current.auth_service_token_url:
+            errors.append("FLEET_AUTH_SERVICE_TOKEN_URL must be set for RS* outbound auth in prod.")
+        if not current.auth_service_client_secret:
+            errors.append("FLEET_AUTH_SERVICE_CLIENT_SECRET must be set for RS* outbound auth in prod.")
     if not current.database_url or current.database_url == DEFAULT_DATABASE_URL:
         errors.append("FLEET_DATABASE_URL must be set to a non-default value in prod.")
-    if not current.driver_service_jwt_secret or current.driver_service_jwt_secret == DEFAULT_DRIVER_JWT_SECRET:
-        errors.append("FLEET_DRIVER_SERVICE_JWT_SECRET must be set to a non-default value in prod.")
-    if not current.trip_service_jwt_secret or current.trip_service_jwt_secret == DEFAULT_TRIP_JWT_SECRET:
-        errors.append("FLEET_TRIP_SERVICE_JWT_SECRET must be set to a non-default value in prod.")
     if current.broker_type is None:
         errors.append("FLEET_BROKER_TYPE must be explicitly set in prod.")
     if not current.kafka_bootstrap_servers or current.kafka_bootstrap_servers == "localhost:9092":

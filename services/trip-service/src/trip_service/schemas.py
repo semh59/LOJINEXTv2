@@ -316,6 +316,22 @@ class ExcelIngestRequest(BaseModel):
         return self
 
 
+class AssetReferenceCheckRequest(BaseModel):
+    """Generic internal request for active asset reference checks."""
+
+    asset_type: Literal["DRIVER", "VEHICLE", "TRAILER"]
+    asset_id: NonEmptyStr
+
+
+class AssetReferenceCheckResponse(BaseModel):
+    """Internal response for active asset reference checks."""
+
+    asset_type: str
+    asset_id: str
+    is_referenced: bool
+    active_trip_count: int
+
+
 class TimelineItem(BaseModel):
     """Timeline item resource."""
 

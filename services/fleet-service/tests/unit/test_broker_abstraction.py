@@ -1,4 +1,5 @@
 import json
+from asyncio import Future
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -22,10 +23,11 @@ def outbox_msg():
 @pytest.mark.asyncio
 async def test_log_broker_publish(outbox_msg, caplog):
     broker = LogBroker()
-    with caplog.at_level("INFO"):
+    with patch("fleet_service.broker.logger.info") as mock_info:
         await broker.publish(outbox_msg)
-    assert "BROKER PUBLISH" in caplog.text
-    assert "evt-123" in caplog.text
+    mock_info.assert_called_once()
+    assert "BROKER PUBLISH" in mock_info.call_args.args[0]
+    assert "evt-123" in mock_info.call_args.args[1:]
 
 
 @pytest.mark.asyncio
@@ -39,7 +41,9 @@ async def test_kafka_broker_publish_success(outbox_msg):
     # Mock AIOProducer and AdminClient since they might not be installed in test env
     # or we don't want to connect to a real Kafka.
     mock_producer = MagicMock()
-    mock_producer.produce = AsyncMock(return_value=AsyncMock())  # Returns a delivery future
+    delivery_future: Future[None] = Future()
+    delivery_future.set_result(None)
+    mock_producer.produce = AsyncMock(return_value=delivery_future)
 
     mock_admin = MagicMock()
 

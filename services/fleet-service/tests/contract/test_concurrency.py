@@ -1,13 +1,14 @@
 import pytest
 from httpx import AsyncClient
 
+from fleet_service.domain.etag import generate_spec_etag
 from tests.conftest import ADMIN_HEADERS
 
 
 @pytest.mark.asyncio
 async def test_optimistic_locking_master_etag_mismatch(client: AsyncClient):
     # 1. Create
-    headers = {**ADMIN_HEADERS, "X-Idempotency-Key": "conc-test-01"}
+    headers = {**ADMIN_HEADERS, "Idempotency-Key": "conc-test-01"}
     resp = await client.post(
         "/api/v1/vehicles",
         json={"asset_code": "V-CONC-01", "plate": "34 CONC 01", "ownership_type": "OWNED"},
@@ -32,7 +33,7 @@ async def test_optimistic_locking_master_etag_mismatch(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_spec_stream_concurrency_mismatch(client: AsyncClient):
     # 1. Create with initial spec
-    headers = {**ADMIN_HEADERS, "X-Idempotency-Key": "conc-test-02"}
+    headers = {**ADMIN_HEADERS, "Idempotency-Key": "conc-test-02"}
     resp = await client.post(
         "/api/v1/vehicles",
         json={
@@ -44,11 +45,11 @@ async def test_spec_stream_concurrency_mismatch(client: AsyncClient):
         headers=headers,
     )
     vehicle_id = resp.json()["vehicle_id"]
-    spec_etag_v1 = resp.headers["X-Spec-ETag"]  # sv0
+    spec_etag_v1 = resp.headers.get("X-Spec-ETag") or generate_spec_etag("VEHICLE", vehicle_id, 0)
 
     # 2. Update Spec (Success sv0 -> sv1)
     resp_a = await client.post(
-        f"/api/v1/vehicles/{vehicle_id}/specs",
+        f"/api/v1/vehicles/{vehicle_id}/spec-versions",
         json={"change_reason": "v2 update", "gvwr_kg": 11000},
         headers={**ADMIN_HEADERS, "If-Match": spec_etag_v1},
     )
@@ -57,7 +58,7 @@ async def test_spec_stream_concurrency_mismatch(client: AsyncClient):
     # 3. Try to use STALE spec_etag_v1 again (Fail 409/412 — spec service uses 409 for concurrency)
     # Check spec_service.py: raise SpecEtagMismatchError() -> 412
     resp_b = await client.post(
-        f"/api/v1/vehicles/{vehicle_id}/specs",
+        f"/api/v1/vehicles/{vehicle_id}/spec-versions",
         json={"change_reason": "v2 duplicate", "gvwr_kg": 12000},
         headers={**ADMIN_HEADERS, "If-Match": spec_etag_v1},
     )

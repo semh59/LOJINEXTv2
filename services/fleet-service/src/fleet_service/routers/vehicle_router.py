@@ -10,6 +10,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Header, Query, Response
 
 from fleet_service.auth import AuthContext, admin_auth, super_admin_auth
+from fleet_service.clients import trip_client
 from fleet_service.database import AsyncSessionDep
 from fleet_service.schemas.requests import (
     HardDeleteRequest,
@@ -37,7 +38,7 @@ async def create_vehicle(
     x_correlation_id: str | None = Header(None, alias="X-Correlation-ID"),
 ) -> VehicleDetailResponse:
     """Create a new vehicle (idempotent)."""
-    result, etag, status_code = await vehicle_service.create_vehicle(
+    result, etag, status_code, spec_etag = await vehicle_service.create_vehicle(
         session,
         body,
         auth,
@@ -48,6 +49,8 @@ async def create_vehicle(
     await session.commit()
     response.status_code = status_code
     response.headers["ETag"] = etag
+    if spec_etag is not None:
+        response.headers["X-Spec-ETag"] = spec_etag
     return result
 
 
@@ -235,6 +238,7 @@ async def hard_delete_vehicle(
         if_match=if_match,
         request_id=x_request_id,
         correlation_id=x_correlation_id,
+        trip_reference_checker=trip_client.check_asset_references,
     )
     await session.commit()
     return HardDeleteResponse(**result)

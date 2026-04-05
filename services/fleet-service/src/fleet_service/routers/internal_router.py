@@ -9,7 +9,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
 
-from fleet_service.auth import AuthContext, service_auth
+from fleet_service.auth import AuthContext, trip_service_auth
 from fleet_service.database import AsyncSessionDep
 from fleet_service.schemas.requests import (
     FuelMetadataResolveRequest,
@@ -34,7 +34,7 @@ router = APIRouter(prefix="/internal/v1", tags=["internal"])
 async def validate_vehicle(
     vehicle_id: str,
     session: AsyncSessionDep,
-    _auth: Annotated[AuthContext, Depends(service_auth)],
+    _auth: Annotated[AuthContext, Depends(trip_service_auth)],
 ) -> ValidateResponse:
     """Validate a vehicle — always 200."""
     return await internal_service.validate_single(session, "VEHICLE", vehicle_id)
@@ -47,7 +47,7 @@ async def validate_vehicle(
 async def validate_trailer(
     trailer_id: str,
     session: AsyncSessionDep,
-    _auth: Annotated[AuthContext, Depends(service_auth)],
+    _auth: Annotated[AuthContext, Depends(trip_service_auth)],
 ) -> ValidateResponse:
     """Validate a trailer — always 200."""
     return await internal_service.validate_single(session, "TRAILER", trailer_id)
@@ -60,7 +60,7 @@ async def validate_trailer(
 async def validate_bulk(
     body: ValidateBulkRequest,
     session: AsyncSessionDep,
-    _auth: Annotated[AuthContext, Depends(service_auth)],
+    _auth: Annotated[AuthContext, Depends(trip_service_auth)],
 ) -> list[ValidateBulkItemResponse]:
     """Validate multiple vehicles and trailers in one call."""
     return await internal_service.validate_bulk(session, body.vehicle_ids, body.trailer_ids)
@@ -73,10 +73,10 @@ async def validate_bulk(
 async def validate_trip_compat(
     body: TripCompatRequest,
     session: AsyncSessionDep,
-    _auth: Annotated[AuthContext, Depends(service_auth)],
+    _auth: Annotated[AuthContext, Depends(trip_service_auth)],
 ) -> Any:
     """Validate driver + vehicle + optional trailer for trip creation."""
-    return await internal_service.validate_trip_compat(
+    return await internal_service.validate_trip_compat_contract(
         session,
         body.driver_id,
         body.vehicle_id,
@@ -90,7 +90,7 @@ async def validate_trip_compat(
 @router.get("/selectable/vehicles")
 async def list_selectable_vehicles(
     session: AsyncSessionDep,
-    _auth: Annotated[AuthContext, Depends(service_auth)],
+    _auth: Annotated[AuthContext, Depends(trip_service_auth)],
     q: str | None = Query(None, description="Search plate/asset_code"),
     cursor: str | None = Query(None, description="Cursor for next page"),
     limit: int = Query(50, ge=1, le=200),
@@ -105,7 +105,7 @@ async def list_selectable_vehicles(
 @router.get("/selectable/trailers")
 async def list_selectable_trailers(
     session: AsyncSessionDep,
-    _auth: Annotated[AuthContext, Depends(service_auth)],
+    _auth: Annotated[AuthContext, Depends(trip_service_auth)],
     q: str | None = Query(None, description="Search plate/asset_code"),
     cursor: str | None = Query(None, description="Cursor for next page"),
     limit: int = Query(50, ge=1, le=200),
@@ -121,7 +121,7 @@ async def list_selectable_trailers(
 async def resolve_fuel_metadata(
     body: FuelMetadataResolveRequest,
     session: AsyncSessionDep,
-    _auth: Annotated[AuthContext, Depends(service_auth)],
+    _auth: Annotated[AuthContext, Depends(trip_service_auth)],
 ) -> FuelMetadataResolveResponse:
     """Resolve fuel metadata for vehicle + optional trailer."""
     return await internal_service.resolve_fuel_metadata(

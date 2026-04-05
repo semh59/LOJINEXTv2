@@ -22,7 +22,7 @@ from fleet_service.domain.enums import (
     PublishStatus,
     ReferenceCheckStatus,
 )
-from fleet_service.domain.etag import generate_master_etag
+from fleet_service.domain.etag import generate_master_etag, generate_spec_etag
 from fleet_service.domain.idempotency import compute_endpoint_fingerprint, compute_request_hash
 from fleet_service.domain.normalization import normalize_plate
 from fleet_service.errors import (
@@ -45,6 +45,7 @@ from fleet_service.models import (
     FleetIdempotencyRecord,
     FleetOutbox,
     FleetVehicle,
+    FleetVehicleSpecVersion,
 )
 from fleet_service.repositories import (
     delete_audit_repo,
@@ -52,6 +53,7 @@ from fleet_service.repositories import (
     outbox_repo,
     timeline_repo,
     vehicle_repo,
+    vehicle_spec_repo,
 )
 from fleet_service.schemas.requests import VehicleCreateRequest, VehiclePatchRequest
 from fleet_service.schemas.responses import (
@@ -60,12 +62,19 @@ from fleet_service.schemas.responses import (
     VehicleDetailResponse,
     VehicleListItemResponse,
 )
+from fleet_service.timestamps import utc_now_naive
+from fleet_service.timestamps import to_utc_naive
 
 logger = logging.getLogger("fleet_service.vehicle_service")
 
 # Idempotency
 _VEHICLE_CREATE_FINGERPRINT = compute_endpoint_fingerprint("POST", "/api/v1/vehicles")
 _IDEMPOTENCY_TTL_HOURS = 72
+
+
+def _utc_now() -> datetime.datetime:
+    """Return the current naive UTC timestamp for the Fleet schema."""
+    return utc_now_naive()
 
 
 # === CREATE ===
@@ -79,16 +88,16 @@ async def create_vehicle(
     idempotency_key: str | None = None,
     request_id: str | None = None,
     correlation_id: str | None = None,
-) -> tuple[VehicleDetailResponse, str, int]:
+) -> tuple[VehicleDetailResponse, str, int, str | None]:
     """Create a vehicle (idempotent, 11-step transaction).
 
-    Returns (response, etag, status_code).
+    Returns (response, etag, status_code, spec_etag).
     """
     # Step 1: Require idempotency key
     if not idempotency_key:
         raise IdempotencyKeyRequiredError()
 
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = _utc_now()
 
     # Step 2: Idempotency replay check
     request_hash = compute_request_hash(body.model_dump())
@@ -98,10 +107,14 @@ async def create_vehicle(
             raise IdempotencyHashMismatchError()
         # Replay: return cached response
         cached = existing.response_body_json
+        replay_spec_etag = None
+        if cached.get("current_spec_summary") is not None:
+            replay_spec_etag = generate_spec_etag("VEHICLE", cached["vehicle_id"], cached["spec_stream_version"])
         return (
             VehicleDetailResponse(**cached),
             generate_master_etag("VEHICLE", cached["vehicle_id"], cached["row_version"]),
             existing.response_status_code,
+            replay_spec_etag,
         )
 
     # Step 3: Normalize plate
@@ -141,6 +154,49 @@ async def create_vehicle(
         await vehicle_repo.create_vehicle(session, vehicle)
     except IntegrityError as exc:
         raise map_integrity_error(exc, "VEHICLE") from exc
+
+    current_spec: FleetVehicleSpecVersion | None = None
+    if body.initial_spec is not None:
+        effective_from = to_utc_naive(body.initial_spec.effective_from_utc) if body.initial_spec.effective_from_utc else now
+        current_spec = FleetVehicleSpecVersion(
+            vehicle_spec_version_id=str(ULID()),
+            vehicle_id=vehicle_id,
+            version_no=1,
+            effective_from_utc=effective_from,
+            effective_to_utc=None,
+            is_current=True,
+            fuel_type=body.initial_spec.fuel_type,
+            powertrain_type=body.initial_spec.powertrain_type,
+            engine_power_kw=body.initial_spec.engine_power_kw,
+            engine_displacement_l=body.initial_spec.engine_displacement_l,
+            emission_class=body.initial_spec.emission_class,
+            transmission_type=body.initial_spec.transmission_type,
+            gear_count=body.initial_spec.gear_count,
+            final_drive_ratio=body.initial_spec.final_drive_ratio,
+            axle_config=body.initial_spec.axle_config,
+            total_axle_count=body.initial_spec.total_axle_count,
+            driven_axle_count=body.initial_spec.driven_axle_count,
+            curb_weight_kg=body.initial_spec.curb_weight_kg,
+            gvwr_kg=body.initial_spec.gvwr_kg,
+            gcwr_kg=body.initial_spec.gcwr_kg,
+            payload_capacity_kg=body.initial_spec.payload_capacity_kg,
+            tractor_cab_type=body.initial_spec.tractor_cab_type,
+            roof_height_class=body.initial_spec.roof_height_class,
+            aero_package_level=body.initial_spec.aero_package_level,
+            tire_rr_class=body.initial_spec.tire_rr_class,
+            tire_type=body.initial_spec.tire_type,
+            speed_limiter_kph=body.initial_spec.speed_limiter_kph,
+            pto_present=body.initial_spec.pto_present,
+            apu_present=body.initial_spec.apu_present,
+            idle_reduction_type=body.initial_spec.idle_reduction_type,
+            first_registration_date=body.initial_spec.first_registration_date,
+            in_service_date=body.initial_spec.in_service_date,
+            change_reason=body.initial_spec.change_reason,
+            created_at_utc=now,
+            created_by_actor_type=auth.actor_type,
+            created_by_actor_id=auth.actor_id,
+        )
+        await vehicle_spec_repo.insert_spec_version(session, current_spec)
 
     # Step 7: Timeline event
     event_id = str(ULID())
@@ -182,7 +238,7 @@ async def create_vehicle(
     await outbox_repo.insert_outbox_event(session, outbox_event)
 
     # Step 9: Build response
-    response = _build_vehicle_detail_response(vehicle, current_spec=None)
+    response = _build_vehicle_detail_response(vehicle, current_spec=current_spec)
 
     # Step 10: Idempotency record
     idem_record = FleetIdempotencyRecord(
@@ -200,7 +256,8 @@ async def create_vehicle(
 
     # Step 11: ETag
     etag = generate_master_etag("VEHICLE", vehicle_id, 1)
-    return response, etag, 201
+    spec_etag = generate_spec_etag("VEHICLE", vehicle_id, vehicle.spec_stream_version) if current_spec else None
+    return response, etag, 201, spec_etag
 
 
 # === LIST ===
@@ -305,7 +362,7 @@ async def patch_vehicle(
     if vehicle.soft_deleted_at_utc is not None:
         raise VehicleSoftDeletedError()
 
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = _utc_now()
     changes: dict[str, Any] = {}
 
     # Apply changes
@@ -475,7 +532,7 @@ async def soft_delete_vehicle(
     if vehicle.soft_deleted_at_utc is not None:
         raise AssetAlreadyInTargetStateError("SOFT_DELETED")
 
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = _utc_now()
     vehicle.soft_deleted_at_utc = now
     vehicle.soft_deleted_by_actor_type = auth.actor_type
     vehicle.soft_deleted_by_actor_id = auth.actor_id
@@ -555,7 +612,7 @@ async def hard_delete_vehicle(
     Stage 2: Trip reference-check → 503/409
     Stage 3: FOR UPDATE → re-verify → audit → dead-letter → DELETE → commit
     """
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = _utc_now()
 
     # --- Stage 1: Non-locking pre-check ---
     if not if_match:
@@ -814,7 +871,7 @@ async def _lifecycle_transition(
     if vehicle.status not in valid_from:
         raise InvalidStatusTransitionError(f"Cannot transition from {vehicle.status} to {target_status}")
 
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = _utc_now()
     vehicle.status = target_status
     vehicle.row_version += 1
     vehicle.updated_at_utc = now
@@ -904,6 +961,7 @@ async def _audit_hard_delete(
 
 def _build_vehicle_detail_response(vehicle: FleetVehicle, current_spec: Any | None) -> VehicleDetailResponse:
     """Build a VehicleDetailResponse from ORM model."""
+    is_selectable = vehicle.soft_deleted_at_utc is None and vehicle.status == MasterStatus.ACTIVE
     spec_summary = None
     if current_spec:
         spec_summary = CurrentSpecSummary(
@@ -929,7 +987,7 @@ def _build_vehicle_detail_response(vehicle: FleetVehicle, current_spec: Any | No
         notes=vehicle.notes,
         row_version=vehicle.row_version,
         spec_stream_version=vehicle.spec_stream_version,
-        is_selectable=vehicle.is_selectable,
+        is_selectable=is_selectable,
         current_spec_summary=spec_summary,
         created_at_utc=vehicle.created_at_utc,
         created_by_actor_type=vehicle.created_by_actor_type,
@@ -946,6 +1004,7 @@ def _build_vehicle_detail_response(vehicle: FleetVehicle, current_spec: Any | No
 
 def _build_vehicle_list_response(vehicle: FleetVehicle) -> VehicleListItemResponse:
     """Build a VehicleListItemResponse from ORM model."""
+    is_selectable = vehicle.soft_deleted_at_utc is None and vehicle.status == MasterStatus.ACTIVE
     return VehicleListItemResponse(
         vehicle_id=vehicle.vehicle_id,
         asset_code=vehicle.asset_code,
@@ -959,7 +1018,7 @@ def _build_vehicle_list_response(vehicle: FleetVehicle) -> VehicleListItemRespon
         lifecycle_state=vehicle.lifecycle_state,
         row_version=vehicle.row_version,
         spec_stream_version=vehicle.spec_stream_version,
-        is_selectable=vehicle.is_selectable,
+        is_selectable=is_selectable,
         created_at_utc=vehicle.created_at_utc,
         updated_at_utc=vehicle.updated_at_utc,
     )

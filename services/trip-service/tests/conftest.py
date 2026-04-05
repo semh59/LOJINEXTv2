@@ -217,9 +217,6 @@ async def client(db_engine, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[A
         pair = PAIR_CONTEXTS[pair_id]
         return LocationRouteResolution(route_id=pair.forward_route_id, pair_id=pair_id, resolution="EXACT_TR")
 
-    async def dependency_ok() -> bool:
-        return True
-
     async def allow_all_trip_references(**kwargs: Any) -> None:
         return None
 
@@ -243,8 +240,6 @@ async def client(db_engine, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[A
     test_app.dependency_overrides[get_session] = override_get_session
     monkeypatch.setattr("trip_service.routers.health.async_session_factory", session_factory)
     monkeypatch.setattr("trip_service.worker_heartbeats.async_session_factory", session_factory)
-    monkeypatch.setattr("trip_service.routers.health.probe_location_service", dependency_ok)
-    monkeypatch.setattr("trip_service.routers.health.probe_fleet_service", dependency_ok)
     monkeypatch.setattr("trip_service.routers.trips.ensure_trip_references_valid", allow_all_trip_references)
     monkeypatch.setattr("trip_service.routers.trips.fetch_trip_context", stub_fetch_trip_context)
     monkeypatch.setattr("trip_service.routers.trips.resolve_route_by_names", stub_resolve_route_by_names)

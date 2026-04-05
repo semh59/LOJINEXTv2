@@ -1,12 +1,14 @@
-"""Health and readiness endpoints (Section 16.1–16.2)."""
+"""Health and readiness endpoints."""
 
 from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
+from fleet_service.auth import auth_outbound_status, auth_verify_status
 from fleet_service.config import settings
 from fleet_service.database import async_session_factory
 from fleet_service.worker_heartbeats import get_worker_heartbeat_snapshot
@@ -18,42 +20,69 @@ router = APIRouter(tags=["health"])
 
 @router.get("/health")
 async def health() -> dict[str, str]:
-    """Liveness probe — always returns 200 if the process is alive."""
+    """Liveness probe that only reflects process health."""
     return {"status": "ok", "service": "fleet-service"}
 
 
 @router.get("/ready")
-async def ready() -> dict:
-    """Readiness probe — production logic.
-
-    Checks:
-    1. DB connectivity (SELECT 1)
-    2. Worker heartbeat freshness
-    """
+async def ready(request: Request) -> JSONResponse:
+    """Readiness probe that only passes when critical dependencies are healthy."""
     checks: dict[str, str] = {}
-    overall = "ok"
+    ready_state = True
 
-    # DB connectivity
     try:
         async with async_session_factory() as session:
             await session.execute(text("SELECT 1"))
         checks["database"] = "ok"
     except Exception as exc:
-        checks["database"] = f"error: {exc}"
-        overall = "degraded"
+        checks["database"] = "fail"
+        ready_state = False
         logger.warning("Readiness: DB check failed: %s", exc)
 
-    # Worker heartbeat (outbox-relay)
-    try:
-        hb = await get_worker_heartbeat_snapshot(
-            "outbox-relay",
-            stale_after_seconds=settings.heartbeat_stale_seconds,
-        )
-        checks["outbox_relay"] = hb.status
-        if hb.status != "ok":
-            overall = "degraded"
-    except Exception as exc:
-        checks["outbox_relay"] = f"error: {exc}"
-        overall = "degraded"
+    broker = getattr(request.app.state, "broker", None)
+    if broker is None:
+        checks["broker"] = "missing"
+        ready_state = False
+    else:
+        broker_health_check = getattr(broker, "check_health", None)
+        if broker_health_check is None:
+            checks["broker"] = "ok"
+        else:
+            try:
+                await broker_health_check()
+                checks["broker"] = "ok"
+            except Exception as exc:
+                checks["broker"] = "fail"
+                ready_state = False
+                logger.warning("Readiness: broker check failed: %s", exc)
 
-    return {"status": overall, "service": "fleet-service", "checks": checks}
+    for worker_name, check_name in (("outbox-relay", "outbox_relay"), ("fleet-worker", "worker")):
+        try:
+            heartbeat = await get_worker_heartbeat_snapshot(
+                worker_name,
+                stale_after_seconds=settings.heartbeat_stale_seconds,
+            )
+            checks[check_name] = heartbeat.status
+            if heartbeat.status != "ok":
+                ready_state = False
+        except Exception as exc:
+            checks[check_name] = "fail"
+            ready_state = False
+            logger.warning("Readiness: worker heartbeat check failed for %s: %s", worker_name, exc)
+
+    checks["auth_verify"] = auth_verify_status()
+    if checks["auth_verify"] != "ok":
+        ready_state = False
+
+    checks["auth_outbound"] = auth_outbound_status()
+    if checks["auth_outbound"] not in {"ok", "cold"}:
+        ready_state = False
+
+    return JSONResponse(
+        status_code=200 if ready_state else 503,
+        content={
+            "status": "ready" if ready_state else "not_ready",
+            "service": "fleet-service",
+            "checks": checks,
+        },
+    )

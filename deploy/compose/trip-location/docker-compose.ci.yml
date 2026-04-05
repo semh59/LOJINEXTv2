@@ -1,14 +1,7 @@
-# =============================================================================
-# CI overlay — strips monitoring, uses ephemeral volumes, adds test profile
-# =============================================================================
-# Usage:
-#   docker compose -f docker-compose.prod.yml -f docker-compose.ci.yml up -d
-#   docker compose -f docker-compose.prod.yml -f docker-compose.ci.yml \
-#       run --rm smoke python /app/smoke_stack.py
-#   docker compose -f docker-compose.prod.yml -f docker-compose.ci.yml down -v
-
 services:
-  # Override Trip services to use test environment
+  identity-api:
+    profiles: ["default"]
+
   trip-api:
     environment:
       TRIP_ENVIRONMENT: prod
@@ -24,8 +17,7 @@ services:
   trip-cleanup:
     profiles: ["default"]
 
-  # Mock fleet service to satisfy Trip API readiness probes
-  fleet-api:
+  provider-mock:
     image: nginx:alpine
     profiles: ["default"]
     volumes:
@@ -33,19 +25,29 @@ services:
     networks:
       - backend
 
-  # Override Location services to use test environment
   location-api:
     environment:
       LOCATION_MAPBOX_API_KEY: mock_key
-      LOCATION_MAPBOX_DIRECTIONS_BASE_URL: http://fleet-api:8102/mapbox/driving
+      LOCATION_MAPBOX_DIRECTIONS_BASE_URL: http://provider-mock/mapbox/driving
       LOCATION_ORS_API_KEY: mock_key
-      LOCATION_ORS_BASE_URL: http://fleet-api:8102/v2/directions/driving-car
+      LOCATION_ORS_BASE_URL: http://provider-mock/v2/directions/driving-car
     profiles: ["default"]
 
   location-processing:
     profiles: ["default"]
 
-  # Strip monitoring from CI
+  driver-api:
+    profiles: ["default"]
+
+  driver-worker:
+    profiles: ["default"]
+
+  fleet-api:
+    profiles: ["default"]
+
+  fleet-worker:
+    profiles: ["default"]
+
   nginx:
     profiles: ["default"]
 
@@ -55,18 +57,26 @@ services:
   grafana:
     profiles: ["monitoring"]
 
-  # Smoke test runner
   smoke:
     build:
       context: ../../../
       dockerfile: ops/trip_location/Dockerfile.smoke
     environment:
+      IDENTITY_API_URL: http://identity-api:8105
       TRIP_API_URL: http://trip-api:8101
       LOCATION_API_URL: http://location-api:8103
+      DRIVER_API_URL: http://driver-api:8104
+      FLEET_API_URL: http://fleet-api:8102
     depends_on:
+      identity-api:
+        condition: service_healthy
       trip-api:
         condition: service_healthy
       location-api:
+        condition: service_healthy
+      driver-api:
+        condition: service_healthy
+      fleet-api:
         condition: service_healthy
     profiles: ["smoke"]
     networks:

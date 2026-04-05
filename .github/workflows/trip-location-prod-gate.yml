@@ -1,9 +1,4 @@
-# Trip/Location — Production Release Gate
-# Triggers on release tags and manual dispatch.
-# Stands up the full Compose stack, runs smoke tests, tears down.
-# REQUIRES live provider secrets — fails hard when missing.
-
-name: "Trip/Location Prod Gate"
+name: "Five-Service Prod Gate"
 
 on:
   push:
@@ -19,22 +14,20 @@ on:
     secrets:
       POSTGRES_PASSWORD:
         required: true
-      TRIP_AUTH_JWT_SECRET:
-        required: true
-      LOCATION_AUTH_JWT_SECRET:
-        required: true
       LOCATION_MAPBOX_API_KEY:
         required: true
       LOCATION_ORS_API_KEY:
         required: false
-      DRIVER_AUTH_JWT_SECRET:
+      IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD:
+        required: true
+      IDENTITY_KEY_ENCRYPTION_KEY_B64:
         required: true
 
 jobs:
   prod-gate:
     name: "Full Stack Smoke + Soak"
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
 
     steps:
       - uses: actions/checkout@v4
@@ -42,19 +35,17 @@ jobs:
       - name: Validate required secrets
         env:
           POSTGRES_PASSWORD: ${{ secrets['POSTGRES_PASSWORD'] }}
-          TRIP_AUTH_JWT_SECRET: ${{ secrets['TRIP_AUTH_JWT_SECRET'] }}
-          LOCATION_AUTH_JWT_SECRET: ${{ secrets['LOCATION_AUTH_JWT_SECRET'] }}
           LOCATION_MAPBOX_API_KEY: ${{ secrets['LOCATION_MAPBOX_API_KEY'] }}
+          IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD: ${{ secrets['IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD'] }}
+          IDENTITY_KEY_ENCRYPTION_KEY_B64: ${{ secrets['IDENTITY_KEY_ENCRYPTION_KEY_B64'] }}
         run: |
           missing=()
           [ -z "$POSTGRES_PASSWORD" ] && missing+=("POSTGRES_PASSWORD")
-          [ -z "$TRIP_AUTH_JWT_SECRET" ] && missing+=("TRIP_AUTH_JWT_SECRET")
-          [ -z "$LOCATION_AUTH_JWT_SECRET" ] && missing+=("LOCATION_AUTH_JWT_SECRET")
           [ -z "$LOCATION_MAPBOX_API_KEY" ] && missing+=("LOCATION_MAPBOX_API_KEY")
-          [ -z "$DRIVER_AUTH_JWT_SECRET" ] && missing+=("DRIVER_AUTH_JWT_SECRET")
+          [ -z "$IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD" ] && missing+=("IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD")
+          [ -z "$IDENTITY_KEY_ENCRYPTION_KEY_B64" ] && missing+=("IDENTITY_KEY_ENCRYPTION_KEY_B64")
           if [ ${#missing[@]} -gt 0 ]; then
             echo "::error::Missing required secrets: ${missing[*]}"
-            echo "The prod gate requires live provider secrets. This is by design."
             exit 1
           fi
 
@@ -62,23 +53,35 @@ jobs:
         working-directory: deploy/compose/trip-location
         env:
           POSTGRES_PASSWORD: ${{ secrets['POSTGRES_PASSWORD'] }}
-          TRIP_AUTH_JWT_SECRET: ${{ secrets['TRIP_AUTH_JWT_SECRET'] }}
-          LOCATION_AUTH_JWT_SECRET: ${{ secrets['LOCATION_AUTH_JWT_SECRET'] }}
           LOCATION_MAPBOX_API_KEY: ${{ secrets['LOCATION_MAPBOX_API_KEY'] }}
           LOCATION_ORS_API_KEY: ${{ secrets['LOCATION_ORS_API_KEY'] }}
           LOCATION_ENABLE_ORS_VALIDATION: ${{ secrets['LOCATION_ORS_API_KEY'] != '' && 'true' || 'false' }}
+          IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD: ${{ secrets['IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD'] }}
+          IDENTITY_KEY_ENCRYPTION_KEY_B64: ${{ secrets['IDENTITY_KEY_ENCRYPTION_KEY_B64'] }}
         run: |
           cat > .env << EOF
           POSTGRES_USER=lojinext
           POSTGRES_PASSWORD=$POSTGRES_PASSWORD
-          TRIP_AUTH_JWT_SECRET=$TRIP_AUTH_JWT_SECRET
+          AUTH_ISSUER=lojinext-platform
+          AUTH_AUDIENCE=lojinext-platform
+          IDENTITY_KEY_ENCRYPTION_KEY_B64=$IDENTITY_KEY_ENCRYPTION_KEY_B64
+          IDENTITY_KEY_ENCRYPTION_KEY_VERSION=ci-v1
+          IDENTITY_BOOTSTRAP_SUPERADMIN_USERNAME=superadmin
+          IDENTITY_BOOTSTRAP_SUPERADMIN_EMAIL=superadmin@example.com
+          IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD=$IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD
+          TRIP_SERVICE_CLIENT_SECRET=trip-ci-client-secret
+          LOCATION_SERVICE_CLIENT_SECRET=location-ci-client-secret
+          DRIVER_SERVICE_CLIENT_SECRET=driver-ci-client-secret
+          FLEET_SERVICE_CLIENT_SECRET=fleet-ci-client-secret
           TRIP_BROKER_TYPE=kafka
           TRIP_ALLOW_PLAINTEXT_IN_PROD=true
-          LOCATION_AUTH_JWT_SECRET=$LOCATION_AUTH_JWT_SECRET
           LOCATION_MAPBOX_API_KEY=$LOCATION_MAPBOX_API_KEY
           LOCATION_ORS_API_KEY=$LOCATION_ORS_API_KEY
           LOCATION_ENABLE_ORS_VALIDATION=$LOCATION_ENABLE_ORS_VALIDATION
-          DRIVER_AUTH_JWT_SECRET=${{ secrets['DRIVER_AUTH_JWT_SECRET'] }}
+          DRIVER_BROKER_TYPE=kafka
+          DRIVER_ALLOW_PLAINTEXT_IN_PROD=true
+          FLEET_BROKER_TYPE=kafka
+          FLEET_ALLOW_PLAINTEXT_IN_PROD=true
           GRAFANA_PASSWORD=ci-admin
           EOF
 
@@ -86,38 +89,77 @@ jobs:
         working-directory: deploy/compose/trip-location
         run: |
           docker compose -f docker-compose.prod.yml up -d --build
-          echo "Waiting 15s for services to initialize..."
-          sleep 15
+          sleep 20
 
-      - name: Run Alembic migrations — Trip
+      - name: Run Alembic migrations - Identity
         working-directory: deploy/compose/trip-location
-        run: |
-          docker compose -f docker-compose.prod.yml exec -T trip-api \
-            alembic upgrade head
+        run: docker compose -f docker-compose.prod.yml exec -T identity-api alembic upgrade head
 
-      - name: Run Alembic migrations — Location
+      - name: Run Alembic migrations - Trip
         working-directory: deploy/compose/trip-location
-        run: |
-          docker compose -f docker-compose.prod.yml exec -T location-api \
-            alembic upgrade head
+        run: docker compose -f docker-compose.prod.yml exec -T trip-api alembic upgrade head
 
-      - name: Run Alembic migrations — Driver
+      - name: Run Alembic migrations - Location
         working-directory: deploy/compose/trip-location
-        run: |
-          docker compose -f docker-compose.prod.yml exec -T driver-api \
-            alembic upgrade head
+        run: docker compose -f docker-compose.prod.yml exec -T location-api alembic upgrade head
 
-      - name: Wait for readiness
+      - name: Run Alembic migrations - Driver
+        working-directory: deploy/compose/trip-location
+        run: docker compose -f docker-compose.prod.yml exec -T driver-api alembic upgrade head
+
+      - name: Run Alembic migrations - Fleet
+        working-directory: deploy/compose/trip-location
+        run: docker compose -f docker-compose.prod.yml exec -T fleet-api alembic upgrade head
+
+      - name: Wait for identity readiness
         run: |
-          for i in $(seq 1 30); do
-            trip_ok=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8101/ready || true)
-            loc_ok=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8103/ready || true)
-            driver_ok=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8104/ready || true)
-            if [ "$trip_ok" = "200" ] && [ "$loc_ok" = "200" ] && [ "$driver_ok" = "200" ]; then
-              echo "All services healthy after ${i}s"
+          for i in $(seq 1 18); do
+            identity_ok=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8105/ready || true)
+            if [ "$identity_ok" = "200" ]; then
+              echo "Identity ready after $((i * 5))s"
               break
             fi
-            sleep 1
+            if [ "$i" = "18" ]; then
+              echo "::error::Identity readiness did not converge"
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: Wait for service readiness
+        run: |
+          wait_ready() {
+            local name="$1"
+            local url="$2"
+            for i in $(seq 1 18); do
+              code=$(curl -s -o /dev/null -w '%{http_code}' "$url" || true)
+              if [ "$code" = "200" ]; then
+                echo "$name ready after $((i * 5))s"
+                return 0
+              fi
+              sleep 5
+            done
+            echo "::error::$name readiness did not converge within 90s"
+            return 1
+          }
+
+          wait_ready trip http://localhost:8101/ready &
+          trip_pid=$!
+          wait_ready location http://localhost:8103/ready &
+          location_pid=$!
+          wait_ready driver http://localhost:8104/ready &
+          driver_pid=$!
+          wait_ready fleet http://localhost:8102/ready &
+          fleet_pid=$!
+
+          pids=($trip_pid $location_pid $driver_pid $fleet_pid)
+          remaining=${#pids[@]}
+          while [ "$remaining" -gt 0 ]; do
+            if ! wait -n; then
+              kill "${pids[@]}" 2>/dev/null || true
+              exit 1
+            fi
+            remaining=$((remaining - 1))
           done
 
       - uses: actions/setup-python@v5
@@ -125,11 +167,18 @@ jobs:
           python-version: "3.12"
 
       - name: Run smoke test
-        run: python ops/trip_location/smoke_stack.py
+        env:
+          IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD: ${{ secrets['IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD'] }}
+          TRIP_SERVICE_CLIENT_SECRET: trip-ci-client-secret
+          LOCATION_SERVICE_CLIENT_SECRET: location-ci-client-secret
+          DRIVER_SERVICE_CLIENT_SECRET: driver-ci-client-secret
+          FLEET_SERVICE_CLIENT_SECRET: fleet-ci-client-secret
+          AUTH_AUDIENCE: lojinext-platform
+        run: python ops/trip_location/smoke_stack.py --identity-url http://localhost:8105
 
       - name: Run soak test
         if: ${{ !inputs.skip_soak }}
-        run: python ops/trip_location/soak_e2e.py --duration-minutes 3
+        run: python ops/trip_location/soak_e2e.py --identity-url http://localhost:8105 --duration-minutes 3
 
       - name: Collect logs on failure
         if: failure()

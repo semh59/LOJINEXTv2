@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import httpx
-import jwt
 
+from trip_service.auth import issue_internal_service_token
 from trip_service.config import settings
 from trip_service.errors import (
     trip_dependency_unavailable,
@@ -66,12 +66,13 @@ def _location_trip_context_url(pair_id: str) -> str:
     return f"{settings.location_service_url}/internal/v1/route-pairs/{pair_id}/trip-context"
 
 
-def _location_service_headers() -> dict[str, str]:
-    token = jwt.encode(
-        {"sub": "trip-service", "role": "SERVICE", "service": "trip-service"},
-        settings.auth_jwt_secret,
-        algorithm=settings.auth_jwt_algorithm,
-    )
+async def _fleet_service_headers() -> dict[str, str]:
+    token = await issue_internal_service_token(audience="fleet-service")
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def _location_service_headers() -> dict[str, str]:
+    token = await issue_internal_service_token(audience="location-service")
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -99,6 +100,48 @@ def _location_validation_error(detail: str) -> Exception:
     )
 
 
+def _compat_errors_for_field(data: dict[str, object], field_name: str) -> list[dict[str, object]]:
+    raw_errors = data.get("errors")
+    if not isinstance(raw_errors, list):
+        return []
+    matches: list[dict[str, object]] = []
+    for item in raw_errors:
+        if not isinstance(item, dict):
+            continue
+        candidate_field = item.get("field")
+        if isinstance(candidate_field, str) and candidate_field == field_name:
+            matches.append(item)
+    return matches
+
+
+def _compat_bool(value: object) -> bool | None:
+    if value is None:
+        return None
+    return bool(value)
+
+
+def _resolve_trip_compat_flag(
+    data: dict[str, object],
+    *,
+    canonical_key: str,
+    legacy_keys: tuple[str, ...],
+    error_field: str,
+    requested: bool,
+) -> bool | None:
+    if canonical_key in data:
+        return _compat_bool(data.get(canonical_key))
+    for legacy_key in legacy_keys:
+        if legacy_key in data:
+            return _compat_bool(data.get(legacy_key))
+    if not requested:
+        return None
+    if _compat_errors_for_field(data, error_field):
+        return False
+    if data.get("valid") is True:
+        return True
+    return None
+
+
 async def validate_trip_references(
     driver_id: str,
     vehicle_id: str | None,
@@ -112,7 +155,7 @@ async def validate_trip_references(
     }
     try:
         client = await get_dependency_client()
-        response = await client.post(_fleet_validation_url(), json=payload)
+        response = await client.post(_fleet_validation_url(), json=payload, headers=await _fleet_service_headers())
     except httpx.HTTPError as exc:
         raise trip_dependency_unavailable("Fleet Service validation is unavailable.") from exc
 
@@ -123,9 +166,28 @@ async def validate_trip_references(
 
     data = response.json()
     return FleetValidationResult(
-        driver_valid=bool(data.get("driver_valid")),
-        vehicle_valid=data.get("vehicle_valid"),
-        trailer_valid=data.get("trailer_valid"),
+        driver_valid=_resolve_trip_compat_flag(
+            data,
+            canonical_key="driver_valid",
+            legacy_keys=("driver_ok",),
+            error_field="driver_id",
+            requested=True,
+        )
+        is True,
+        vehicle_valid=_resolve_trip_compat_flag(
+            data,
+            canonical_key="vehicle_valid",
+            legacy_keys=("vehicle_exists",),
+            error_field="vehicle_id",
+            requested=vehicle_id is not None,
+        ),
+        trailer_valid=_resolve_trip_compat_flag(
+            data,
+            canonical_key="trailer_valid",
+            legacy_keys=(),
+            error_field="trailer_id",
+            requested=trailer_id is not None,
+        ),
     )
 
 
@@ -167,7 +229,7 @@ async def resolve_route_by_names(
     }
     try:
         client = await get_dependency_client()
-        response = await client.post(_location_resolve_url(), json=payload, headers=_location_service_headers())
+        response = await client.post(_location_resolve_url(), json=payload, headers=await _location_service_headers())
     except httpx.HTTPError as exc:
         raise trip_dependency_unavailable("Location Service route resolution is unavailable.") from exc
 
@@ -194,7 +256,7 @@ async def fetch_trip_context(pair_id: str, *, field_name: str = "body.route_pair
     del field_name
     try:
         client = await get_dependency_client()
-        response = await client.get(_location_trip_context_url(pair_id), headers=_location_service_headers())
+        response = await client.get(_location_trip_context_url(pair_id), headers=await _location_service_headers())
     except httpx.HTTPError as exc:
         raise trip_dependency_unavailable("Location Service trip context is unavailable.") from exc
 
@@ -234,7 +296,7 @@ async def probe_fleet_service() -> bool:
     payload = {"driver_id": "healthcheck-driver", "vehicle_id": None, "trailer_id": None}
     try:
         client = await get_dependency_client()
-        response = await client.post(_fleet_validation_url(), json=payload)
+        response = await client.post(_fleet_validation_url(), json=payload, headers=await _fleet_service_headers())
     except httpx.HTTPError:
         return False
     return response.status_code == 200
@@ -248,7 +310,7 @@ async def probe_location_service() -> bool:
         "profile_code": "TIR",
         "language_hint": "AUTO",
     }
-    headers = _location_service_headers()
+    headers = await _location_service_headers()
     try:
         client = await get_dependency_client()
         resolve_response = await client.post(_location_resolve_url(), json=resolve_payload, headers=headers)

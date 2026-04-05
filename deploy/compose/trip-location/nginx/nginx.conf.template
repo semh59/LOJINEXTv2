@@ -1,5 +1,9 @@
-# Trip/Location reverse proxy — Nginx config template
+# Five-service reverse proxy config template
 # Environment variables are substituted at container start by envsubst.
+
+upstream identity_api {
+    server ${IDENTITY_API_UPSTREAM};
+}
 
 upstream trip_api {
     server ${TRIP_API_UPSTREAM};
@@ -9,13 +13,52 @@ upstream location_api {
     server ${LOCATION_API_UPSTREAM};
 }
 
+upstream driver_api {
+    server ${DRIVER_API_UPSTREAM};
+}
+
+upstream fleet_api {
+    server ${FLEET_API_UPSTREAM};
+}
+
 server {
     listen 80;
     server_name _;
 
-    # -------------------------------------------------------------------------
-    # Trip Service
-    # -------------------------------------------------------------------------
+    location /.well-known/jwks.json {
+        proxy_pass http://identity_api;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /auth/v1/ {
+        proxy_pass http://identity_api;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $request_id;
+    }
+
+    location /admin/v1/users {
+        proxy_pass http://identity_api;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $request_id;
+    }
+
+    location = /identity/health {
+        rewrite ^/identity/health$ /health break;
+        proxy_pass http://identity_api;
+    }
+
+    location = /identity/ready {
+        rewrite ^/identity/ready$ /ready break;
+        proxy_pass http://identity_api;
+    }
+
     location /api/v1/trips {
         proxy_pass http://trip_api;
         proxy_set_header Host $host;
@@ -25,15 +68,6 @@ server {
         proxy_set_header X-Request-ID $request_id;
     }
 
-    location /internal/v1/ {
-        # Internal endpoints — restrict to internal network in production
-        proxy_pass http://trip_api;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Request-ID $request_id;
-    }
-
-    # Trip health/ready — public for load balancers
     location = /trip/health {
         rewrite ^/trip/health$ /health break;
         proxy_pass http://trip_api;
@@ -44,9 +78,6 @@ server {
         proxy_pass http://trip_api;
     }
 
-    # -------------------------------------------------------------------------
-    # Location Service
-    # -------------------------------------------------------------------------
     location /v1/ {
         proxy_pass http://location_api;
         proxy_set_header Host $host;
@@ -66,9 +97,53 @@ server {
         proxy_pass http://location_api;
     }
 
-    # -------------------------------------------------------------------------
-    # Block metrics from external access — internal-only via direct ports
-    # -------------------------------------------------------------------------
+    location /api/v1/drivers {
+        proxy_pass http://driver_api;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $request_id;
+    }
+
+    location = /driver/health {
+        rewrite ^/driver/health$ /health break;
+        proxy_pass http://driver_api;
+    }
+
+    location = /driver/ready {
+        rewrite ^/driver/ready$ /ready break;
+        proxy_pass http://driver_api;
+    }
+
+    location /api/v1/vehicles {
+        proxy_pass http://fleet_api;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $request_id;
+    }
+
+    location /api/v1/trailers {
+        proxy_pass http://fleet_api;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $request_id;
+    }
+
+    location = /fleet/health {
+        rewrite ^/fleet/health$ /health break;
+        proxy_pass http://fleet_api;
+    }
+
+    location = /fleet/ready {
+        rewrite ^/fleet/ready$ /ready break;
+        proxy_pass http://fleet_api;
+    }
+
     location = /metrics {
         return 403;
     }
@@ -81,9 +156,14 @@ server {
         return 403;
     }
 
-    # -------------------------------------------------------------------------
-    # Default
-    # -------------------------------------------------------------------------
+    location = /driver/metrics {
+        return 403;
+    }
+
+    location = /fleet/metrics {
+        return 403;
+    }
+
     location / {
         return 404 '{"error": "not_found"}';
         add_header Content-Type application/json;

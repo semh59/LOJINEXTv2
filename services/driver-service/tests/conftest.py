@@ -59,10 +59,12 @@ async def engine(database_url: str):
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
     import driver_service.database
+    import driver_service.routers
     import driver_service.routers.import_jobs
 
     test_factory = async_sessionmaker(bind=engine, expire_on_commit=False)
     driver_service.database.async_session_factory = test_factory
+    driver_service.routers.async_session_factory = test_factory
     driver_service.routers.import_jobs.async_session_factory = test_factory
 
     yield engine
@@ -142,11 +144,26 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     app.dependency_overrides[internal_service_auth_dependency] = mock_auth_dep
     app.dependency_overrides[admin_or_internal_auth_dependency] = mock_auth_dep
 
+    class HealthyBroker:
+        async def check_health(self) -> bool:
+            return True
+
+        async def close(self) -> None:
+            return None
+
+    had_broker = hasattr(app.state, "broker")
+    original_broker = getattr(app.state, "broker", None)
+    app.state.broker = HealthyBroker()
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
 
     app.dependency_overrides.clear()
+    if had_broker:
+        app.state.broker = original_broker
+    elif hasattr(app.state, "broker"):
+        delattr(app.state, "broker")
 
 
 # Authentication Headers

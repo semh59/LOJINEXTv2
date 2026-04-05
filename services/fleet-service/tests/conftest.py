@@ -1,8 +1,6 @@
 """Shared test fixtures for Fleet Service tests."""
 
 from __future__ import annotations
-
-import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -26,6 +24,7 @@ from fleet_service.database import get_session
 from fleet_service.errors import ProblemDetailError, problem_detail_handler, validation_exception_handler
 from fleet_service.middleware import PrometheusMiddleware, RequestIdMiddleware
 from fleet_service.broker import NoOpBroker
+from fleet_service.worker_heartbeats import record_worker_heartbeat
 
 TRUNCATE_TABLES = (
     "fleet_vehicles",
@@ -44,7 +43,7 @@ _pg_url: str = ""
 
 def _token(payload: dict[str, Any]) -> str:
     """Build a JWT token for tests."""
-    return jwt.encode(payload, settings.auth_jwt_secret, algorithm=settings.auth_jwt_algorithm)
+    return jwt.encode(payload, settings.resolved_auth_jwt_secret, algorithm=settings.auth_jwt_algorithm)
 
 
 def _bearer_headers(payload: dict[str, Any]) -> dict[str, str]:
@@ -54,7 +53,34 @@ def _bearer_headers(payload: dict[str, Any]) -> dict[str, str]:
 
 ADMIN_HEADERS = _bearer_headers({"sub": "admin-test-001", "role": "ADMIN"})
 SUPER_ADMIN_HEADERS = _bearer_headers({"sub": "super-admin-001", "role": "SUPER_ADMIN"})
-SERVICE_HEADERS = _bearer_headers({"sub": "fleet-service-test", "role": "SERVICE", "service": "fleet-service-test"})
+SERVICE_HEADERS = _bearer_headers({"sub": "trip-service", "role": "SERVICE", "service": "trip-service"})
+FORBIDDEN_SERVICE_HEADERS = _bearer_headers(
+    {"sub": "rogue-service", "role": "SERVICE", "service": "rogue-service"}
+)
+
+
+@pytest.fixture
+def admin_headers() -> dict[str, str]:
+    """Provide admin bearer headers for tests that expect a fixture."""
+    return ADMIN_HEADERS
+
+
+@pytest.fixture
+def super_admin_headers() -> dict[str, str]:
+    """Provide super-admin bearer headers for tests that expect a fixture."""
+    return SUPER_ADMIN_HEADERS
+
+
+@pytest.fixture
+def service_headers() -> dict[str, str]:
+    """Provide service bearer headers for tests that expect a fixture."""
+    return SERVICE_HEADERS
+
+
+@pytest.fixture
+def forbidden_service_headers() -> dict[str, str]:
+    """Provide a disallowed service bearer header for internal auth tests."""
+    return FORBIDDEN_SERVICE_HEADERS
 
 
 @pytest.fixture(scope="session")
@@ -84,6 +110,12 @@ def migrated_database(postgres_container: str) -> str:
     # But migration 001 already does 'CREATE EXTENSION IF NOT EXISTS btree_gist'
     command.upgrade(alembic_cfg, "head")
     return postgres_container
+
+
+@pytest.fixture(scope="session")
+def test_db_url(migrated_database: str) -> str:
+    """Expose the migrated async database URL to tests that need their own engine."""
+    return migrated_database
 
 
 async def _truncate_all(engine) -> None:
@@ -145,18 +177,29 @@ async def client(db_engine, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[A
     monkeypatch.setattr("fleet_service.worker_heartbeats.async_session_factory", session_factory)
 
     # Mock external clients
-    async def mock_check_eligibility(*args, **kwargs):
-        return {"drivers": {}}  # Default empty
+    async def mock_validate_driver(driver_id: str):
+        return {
+            "driver_id": driver_id,
+            "exists": True,
+            "status": "ACTIVE",
+            "lifecycle_state": "ACTIVE",
+            "is_assignable": True,
+        }
 
-    async def mock_reference_check(*args, **kwargs):
-        return {"is_referenced": False, "reference_sources": []}
+    async def mock_reference_check(asset_id: str, asset_type: str):
+        return {
+            "asset_id": asset_id,
+            "asset_type": asset_type,
+            "is_referenced": False,
+            "has_references": False,
+            "active_trip_count": 0,
+        }
 
-    monkeypatch.setattr(
-        "fleet_service.infrastructure.http_clients.driver_client.DriverClient.check_eligibility", mock_check_eligibility
-    )
-    monkeypatch.setattr(
-        "fleet_service.infrastructure.http_clients.trip_client.TripClient.check_reference", mock_reference_check
-    )
+    monkeypatch.setattr("fleet_service.clients.driver_client.validate_driver", mock_validate_driver)
+    monkeypatch.setattr("fleet_service.clients.trip_client.check_asset_references", mock_reference_check)
+    await record_worker_heartbeat("outbox-relay")
+    await record_worker_heartbeat("fleet-worker")
+    test_app.state.broker = NoOpBroker()
 
     transport = ASGITransport(app=test_app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:

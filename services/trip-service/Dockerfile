@@ -11,12 +11,14 @@ WORKDIR /app
 
 RUN useradd --create-home --shell /usr/sbin/nologin appuser
 
-COPY pyproject.toml ./
-COPY alembic.ini ./
-COPY alembic ./alembic
-COPY src ./src
+COPY packages/platform-auth /app/packages/platform-auth
+COPY services/trip-service/pyproject.toml ./pyproject.toml
+COPY services/trip-service/alembic.ini ./alembic.ini
+COPY services/trip-service/alembic ./alembic
+COPY services/trip-service/src ./src
 
 RUN python -m pip install --upgrade pip \
+    && python -m pip install --no-cache-dir /app/packages/platform-auth \
     && python -m pip install --no-cache-dir .
 
 USER appuser

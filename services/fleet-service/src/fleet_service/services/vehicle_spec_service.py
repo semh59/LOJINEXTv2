@@ -38,8 +38,14 @@ from fleet_service.repositories import (
 )
 from fleet_service.schemas.requests import VehicleSpecVersionRequest
 from fleet_service.schemas.responses import VehicleSpecResponse
+from fleet_service.timestamps import to_utc_naive, utc_now_naive
 
 logger = logging.getLogger("fleet_service.vehicle_spec_service")
+
+
+def _utc_now() -> datetime.datetime:
+    """Return the current naive UTC timestamp for the Fleet schema."""
+    return utc_now_naive()
 
 
 # === CREATE SPEC VERSION (13-step) ===
@@ -82,19 +88,16 @@ async def create_vehicle_spec_version(
     if vehicle.spec_stream_version != expected_spec_version:
         raise SpecEtagMismatchError()
 
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = _utc_now()
 
     # Step 6: Default effective_from_utc
-    effective_from = body.effective_from_utc or now
+    effective_from = to_utc_naive(body.effective_from_utc) if body.effective_from_utc else now
 
     # Step 7: Get max version_no → new_version_no
     max_version = await vehicle_spec_repo.get_max_version_no(session, vehicle_id)
     new_version_no = max_version + 1
 
-    # Step 8: Close previous current spec
-    await vehicle_spec_repo.close_current_spec(session, vehicle_id, effective_from)
-
-    # Step 9: Build new spec version entity
+    # Step 8: Build new spec version entity
     spec_version_id = str(ULID())
     spec = FleetVehicleSpecVersion(
         vehicle_spec_version_id=spec_version_id,
@@ -135,8 +138,9 @@ async def create_vehicle_spec_version(
         created_by_actor_id=auth.actor_id,
     )
 
-    # Step 10: INSERT (GiST exclusion constraint catches overlap)
+    # Step 9-10: Close current spec and INSERT new row (constraint checks can fail in either step)
     try:
+        await vehicle_spec_repo.close_current_spec(session, vehicle_id, effective_from)
         await vehicle_spec_repo.insert_spec_version(session, spec)
     except IntegrityError as exc:
         mapped = map_integrity_error(exc, "VEHICLE")
@@ -236,7 +240,7 @@ async def get_spec_as_of(session: AsyncSession, vehicle_id: str, at: datetime.da
     if not vehicle:
         raise VehicleNotFoundError(vehicle_id)
 
-    spec = await vehicle_spec_repo.get_spec_as_of(session, vehicle_id, at)
+    spec = await vehicle_spec_repo.get_spec_as_of(session, vehicle_id, to_utc_naive(at))
     if not spec:
         raise SpecNotFoundForInstantError(at.isoformat())
 

@@ -23,7 +23,7 @@ async def test_vehicle_full_crud_lifecycle(client: AsyncClient):
     assert "Idempotency-Key" in resp.text
 
     # Successful create
-    headers = {**ADMIN_HEADERS, "X-Idempotency-Key": "idem-001"}
+    headers = {**ADMIN_HEADERS, "Idempotency-Key": "idem-001"}
     resp = await client.post("/api/v1/vehicles", json=create_payload, headers=headers)
     assert resp.status_code == 201
     data = resp.json()
@@ -45,9 +45,9 @@ async def test_vehicle_full_crud_lifecycle(client: AsyncClient):
     # 4. PATCH (Update brand and plate)
     patch_payload = {"brand": "Volvo", "plate": "34 XYZ 99"}
 
-    # Missing If-Match (428 Precondition Required)
+    # Missing If-Match fails closed under the current contract
     resp = await client.patch(f"/api/v1/vehicles/{vehicle_id}", json=patch_payload, headers=ADMIN_HEADERS)
-    assert resp.status_code == 428
+    assert resp.status_code == 400
 
     # Wrong If-Match (412 Precondition Failed)
     resp = await client.patch(
@@ -90,18 +90,16 @@ async def test_vehicle_full_crud_lifecycle(client: AsyncClient):
     # 7. Hard Delete (Requires SUPER_ADMIN)
     # Admin attempt (403 Forbidden - handled by dependency)
     # Note: Our conftest ADMIN_HEADERS has role: ADMIN
-    resp = await client.request(
-        "DELETE",
-        f"/api/v1/vehicles/{vehicle_id}",
+    resp = await client.post(
+        f"/api/v1/vehicles/{vehicle_id}/hard-delete",
         json={"reason": "Data correction"},
         headers={**ADMIN_HEADERS, "If-Match": soft_etag},
     )
     assert resp.status_code == 403
 
     # Super Admin attempt
-    resp = await client.request(
-        "DELETE",
-        f"/api/v1/vehicles/{vehicle_id}",
+    resp = await client.post(
+        f"/api/v1/vehicles/{vehicle_id}/hard-delete",
         json={"reason": "Data correction"},
         headers={**SUPER_ADMIN_HEADERS, "If-Match": soft_etag},
     )

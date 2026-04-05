@@ -1,8 +1,4 @@
-# Trip/Location — PR & Branch Verification Gate
-# Triggers on pushes to dev and PRs touching service code.
-# Runs lint, type-check, and unit tests for both services.
-
-name: "Trip/Location Verify"
+name: "Multi-Service Verify"
 
 on:
   push:
@@ -10,20 +6,49 @@ on:
     paths:
       - "services/trip-service/**"
       - "services/location-service/**"
+      - "services/driver-service/**"
+      - "services/fleet-service/**"
+      - "services/identity-service/**"
+      - "packages/platform-auth/**"
+      - "deploy/compose/trip-location/**"
+      - "ops/trip_location/**"
   pull_request:
     branches: [dev, main]
     paths:
       - "services/trip-service/**"
       - "services/location-service/**"
+      - "services/driver-service/**"
+      - "services/fleet-service/**"
+      - "services/identity-service/**"
+      - "packages/platform-auth/**"
+      - "deploy/compose/trip-location/**"
+      - "ops/trip_location/**"
 
 jobs:
+  platform-auth:
+    name: "Platform Auth - Tests"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/platform-auth
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Run tests
+        run: pytest tests/ -v --tb=short
+
   trip-service:
-    name: "Trip Service — Lint + Type-Check + Tests"
+    name: "Trip Service - Lint + Type-Check + Tests"
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: services/trip-service
-
     services:
       postgres:
         image: postgres:16-alpine
@@ -38,43 +63,35 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 5
-
     env:
       TRIP_DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/trip_service_test
       TRIP_ENVIRONMENT: test
       TRIP_AUTH_JWT_SECRET: test-secret-at-least-32-bytes-long
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          pip install -e ../../packages/platform-auth
           pip install -e ".[dev]"
-
       - name: Lint (ruff)
         run: ruff check src/ tests/
-
       - name: Type check (mypy)
         run: mypy src/trip_service/ --ignore-missing-imports
-
       - name: Run migrations
         run: alembic upgrade head
-
       - name: Run tests
         run: pytest tests/ -v --tb=short
 
   location-service:
-    name: "Location Service — Lint + Type-Check + Tests"
+    name: "Location Service - Lint + Type-Check + Tests"
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: services/location-service
-
     services:
       postgres:
         image: postgres:16-alpine
@@ -89,32 +106,155 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 5
-
     env:
       LOCATION_DATABASE_URL: postgresql+asyncpg://test:test@localhost:5433/location_service_test
       LOCATION_ENVIRONMENT: test
       LOCATION_AUTH_JWT_SECRET: test-secret-at-least-32-bytes-long
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          pip install -e ../../packages/platform-auth
           pip install -e ".[dev]"
-
       - name: Lint (ruff)
         run: ruff check src/ tests/
-
       - name: Type check (mypy)
         run: mypy src/location_service/ --ignore-missing-imports
-
       - name: Run migrations
         run: alembic upgrade head
+      - name: Run tests
+        run: pytest tests/ -v --tb=short
 
+  driver-service:
+    name: "Driver Service - Lint + Type-Check + Tests"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/driver-service
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: driver_service_test
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    env:
+      DRIVER_DATABASE_URL: postgresql+asyncpg://test:test@localhost:5434/driver_service_test
+      DRIVER_ENVIRONMENT: test
+      DRIVER_AUTH_JWT_SECRET: test-secret-at-least-32-bytes-long
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ../../packages/platform-auth
+          pip install -e ".[dev]"
+      - name: Lint (ruff)
+        run: ruff check src/ tests/
+      - name: Type check (mypy)
+        run: mypy src/driver_service/ --ignore-missing-imports
+      - name: Run tests
+        run: pytest tests/ -v --tb=short
+
+  fleet-service:
+    name: "Fleet Service - Lint + Type-Check + Tests"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/fleet-service
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: fleet_service_test
+        ports:
+          - 5435:5432
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    env:
+      FLEET_DATABASE_URL: postgresql+asyncpg://test:test@localhost:5435/fleet_service_test
+      FLEET_ENVIRONMENT: test
+      FLEET_AUTH_JWT_SECRET: test-secret-at-least-32-bytes-long
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ../../packages/platform-auth
+          pip install -e ".[dev]"
+      - name: Lint (ruff)
+        run: ruff check src/ tests/
+      - name: Type check (mypy)
+        run: mypy src/fleet_service/ --ignore-missing-imports
+      - name: Run migrations
+        run: alembic upgrade head
+      - name: Run tests
+        run: pytest tests/ -v --tb=short
+
+  identity-service:
+    name: "Identity Service - Lint + Type-Check + Tests"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/identity-service
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: identity_service_test
+        ports:
+          - 5436:5432
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    env:
+      IDENTITY_DATABASE_URL: postgresql+asyncpg://test:test@localhost:5436/identity_service_test
+      IDENTITY_ENVIRONMENT: test
+      IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD: bootstrap-password
+      IDENTITY_TEST_BACKEND: postgres
+      IDENTITY_SERVICE_CLIENTS: trip-service
+      IDENTITY_SERVICE_CLIENT_SECRET__TRIP_SERVICE: trip-client-secret
+      IDENTITY_KEY_ENCRYPTION_KEY_B64: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+      IDENTITY_KEY_ENCRYPTION_KEY_VERSION: ci-v1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ../../packages/platform-auth
+          pip install -e ".[dev]"
+      - name: Lint (ruff)
+        run: python -m compileall src
+      - name: Run migrations
+        run: alembic upgrade head
       - name: Run tests
         run: pytest tests/ -v --tb=short

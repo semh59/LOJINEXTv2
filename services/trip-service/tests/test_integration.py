@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import httpx
+import jwt
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
@@ -20,7 +21,8 @@ from tests.conftest import (
     make_manual_trip_payload,
     make_slip_payload,
 )
-from trip_service.dependencies import fetch_trip_context, probe_location_service, resolve_route_by_names
+from trip_service.config import settings
+from trip_service.dependencies import fetch_trip_context, probe_location_service, resolve_route_by_names, validate_trip_references
 from trip_service.errors import ProblemDetailError
 from trip_service.models import TripIdempotencyRecord, TripOutbox, TripTrip, TripTripDeleteAudit, TripTripEnrichment
 from trip_service.routers.trips import _merged_payload_hash
@@ -737,3 +739,47 @@ async def test_probe_location_service_uses_authenticated_contract_checks() -> No
     assert ok is True
     assert mock_post.await_args.kwargs["headers"]["Authorization"].startswith("Bearer ")
     assert mock_get.await_args.kwargs["headers"]["Authorization"].startswith("Bearer ")
+
+
+@pytest.mark.asyncio
+async def test_validate_trip_references_sends_fleet_auth_and_accepts_compat_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class StubClient:
+        async def post(self, url: str, *, json: dict[str, object], headers: dict[str, str] | None = None) -> httpx.Response:
+            captured["url"] = url
+            captured["json"] = json
+            captured["headers"] = headers or {}
+            return httpx.Response(
+                200,
+                json={"valid": True, "errors": [], "warnings": [], "driver_ok": True, "vehicle_exists": True},
+                request=httpx.Request("POST", url),
+            )
+
+    async def fake_get_dependency_client() -> StubClient:
+        return StubClient()
+
+    monkeypatch.setattr("trip_service.dependencies.get_dependency_client", fake_get_dependency_client)
+    monkeypatch.setenv("PLATFORM_JWT_SECRET", "trip-fleet-shared-secret")
+
+    result = await validate_trip_references(driver_id="driver-001", vehicle_id="vehicle-001", trailer_id=None)
+
+    auth_header = dict(captured["headers"])["Authorization"]  # type: ignore[arg-type]
+    scheme, _, token = auth_header.partition(" ")
+    payload = jwt.decode(
+        token,
+        "trip-fleet-shared-secret",
+        algorithms=[settings.auth_jwt_algorithm],
+        audience="lojinext-platform",
+    )
+
+    assert scheme == "Bearer"
+    assert payload["role"] == "SERVICE"
+    assert payload["service"] == "trip-service"
+    assert payload["aud"] == "lojinext-platform"
+    assert captured["json"] == {"driver_id": "driver-001", "vehicle_id": "vehicle-001", "trailer_id": None}
+    assert result.driver_valid is True
+    assert result.vehicle_valid is True
+    assert result.trailer_valid is None

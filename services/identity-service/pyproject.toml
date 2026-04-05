@@ -1,0 +1,44 @@
+[project]
+name = "identity-service"
+version = "0.1.0"
+description = "Central identity, service-token issuance, and JWKS service for LOJINEXT"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "sqlalchemy[asyncio]>=2.0.30",
+    "asyncpg>=0.30.0",
+    "aiosqlite>=0.20.0",
+    "alembic>=1.13.0",
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.3.0",
+    "email-validator>=2.2.0",
+    "python-ulid>=3.0.0",
+    "httpx>=0.27.0",
+    "PyJWT>=2.10.1",
+    "cryptography>=44.0.0",
+]
+
+[project.scripts]
+identity-api = "identity_service.entrypoints.api:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
+pythonpath = ["src", "../../packages/platform-auth/src"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true

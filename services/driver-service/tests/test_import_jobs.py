@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @pytest.mark.asyncio
-async def test_create_import_job_success(client: AsyncClient, db_session: AsyncSession, auth_admin: dict[str, str]):
+async def test_create_import_job_success(client: AsyncClient, db_session: AsyncSession, auth_internal: dict[str, str]):
     """Test importing a valid CSV file with valid and invalid rows mapping to SUCCESS and RAW_UNKNOWN states."""
 
     payload = {
@@ -46,7 +46,7 @@ async def test_create_import_job_success(client: AsyncClient, db_session: AsyncS
     resp = await client.post(
         "/internal/v1/driver-import-jobs",
         json=payload,
-        headers=auth_admin,
+        headers=auth_internal,
     )
 
     # 201 Created — job is now PENDING/RUNNING in background
@@ -67,7 +67,7 @@ async def test_create_import_job_success(client: AsyncClient, db_session: AsyncS
     await _run_job_logic(session=db_session, job_id=job_id)
 
     # Fetch final state to verify
-    detail_resp = await client.get(f"/internal/v1/driver-import-jobs/{job_id}", headers=auth_admin)
+    detail_resp = await client.get(f"/internal/v1/driver-import-jobs/{job_id}", headers=auth_internal)
     assert detail_resp.status_code == 200
     detail_data = detail_resp.json()
 
@@ -82,7 +82,7 @@ async def test_create_import_job_success(client: AsyncClient, db_session: AsyncS
 
 
 @pytest.mark.asyncio
-async def test_import_job_batch_too_large(client: AsyncClient, auth_admin: dict[str, str]):
+async def test_import_job_batch_too_large(client: AsyncClient, auth_internal: dict[str, str]):
     """Payload exceeds MAX_IMPORT_BATCH should 413 or 422."""
     payload = {
         "strict_mode": False,
@@ -97,14 +97,14 @@ async def test_import_job_batch_too_large(client: AsyncClient, auth_admin: dict[
             for i in range(5005)
         ],
     }
-    resp = await client.post("/internal/v1/driver-import-jobs", json=payload, headers=auth_admin)
+    resp = await client.post("/internal/v1/driver-import-jobs", json=payload, headers=auth_internal)
 
     assert resp.status_code == 422
     assert resp.json()["code"] == "DRIVER_IMPORT_BATCH_TOO_LARGE"
 
 
 @pytest.mark.asyncio
-async def test_import_job_invalid_payload(client: AsyncClient, auth_admin: dict[str, str]):
+async def test_import_job_invalid_payload(client: AsyncClient, auth_internal: dict[str, str]):
     """Missing mandatory fields inside the row JSON."""
     payload = {
         "strict_mode": False,
@@ -115,15 +115,15 @@ async def test_import_job_invalid_payload(client: AsyncClient, auth_admin: dict[
             }
         ],
     }
-    resp = await client.post("/internal/v1/driver-import-jobs", json=payload, headers=auth_admin)
+    resp = await client.post("/internal/v1/driver-import-jobs", json=payload, headers=auth_internal)
 
     assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
-async def test_import_job_not_found(client: AsyncClient, auth_admin: dict[str, str]):
+async def test_import_job_not_found(client: AsyncClient, auth_internal: dict[str, str]):
     """Fetching non existing import job."""
-    resp = await client.get("/internal/v1/driver-import-jobs/01J00000000000000000000000", headers=auth_admin)
+    resp = await client.get("/internal/v1/driver-import-jobs/01J00000000000000000000000", headers=auth_internal)
 
     assert resp.status_code == 404
     assert resp.json()["code"] == "DRIVER_NOT_FOUND"

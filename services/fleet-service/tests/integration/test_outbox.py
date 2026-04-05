@@ -9,7 +9,7 @@ from tests.conftest import ADMIN_HEADERS
 @pytest.mark.asyncio
 async def test_outbox_event_emission_on_create(client: AsyncClient, test_session):
     # 1. Create a vehicle
-    headers = {**ADMIN_HEADERS, "X-Idempotency-Key": "outbox-test-01"}
+    headers = {**ADMIN_HEADERS, "Idempotency-Key": "outbox-test-01"}
     resp = await client.post(
         "/api/v1/vehicles",
         json={"asset_code": "V-OUT-01", "plate": "34 OUT 01", "ownership_type": "OWNED"},
@@ -34,7 +34,7 @@ async def test_outbox_event_emission_on_create(client: AsyncClient, test_session
 @pytest.mark.asyncio
 async def test_outbox_dead_lettering_on_hard_delete(client: AsyncClient, test_session, super_admin_headers):
     # 1. Create then soft-delete
-    headers = {**ADMIN_HEADERS, "X-Idempotency-Key": "outbox-test-02"}
+    headers = {**ADMIN_HEADERS, "Idempotency-Key": "outbox-test-02"}
     resp = await client.post(
         "/api/v1/vehicles",
         json={"asset_code": "V-OUT-02", "plate": "34 OUT 02", "ownership_type": "OWNED"},
@@ -52,9 +52,8 @@ async def test_outbox_dead_lettering_on_hard_delete(client: AsyncClient, test_se
     soft_etag = resp.headers["ETag"]
 
     # 2. Hard delete should DEAD_LETTER previous events for this aggregate
-    resp = await client.request(
-        "DELETE",
-        f"/api/v1/vehicles/{vehicle_id}",
+    resp = await client.post(
+        f"/api/v1/vehicles/{vehicle_id}/hard-delete",
         json={"reason": "Audit cleanup"},
         headers={**super_admin_headers, "If-Match": soft_etag},
     )

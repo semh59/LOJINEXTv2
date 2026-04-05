@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
-from driver_service.auth import AuthContext, admin_or_internal_auth_dependency
+from driver_service.auth import AuthContext, internal_service_auth_dependency
 from driver_service.database import get_session
 from driver_service.enums import ImportJobStatus, ImportRowStatus
 from driver_service.errors import (
@@ -50,7 +50,7 @@ def _new_ulid() -> str:
 @router.post("", status_code=201)
 async def create_import_job(
     body: CreateImportJobRequest,
-    auth: AuthContext = Depends(admin_or_internal_auth_dependency),
+    auth: AuthContext = Depends(internal_service_auth_dependency),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Create and asynchronously process a driver import job (spec §3.12).
@@ -110,7 +110,7 @@ async def create_import_job(
 @router.get("/{import_job_id}")
 async def get_import_job(
     import_job_id: str,
-    auth: AuthContext = Depends(admin_or_internal_auth_dependency),
+    auth: AuthContext = Depends(internal_service_auth_dependency),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Get import job detail with row-level results (spec §3.13)."""

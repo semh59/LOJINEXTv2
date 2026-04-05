@@ -49,6 +49,17 @@ When resolved: mark resolved, write what fixed it, keep the entry.
 
 ---
 
+## [ISSUE-003] Fleet create contracts expose `initial_spec` fields that are not applied on create
+
+- **Discovered:** 2026-04-05, TASK-0045
+- **Impact:** `fleet-service` request schemas allow `initial_spec` during vehicle and trailer create, but the create services currently ignore those fields. Internal fuel-metadata and spec-dependent flows cannot rely on inline spec initialization.
+- **Status:** open
+- **Workaround:** Create the asset first, then call the explicit spec-version endpoint (`POST /api/v1/vehicles/{id}/spec-versions` or trailer equivalent).
+- **Linked task:** none
+- **Resolution:** 
+
+---
+
 ## Resolved
 
 *(none yet)*

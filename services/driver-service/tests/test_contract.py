@@ -1,17 +1,19 @@
-"""Contract tests for Outbox events and Trip client (spec §18)."""
+"""Contract tests for Outbox events and Trip client (spec section 18)."""
 
 import json
+from unittest.mock import AsyncMock, patch
 
+import jwt
 import pytest
+from httpx import AsyncClient
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from driver_service.auth import generate_internal_service_token, require_internal_service_token
+from driver_service.config import settings
+from driver_service.errors import ProblemDetailError
 from driver_service.models import DriverOutboxModel
-
-# ---------------------------------------------------------------------------
-# EVENT SCHEMAS (BR-CONTRACT)
-# ---------------------------------------------------------------------------
 
 
 class DriverCreatedEvent(BaseModel):
@@ -32,12 +34,9 @@ class DriverUpdatedEvent(BaseModel):
     updated_at_utc: str
 
 
-# ---------------------------------------------------------------------------
-# EVENT SCHEMA VALIDATION TESTS
-# ---------------------------------------------------------------------------
-
-
-from httpx import AsyncClient
+def _service_token(payload: dict[str, object]) -> str:
+    """Build a service token signed the same way as the runtime auth helpers."""
+    return jwt.encode(payload, settings.resolved_auth_jwt_secret, algorithm=settings.auth_jwt_algorithm)
 
 
 @pytest.mark.asyncio
@@ -62,30 +61,51 @@ async def test_event_schema_driver_created(client: AsyncClient, auth_admin: dict
 
     assert outbox_row is not None
     event_data = json.loads(outbox_row.payload_json)
-
-    # Validate payload against schema (will raise ValidationError if invalid)
     DriverCreatedEvent.model_validate(event_data)
-
-
-# ---------------------------------------------------------------------------
-# TRIP SERVICE CLIENT CONTRACT
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_trip_client_check_usage():
-    """Contract test: Driver-Trip reference check schema."""
-    from unittest.mock import patch
-
+    """Driver maintenance must use the generic Trip asset-reference contract."""
     import httpx
 
     from driver_service.routers.maintenance import _check_trip_references
 
     driver_id = "01HYY"
     mock_response = httpx.Response(
-        200, json={"driver_id": driver_id, "is_referenced": True, "safe_to_delete": False, "active_trip_count": 1}
+        200,
+        json={"asset_type": "DRIVER", "asset_id": driver_id, "is_referenced": True, "active_trip_count": 1},
     )
 
-    with patch("httpx.AsyncClient.get", return_value=mock_response):
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_response
         result = await _check_trip_references(driver_id)
-        assert result is False
+
+    assert result is False
+    assert mock_post.await_args.kwargs["json"] == {"asset_id": driver_id, "asset_type": "DRIVER"}
+
+
+def test_generate_internal_service_token_uses_service_role() -> None:
+    """Recovery tokens must use the SERVICE role accepted by trip-service."""
+    token = generate_internal_service_token()
+    payload = jwt.decode(
+        token,
+        settings.resolved_auth_jwt_secret,
+        algorithms=[settings.auth_jwt_algorithm],
+        audience="lojinext-platform",
+    )
+
+    assert payload["sub"] == settings.service_name
+    assert payload["role"] == "SERVICE"
+    assert payload["service"] == settings.service_name
+    assert payload["aud"] == "lojinext-platform"
+
+
+def test_require_internal_service_token_rejects_unapproved_service() -> None:
+    """Driver internal endpoints should reject unknown service callers."""
+    token = _service_token({"sub": "rogue-service", "role": "SERVICE", "service": "rogue-service"})
+
+    with pytest.raises(ProblemDetailError) as exc_info:
+        require_internal_service_token(f"Bearer {token}")
+
+    assert exc_info.value.code == "DRIVER_INTERNAL_FORBIDDEN"

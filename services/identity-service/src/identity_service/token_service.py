@@ -1,0 +1,433 @@
+"""Core token and bootstrap services."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import secrets
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
+
+import jwt
+from platform_auth import AuthSettings, PlatformRole, verify_token
+from platform_auth.jwt_codec import issue_token
+from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from ulid import ULID
+
+from identity_service.config import settings
+from identity_service.crypto import decrypt_private_key, encrypt_private_key, require_kek_version
+from identity_service.jwks import generate_rsa_keypair, public_key_to_jwk
+from identity_service.models import (
+    IdentityGroupModel,
+    IdentityGroupPermissionModel,
+    IdentityRefreshTokenModel,
+    IdentityServiceClientModel,
+    IdentitySigningKeyModel,
+    IdentityUserGroupModel,
+    IdentityUserModel,
+)
+from identity_service.password import hash_secret, verify_secret
+
+ROLE_PRIORITY = {
+    str(PlatformRole.SUPER_ADMIN): 3,
+    str(PlatformRole.ADMIN): 2,
+    str(PlatformRole.MANAGER): 1,
+}
+
+
+def _now_utc() -> datetime:
+    return datetime.now(UTC)
+
+
+def _new_ulid() -> str:
+    return str(ULID())
+
+
+def _hash_token(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+def _as_utc(value: datetime) -> datetime:
+    """Normalize DB-loaded datetimes to timezone-aware UTC."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _signing_auth_settings(private_key: str, public_key: str) -> AuthSettings:
+    return AuthSettings(
+        algorithm=settings.auth_jwt_algorithm,
+        issuer=settings.auth_issuer,
+        audience=settings.auth_audience,
+        private_key=private_key,
+        public_key=public_key,
+    )
+
+
+def _bootstrap_service_clients() -> list[dict[str, str]]:
+    """Return bootstrap service-client definitions from structured env or JSON fallback."""
+    structured: list[dict[str, str]] = []
+    for service_name in settings.bootstrap_service_names:
+        client_secret = settings.service_client_secret(service_name)
+        if not client_secret:
+            continue
+        structured.append(
+            {
+                "client_id": service_name,
+                "service_name": service_name,
+                "client_secret": client_secret,
+            }
+        )
+    if structured:
+        return structured
+
+    try:
+        client_defs = json.loads(settings.bootstrap_service_clients_json or "[]")
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(client_defs, list):
+        return []
+    return [item for item in client_defs if isinstance(item, dict)]
+
+
+def _signing_private_key(signing_key: IdentitySigningKeyModel) -> str:
+    """Decrypt the persisted signing key into PEM for short-lived signing operations."""
+    return decrypt_private_key(signing_key.private_key_ciphertext_b64, aad=signing_key.kid)
+
+
+async def ensure_group(session: AsyncSession, group_name: str) -> IdentityGroupModel:
+    """Create or fetch a named group."""
+    result = await session.execute(
+        select(IdentityGroupModel).where(IdentityGroupModel.group_name == group_name)
+    )
+    group = result.scalar_one_or_none()
+    if group is not None:
+        return group
+    group = IdentityGroupModel(
+        group_id=_new_ulid(),
+        group_name=group_name,
+        description=f"Auto-managed group {group_name}",
+    )
+    session.add(group)
+    await session.flush()
+    return group
+
+
+async def ensure_active_signing_key(session: AsyncSession) -> IdentitySigningKeyModel:
+    """Return the active signing key, creating one if none exist."""
+    result = await session.execute(
+        select(IdentitySigningKeyModel)
+        .where(IdentitySigningKeyModel.is_active.is_(True))
+        .order_by(IdentitySigningKeyModel.created_at_utc.desc())
+    )
+    key = result.scalars().first()
+    if key is not None:
+        return key
+
+    private_key, public_key = generate_rsa_keypair()
+    kid = _new_ulid()
+    key = IdentitySigningKeyModel(
+        kid=kid,
+        algorithm=settings.auth_jwt_algorithm,
+        public_key_pem=public_key,
+        private_key_ciphertext_b64=encrypt_private_key(private_key, aad=kid),
+        private_key_kek_version=require_kek_version(),
+        is_active=True,
+        created_at_utc=_now_utc(),
+        retired_at_utc=None,
+    )
+    session.add(key)
+    await session.flush()
+    return key
+
+
+async def seed_bootstrap_state(session: AsyncSession) -> None:
+    """Seed bootstrap admin, groups, and service clients when missing."""
+    for group_name in (str(PlatformRole.ADMIN), str(PlatformRole.SUPER_ADMIN), str(PlatformRole.MANAGER)):
+        await ensure_group(session, group_name)
+
+    user_count = await session.scalar(select(func.count()).select_from(IdentityUserModel))
+    if not user_count:
+        super_admin = IdentityUserModel(
+            user_id=_new_ulid(),
+            username=settings.bootstrap_superadmin_username,
+            email=settings.bootstrap_superadmin_email,
+            password_hash=hash_secret(settings.bootstrap_superadmin_password),
+            is_active=True,
+            created_at_utc=_now_utc(),
+            updated_at_utc=_now_utc(),
+        )
+        session.add(super_admin)
+        await session.flush()
+        super_admin_group = await ensure_group(session, str(PlatformRole.SUPER_ADMIN))
+        session.add(
+            IdentityUserGroupModel(
+                user_id=super_admin.user_id,
+                group_id=super_admin_group.group_id,
+                assigned_at=_now_utc(),
+            )
+        )
+
+    for item in _bootstrap_service_clients():
+        client_id = str(item.get("client_id", "")).strip()
+        service_name = str(item.get("service_name", "")).strip()
+        client_secret = str(item.get("client_secret", "")).strip()
+        if not client_id or not service_name or not client_secret:
+            continue
+        existing = await session.get(IdentityServiceClientModel, client_id)
+        if existing is None:
+            session.add(
+                IdentityServiceClientModel(
+                    client_id=client_id,
+                    service_name=service_name,
+                    client_secret_hash=hash_secret(client_secret),
+                    is_active=True,
+                    created_at_utc=_now_utc(),
+                    rotated_at_utc=None,
+                )
+            )
+
+    await ensure_active_signing_key(session)
+
+
+async def _user_groups(session: AsyncSession, user_id: str) -> list[str]:
+    query = (
+        select(IdentityGroupModel.group_name)
+        .join(IdentityUserGroupModel, IdentityUserGroupModel.group_id == IdentityGroupModel.group_id)
+        .where(IdentityUserGroupModel.user_id == user_id)
+    )
+    result = await session.execute(query)
+    return [str(name) for name in result.scalars().all()]
+
+
+async def _permissions_for_groups(session: AsyncSession, group_names: list[str]) -> list[str]:
+    if not group_names:
+        return []
+    query = (
+        select(IdentityGroupPermissionModel.permission_key)
+        .join(IdentityGroupModel, IdentityGroupModel.group_id == IdentityGroupPermissionModel.group_id)
+        .where(IdentityGroupModel.group_name.in_(group_names))
+    )
+    result = await session.execute(query)
+    return sorted({str(item) for item in result.scalars().all()})
+
+
+def _role_for_groups(group_names: list[str]) -> str:
+    if not group_names:
+        return str(PlatformRole.ADMIN)
+    return max(group_names, key=lambda item: ROLE_PRIORITY.get(item, 0))
+
+
+async def build_user_profile(session: AsyncSession, user: IdentityUserModel) -> dict[str, object]:
+    """Return a normalized user profile used by /me and admin endpoints."""
+    groups = await _user_groups(session, user.user_id)
+    permissions = await _permissions_for_groups(session, groups)
+    return {
+        "user_id": user.user_id,
+        "username": user.username,
+        "email": user.email,
+        "is_active": user.is_active,
+        "groups": groups,
+        "permissions": permissions,
+        "role": _role_for_groups(groups),
+        "created_at_utc": user.created_at_utc,
+        "updated_at_utc": user.updated_at_utc,
+    }
+
+
+async def authenticate_user(session: AsyncSession, username: str, password: str) -> IdentityUserModel | None:
+    """Authenticate a user by username/password."""
+    result = await session.execute(select(IdentityUserModel).where(IdentityUserModel.username == username))
+    user = result.scalar_one_or_none()
+    if user is None or not user.is_active:
+        return None
+    if not verify_secret(password, user.password_hash):
+        return None
+    return user
+
+
+def _issue_user_access_token(
+    signing_key: IdentitySigningKeyModel,
+    private_key_pem: str,
+    *,
+    user_id: str,
+    role: str,
+    groups: list[str],
+    permissions: list[str],
+) -> str:
+    now = int(_now_utc().timestamp())
+    payload = {
+        "sub": user_id,
+        "role": role,
+        "groups": groups,
+        "permissions": permissions,
+        "iss": settings.auth_issuer,
+        "aud": settings.auth_audience,
+        "iat": now,
+        "exp": now + settings.access_token_ttl_seconds,
+        "jti": uuid4().hex,
+    }
+    return issue_token(
+        payload,
+        _signing_auth_settings(private_key_pem, signing_key.public_key_pem),
+        headers={"kid": signing_key.kid},
+    )
+
+
+def _issue_service_access_token(
+    signing_key: IdentitySigningKeyModel,
+    private_key_pem: str,
+    *,
+    service_name: str,
+    audience: str | None = None,
+) -> str:
+    now = int(_now_utc().timestamp())
+    payload = {
+        "sub": service_name,
+        "role": str(PlatformRole.SERVICE),
+        "service": service_name,
+        "iss": settings.auth_issuer,
+        "aud": audience or settings.auth_audience,
+        "iat": now,
+        "exp": now + settings.service_token_ttl_seconds,
+        "jti": uuid4().hex,
+    }
+    return issue_token(
+        payload,
+        _signing_auth_settings(private_key_pem, signing_key.public_key_pem),
+        headers={"kid": signing_key.kid},
+    )
+
+
+async def issue_token_pair(session: AsyncSession, user: IdentityUserModel) -> dict[str, object]:
+    """Issue and persist an access/refresh token pair for a user."""
+    signing_key = await ensure_active_signing_key(session)
+    private_key_pem = _signing_private_key(signing_key)
+    profile = await build_user_profile(session, user)
+    access_token = _issue_user_access_token(
+        signing_key,
+        private_key_pem=private_key_pem,
+        user_id=user.user_id,
+        role=str(profile["role"]),
+        groups=list(profile["groups"]),
+        permissions=list(profile["permissions"]),
+    )
+    refresh_token = secrets.token_urlsafe(48)
+    refresh_row = IdentityRefreshTokenModel(
+        token_id=_new_ulid(),
+        user_id=user.user_id,
+        token_hash=_hash_token(refresh_token),
+        expires_at_utc=_now_utc() + timedelta(seconds=settings.refresh_token_ttl_seconds),
+        revoked_at_utc=None,
+        created_at_utc=_now_utc(),
+    )
+    session.add(refresh_row)
+    await session.flush()
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "expires_in": settings.access_token_ttl_seconds,
+    }
+
+
+async def rotate_refresh_token(session: AsyncSession, raw_refresh_token: str) -> dict[str, object]:
+    """Consume a refresh token and issue a replacement pair."""
+    token_hash = _hash_token(raw_refresh_token)
+    result = await session.execute(
+        select(IdentityRefreshTokenModel).where(IdentityRefreshTokenModel.token_hash == token_hash)
+    )
+    refresh_row = result.scalar_one_or_none()
+    if refresh_row is None or refresh_row.revoked_at_utc is not None or _as_utc(refresh_row.expires_at_utc) <= _now_utc():
+        raise ValueError("Refresh token is invalid or expired.")
+
+    user = await session.get(IdentityUserModel, refresh_row.user_id)
+    if user is None or not user.is_active:
+        raise ValueError("Refresh token owner is inactive.")
+
+    refresh_row.revoked_at_utc = _now_utc()
+    token_pair = await issue_token_pair(session, user)
+    await session.flush()
+    return token_pair
+
+
+async def revoke_refresh_token(session: AsyncSession, raw_refresh_token: str) -> None:
+    """Revoke a refresh token if it exists."""
+    token_hash = _hash_token(raw_refresh_token)
+    result = await session.execute(
+        select(IdentityRefreshTokenModel).where(IdentityRefreshTokenModel.token_hash == token_hash)
+    )
+    refresh_row = result.scalar_one_or_none()
+    if refresh_row is not None and refresh_row.revoked_at_utc is None:
+        refresh_row.revoked_at_utc = _now_utc()
+
+
+async def issue_service_token(
+    session: AsyncSession,
+    client_id: str,
+    client_secret: str,
+    audience: str | None,
+) -> dict[str, object]:
+    """Issue a service token after validating client credentials."""
+    client = await session.get(IdentityServiceClientModel, client_id)
+    if client is None or not client.is_active or not verify_secret(client_secret, client.client_secret_hash):
+        raise ValueError("Service client credentials are invalid.")
+    if audience and audience != settings.auth_audience:
+        raise ValueError("Service token audience must match the platform audience.")
+    signing_key = await ensure_active_signing_key(session)
+    access_token = _issue_service_access_token(
+        signing_key,
+        private_key_pem=_signing_private_key(signing_key),
+        service_name=client.service_name,
+        audience=settings.auth_audience,
+    )
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "expires_in": settings.service_token_ttl_seconds,
+    }
+
+
+async def decode_access_token(session: AsyncSession, token: str):
+    """Verify an access token against the persisted signing keys."""
+    header = jwt.get_unverified_header(token)
+    kid = str(header.get("kid", "")).strip()
+    if not kid:
+        raise ValueError("Token is missing kid.")
+    signing_key = await session.get(IdentitySigningKeyModel, kid)
+    if signing_key is None:
+        raise ValueError("Signing key not found.")
+    auth_settings = AuthSettings(
+        algorithm=signing_key.algorithm,
+        public_key=signing_key.public_key_pem,
+        issuer=settings.auth_issuer,
+        audience=settings.auth_audience,
+    )
+    return verify_token(token, auth_settings)
+
+
+async def assign_groups(session: AsyncSession, user: IdentityUserModel, group_names: list[str]) -> None:
+    """Replace a user's group memberships."""
+    await session.execute(delete(IdentityUserGroupModel).where(IdentityUserGroupModel.user_id == user.user_id))
+    for group_name in group_names:
+        group = await ensure_group(session, group_name)
+        session.add(
+            IdentityUserGroupModel(
+                user_id=user.user_id,
+                group_id=group.group_id,
+                assigned_at=_now_utc(),
+            )
+        )
+
+
+async def jwks_document(session: AsyncSession) -> dict[str, object]:
+    """Return the published JWKS document."""
+    result = await session.execute(
+        select(IdentitySigningKeyModel).where(IdentitySigningKeyModel.retired_at_utc.is_(None))
+    )
+    keys = [
+        public_key_to_jwk(row.public_key_pem, row.kid, row.algorithm)
+        for row in result.scalars().all()
+    ]
+    return {"keys": keys}

@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import text
 
+from location_service.auth import auth_verify_status
 from location_service.config import settings
 from location_service.database import async_session_factory
 from location_service.provider_health import get_provider_probe_result, provider_probe_age_seconds
@@ -53,6 +54,7 @@ async def ready() -> JSONResponse:
     else:
         checks["ors_validation"] = "disabled"
     checks["provider_probe_age_s"] = provider_probe_age_seconds(probe_result)
+    checks["auth_verify"] = auth_verify_status()
 
     worker_heartbeat = await get_worker_heartbeat_snapshot(
         "processing-worker",
@@ -64,6 +66,7 @@ async def ready() -> JSONResponse:
         checks.get("database") == "ok"
         and checks.get("mapbox") == "ok"
         and checks.get("mapbox_live") == "ok"
+        and checks.get("auth_verify") == "ok"
         and checks.get("processing_worker") == "ok"
     )
     if settings.enable_ors_validation:

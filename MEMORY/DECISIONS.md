@@ -577,3 +577,66 @@ After TASK-0033, both services were materially closer to production correctness,
 ### Status
 
 active
+
+---
+
+## [2026-04-05] Recovery auth bridge uses PLATFORM_JWT_SECRET before shared auth extraction
+
+### Context
+
+TASK-0045 repaired live Trip/Fleet/Driver service boundaries before `packages/platform-auth` and `identity-service` exist. The repo already had divergent per-service JWT secrets, but the recovery slice needed one deterministic HS256 signing domain for repaired service-to-service calls without forcing the later auth package work into the same task.
+
+### Decision
+
+- `trip-service`, `fleet-service`, and `driver-service` resolve inbound and outbound HS256 service auth from `PLATFORM_JWT_SECRET` when it is set.
+- Each service keeps its existing local secret env vars as the fallback when the bridge is unset.
+- The bridge is temporary and does not replace the later `platform-auth` or JWKS work.
+
+### Alternatives Considered
+
+- Wait for `platform-auth` before fixing live contracts: rejected because broken live service boundaries had to be repaired first.
+- Keep separate per-edge secrets during recovery: rejected because it preserves the current integration drift and makes smoke verification harder.
+
+### Consequences
+
+- Service env examples must document `PLATFORM_JWT_SECRET`.
+- Recovery verification can exercise one HS256 service-auth domain across Trip/Fleet/Driver.
+- Later auth tasks must remove this temporary bridge once the shared auth package and `identity-service` are in place.
+
+### Status
+
+active
+
+---
+
+## [2026-04-05] Trip to Location auth repair belongs to the first live-contract slice
+
+### Context
+
+The recovery roadmap initially separated "live contract repair" from later "shared HS256 bridge completion", which created ambiguity around the `trip-service -> location-service` boundary. If Trip started emitting bridge-compatible service tokens while Location still verified only its local secret, the enrichment and route-resolution path would remain broken even though the repo claimed a repaired live baseline.
+
+There was similar ambiguity around `active_trip_count` in the new Trip internal reference contract. The live consumer contract needs to know whether the field is a true count or only a capped boolean proxy.
+
+### Decision
+
+- `trip-service -> location-service` auth compatibility is part of the first live-contract repair slice, not a deferred Phase 3 cleanup.
+- When Trip changes outbound service-token behavior, Location must accept the same auth domain in the same recovery slice:
+  - HS256 recovery mode: both services resolve `PLATFORM_JWT_SECRET` before their local fallback secrets.
+  - RS256 production mode: both services verify through the same JWKS / issuer / audience surface.
+- Phase 3 is only allowed to standardize remaining services and remove residual env divergence; it must not be the first point where Trip and Location can actually interoperate again.
+- `POST /internal/v1/assets/reference-check` returns the real current count of referencing trips in `active_trip_count`; it is not capped at `1`.
+
+### Alternatives Considered
+
+- Leave `trip-service -> location-service` broken until the broader bridge-standardization phase: rejected because the recovery slice would not establish a truthful live baseline.
+- Treat `active_trip_count` as a boolean proxy and document it as capped: rejected because the current implementation performs a real count and downstream callers may rely on that.
+
+### Consequences
+
+- Any roadmap, task brief, or handoff that claims a repaired live contract baseline must include the Location receiver-side auth change alongside the Trip sender-side change.
+- Enrichment and route-context calls are not allowed to sit knowingly broken between Phase 1 and Phase 3.
+- Consumers of the Trip internal reference endpoint can interpret `active_trip_count` as an actual count for the current query result.
+
+### Status
+
+active

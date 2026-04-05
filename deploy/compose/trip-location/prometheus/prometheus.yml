@@ -1,17 +1,24 @@
-# Prometheus scrape config for Trip/Location production stack
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
 scrape_configs:
-  # Trip Service — API
   - job_name: "trip-api"
     static_configs:
       - targets: ["trip-api:8101"]
     metrics_path: /metrics
 
-  # Location Service — API
   - job_name: "location-api"
     static_configs:
       - targets: ["location-api:8103"]
+    metrics_path: /metrics
+
+  - job_name: "driver-api"
+    static_configs:
+      - targets: ["driver-api:8104"]
+    metrics_path: /metrics
+
+  - job_name: "fleet-api"
+    static_configs:
+      - targets: ["fleet-api:8102"]
     metrics_path: /metrics

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy.exc import DBAPIError
 
@@ -17,6 +17,7 @@ from fleet_service.config import settings
 from fleet_service.database import async_session_factory
 from fleet_service.models import FleetOutbox
 from fleet_service.repositories import outbox_repo
+from fleet_service.timestamps import utc_now_naive
 from fleet_service.worker_heartbeats import record_worker_heartbeat
 
 logger = logging.getLogger("fleet_service.outbox_relay")
@@ -34,8 +35,8 @@ def _next_attempt_at(attempt_count: int) -> datetime:
 
 
 def _now_utc() -> datetime:
-    """Current UTC timestamp."""
-    return datetime.now(UTC)
+    """Current naive UTC timestamp matching the Fleet schema."""
+    return utc_now_naive()
 
 
 def _is_schema_not_ready(exc: Exception) -> bool:

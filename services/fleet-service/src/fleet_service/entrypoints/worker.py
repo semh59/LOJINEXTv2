@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, datetime
 
 from fleet_service.broker import create_broker
 from fleet_service.config import settings
 from fleet_service.database import async_session_factory, engine
 from fleet_service.observability import setup_structured_logging
+from fleet_service.timestamps import utc_now_naive
 from fleet_service.worker_heartbeats import record_worker_heartbeat
 from fleet_service.workers.outbox_relay import run_outbox_relay
 
@@ -35,7 +35,7 @@ async def _idempotency_cleanup_loop() -> None:
     while True:
         try:
             async with async_session_factory() as session:
-                now = datetime.now(UTC)
+                now = utc_now_naive()
                 stmt = delete(FleetIdempotencyRecord).where(FleetIdempotencyRecord.expires_at_utc < now)
                 result = await session.execute(stmt)
                 count = result.rowcount

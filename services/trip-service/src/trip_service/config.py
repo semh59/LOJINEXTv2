@@ -1,5 +1,7 @@
 """Application configuration via environment variables."""
 
+import os
+
 from typing import Literal
 
 from pydantic_settings import BaseSettings
@@ -23,6 +25,15 @@ class Settings(BaseSettings):
     dependency_timeout_seconds: float = 5.0
     auth_jwt_secret: str = DEFAULT_AUTH_JWT_SECRET
     auth_jwt_algorithm: str = "HS256"
+    auth_issuer: str = ""
+    auth_audience: str = ""
+    auth_public_key: str = ""
+    auth_private_key: str = ""
+    auth_jwks_url: str = ""
+    auth_jwks_cache_ttl_seconds: int = 300
+    auth_service_token_url: str = ""
+    auth_service_client_id: str = "trip-service"
+    auth_service_client_secret: str = ""
     allow_legacy_actor_headers: bool = False
 
     enrichment_claim_ttl_seconds: int = 300
@@ -56,6 +67,11 @@ class Settings(BaseSettings):
             return "noop"
         return "log"
 
+    @property
+    def resolved_auth_jwt_secret(self) -> str:
+        """Return the recovery-time shared secret if set, otherwise the local auth secret."""
+        return os.getenv("PLATFORM_JWT_SECRET") or self.auth_jwt_secret
+
     model_config = {"env_prefix": "TRIP_", "env_file": ".env", "extra": "ignore"}
 
 
@@ -68,8 +84,19 @@ def validate_prod_settings(current: Settings) -> None:
         return
 
     errors: list[str] = []
-    if not current.auth_jwt_secret or current.auth_jwt_secret == DEFAULT_AUTH_JWT_SECRET:
+    if current.auth_jwt_algorithm.upper().startswith("HS") and (
+        not current.resolved_auth_jwt_secret or current.resolved_auth_jwt_secret == DEFAULT_AUTH_JWT_SECRET
+    ):
         errors.append("TRIP_AUTH_JWT_SECRET must be set to a non-default value in prod.")
+    if current.auth_jwt_algorithm.upper().startswith("RS"):
+        if not current.auth_jwks_url and not current.auth_public_key:
+            errors.append("TRIP_AUTH_JWKS_URL or TRIP_AUTH_PUBLIC_KEY must be set for RS* auth in prod.")
+        if current.auth_private_key:
+            errors.append("TRIP_AUTH_PRIVATE_KEY must not be set in prod; signing belongs to identity-service.")
+        if not current.auth_service_token_url:
+            errors.append("TRIP_AUTH_SERVICE_TOKEN_URL must be set for RS* outbound auth in prod.")
+        if not current.auth_service_client_secret:
+            errors.append("TRIP_AUTH_SERVICE_CLIENT_SECRET must be set for RS* outbound auth in prod.")
     if not current.database_url or current.database_url == DEFAULT_DATABASE_URL:
         errors.append("TRIP_DATABASE_URL must be set to a non-default value in prod.")
     if current.broker_type is None:

@@ -16,7 +16,7 @@ async def test_trailer_full_crud_lifecycle(client: AsyncClient):
         "model_year": 2022,
     }
 
-    headers = {**ADMIN_HEADERS, "X-Idempotency-Key": "idem-trailer-001"}
+    headers = {**ADMIN_HEADERS, "Idempotency-Key": "idem-trailer-001"}
     resp = await client.post("/api/v1/trailers", json=create_payload, headers=headers)
     assert resp.status_code == 201
     trailer_id = resp.json()["trailer_id"]
@@ -39,9 +39,8 @@ async def test_trailer_full_crud_lifecycle(client: AsyncClient):
     soft_etag = resp.headers["ETag"]
 
     # Hard Delete
-    resp = await client.request(
-        "DELETE",
-        f"/api/v1/trailers/{trailer_id}",
+    resp = await client.post(
+        f"/api/v1/trailers/{trailer_id}/hard-delete",
         json={"reason": "Audit cleanup"},
         headers={**SUPER_ADMIN_HEADERS, "If-Match": soft_etag},
     )

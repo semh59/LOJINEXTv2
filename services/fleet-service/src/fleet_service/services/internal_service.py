@@ -210,6 +210,83 @@ async def validate_trip_compat(
     }
 
 
+async def validate_trip_compat_contract(
+    session: AsyncSession,
+    driver_id: str,
+    vehicle_id: str | None,
+    trailer_id: str | None = None,
+) -> dict[str, Any]:
+    """Validate trip references against the live Driver and Fleet contracts.
+
+    This is the recovery-time contract returned to trip-service. It keeps the
+    canonical `driver_valid` / `vehicle_valid` / `trailer_valid` fields while
+    preserving a couple of legacy aliases during the transition.
+    """
+    errors: list[dict[str, str]] = []
+    warnings: list[dict[str, str]] = []
+    driver_valid = False
+    vehicle_valid: bool | None = None
+    trailer_valid: bool | None = None
+
+    driver_result = await driver_client.validate_driver(driver_id)
+    if not driver_result.get("exists", False):
+        errors.append({"field": "driver_id", "code": "DRIVER_NOT_FOUND"})
+    elif not driver_result.get("is_assignable", False):
+        errors.append(
+            {
+                "field": "driver_id",
+                "code": "DRIVER_NOT_ASSIGNABLE",
+                "reason": str(driver_result.get("status") or "UNKNOWN"),
+            }
+        )
+    else:
+        driver_valid = True
+
+    if vehicle_id is not None:
+        vehicle_resp = await validate_single(session, "VEHICLE", vehicle_id)
+        if not vehicle_resp.exists:
+            errors.append({"field": "vehicle_id", "code": "VEHICLE_NOT_FOUND"})
+            vehicle_valid = False
+        elif not vehicle_resp.is_usable_for_new_operation:
+            errors.append(
+                {
+                    "field": "vehicle_id",
+                    "code": "VEHICLE_NOT_SELECTABLE",
+                    "reason": vehicle_resp.reason_code or "UNKNOWN",
+                }
+            )
+            vehicle_valid = False
+        else:
+            vehicle_valid = True
+
+    if trailer_id:
+        trailer_resp = await validate_single(session, "TRAILER", trailer_id)
+        if not trailer_resp.exists:
+            errors.append({"field": "trailer_id", "code": "TRAILER_NOT_FOUND"})
+            trailer_valid = False
+        elif not trailer_resp.is_usable_for_new_operation:
+            errors.append(
+                {
+                    "field": "trailer_id",
+                    "code": "TRAILER_NOT_SELECTABLE",
+                    "reason": trailer_resp.reason_code or "UNKNOWN",
+                }
+            )
+            trailer_valid = False
+        else:
+            trailer_valid = True
+
+    valid = not errors
+    return {
+        "valid": valid,
+        "errors": errors,
+        "warnings": warnings,
+        "driver_valid": driver_valid,
+        "vehicle_valid": vehicle_valid,
+        "trailer_valid": trailer_valid,
+    }
+
+
 # === SELECTABLE — VEHICLES ===
 
 

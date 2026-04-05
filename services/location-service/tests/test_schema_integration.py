@@ -31,6 +31,7 @@ async def test_ready_endpoint(raw_client: AsyncClient) -> None:
     assert data["checks"]["database"] == "ok"
     assert data["checks"]["mapbox"] == "ok"
     assert data["checks"]["mapbox_live"] == "ok"
+    assert data["checks"]["auth_verify"] == "ok"
     assert data["checks"]["provider_probe_age_s"] == 0
     assert data["checks"]["processing_worker"] == "ok"
 

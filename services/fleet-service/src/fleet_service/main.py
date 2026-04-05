@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 
+from fleet_service.broker import create_broker
 from fleet_service.config import settings, validate_prod_settings
 from fleet_service.database import engine
 from fleet_service.errors import (
@@ -33,11 +34,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         settings.environment,
         settings.resolved_broker_type,
     )
+    broker = create_broker(settings.resolved_broker_type)
+    app.state.broker = broker
 
-    yield
-
-    await engine.dispose()
-    logger.info("Shutdown complete")
+    try:
+        yield
+    finally:
+        await broker.close()
+        await engine.dispose()
+        logger.info("Shutdown complete")
 
 
 def create_app() -> FastAPI:

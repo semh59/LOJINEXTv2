@@ -7,9 +7,9 @@ from fastapi.responses import JSONResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import text
 
+from trip_service.auth import auth_outbound_status, auth_verify_status
 from trip_service.config import settings
 from trip_service.database import async_session_factory
-from trip_service.dependencies import probe_fleet_service, probe_location_service
 from trip_service.worker_heartbeats import get_worker_heartbeat_snapshot
 
 router = APIRouter(tags=["health"])
@@ -43,23 +43,21 @@ async def readiness(request: Request) -> JSONResponse:
 
     broker = getattr(request.app.state, "broker", None)
     if broker is None:
-        checks["kafka"] = "unavailable"
+        checks["broker"] = "unavailable"
         overall = False
     else:
         try:
             await broker.check_health()
-            checks["kafka"] = "ok"
+            checks["broker"] = "ok"
         except Exception:
-            checks["kafka"] = "unavailable"
+            checks["broker"] = "unavailable"
             overall = False
 
-    location_ok = await probe_location_service()
-    checks["location_service"] = "ok" if location_ok else "unavailable"
-    overall = overall and location_ok
+    checks["auth_verify"] = auth_verify_status()
+    overall = overall and checks["auth_verify"] == "ok"
 
-    fleet_ok = await probe_fleet_service()
-    checks["fleet_service"] = "ok" if fleet_ok else "unavailable"
-    overall = overall and fleet_ok
+    checks["auth_outbound"] = auth_outbound_status()
+    overall = overall and checks["auth_outbound"] in {"ok", "cold"}
 
     enrichment_heartbeat = await get_worker_heartbeat_snapshot(
         "enrichment-worker",

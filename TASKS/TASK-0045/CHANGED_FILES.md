@@ -1,0 +1,56 @@
+# CHANGED_FILES.md
+
+- `MEMORY/PROJECT_STATE.md` — corrected the live task ledger and removed the false completed `TASK-0044` claim.
+- `MEMORY/DECISIONS.md` — recorded the temporary `PLATFORM_JWT_SECRET` recovery bridge decision.
+- `MEMORY/KNOWN_ISSUES.md` — recorded the open Fleet `initial_spec` create-gap discovered during verification.
+- `TASKS/TASK-0045/BRIEF.md` — created the task brief for the recovery baseline.
+- `TASKS/TASK-0045/PLAN.md` — created and revised the plan as test-driven scope details emerged.
+- `TASKS/TASK-0045/STATE.md` — updated progress, risks, and unexpected findings to match the final session state.
+- `TASKS/TASK-0045/CHANGED_FILES.md` — recorded every file touched in TASK-0045.
+- `TASKS/TASK-0045/TEST_EVIDENCE.md` — recorded final verification commands and outputs.
+- `TASKS/TASK-0045/NEXT_AGENT.md` — wrote a complete handoff for the next agent.
+- `TASKS/TASK-0045/DONE_CHECKLIST.md` — marked the documentation/proof checklist for this task state.
+- `services/trip-service/.env.example` — documented the temporary `PLATFORM_JWT_SECRET` bridge for Trip.
+- `services/trip-service/src/trip_service/config.py` — added resolved auth-secret bridge handling.
+- `services/trip-service/src/trip_service/auth.py` — switched inbound JWT verification to the resolved auth secret.
+- `services/trip-service/src/trip_service/dependencies.py` — added Fleet bearer auth and compatibility parsing for legacy/canonical Fleet responses.
+- `services/trip-service/src/trip_service/routers/trips.py` — added the generic asset reference endpoint and repaired driver reference checks and allowlists.
+- `services/trip-service/src/trip_service/schemas.py` — added generic asset-reference request/response models.
+- `services/trip-service/tests/test_contract.py` — added regression coverage for the repaired internal reference endpoints.
+- `services/trip-service/tests/test_integration.py` — added regression coverage for Fleet auth headers and compatibility parsing.
+- `services/fleet-service/.env.example` — documented the temporary `PLATFORM_JWT_SECRET` bridge for Fleet.
+- `services/fleet-service/pyproject.toml` — configured pytest to resolve the local `src/` package path directly from the service root.
+- `services/fleet-service/src/fleet_service/auth.py` — switched inbound JWT verification to the resolved auth secret.
+- `services/fleet-service/src/fleet_service/config.py` — added resolved auth/Driver/Trip secret bridge handling.
+- `services/fleet-service/src/fleet_service/clients/driver_client.py` — switched Fleet-to-Driver validation to the real eligibility endpoint and normalized its response.
+- `services/fleet-service/src/fleet_service/clients/trip_client.py` — switched Fleet-to-Trip reference checks to the generic asset endpoint and normalized its response.
+- `services/fleet-service/src/fleet_service/entrypoints/worker.py` — normalized worker cleanup timestamps to the current naive-UTC schema.
+- `services/fleet-service/src/fleet_service/repositories/idempotency_repo.py` — normalized TTL cleanup timestamps to the current naive-UTC schema.
+- `services/fleet-service/src/fleet_service/repositories/outbox_repo.py` — normalized outbox claim/publish timestamps to the current naive-UTC schema.
+- `services/fleet-service/src/fleet_service/routers/internal_router.py` — routed Trip compatibility through the repaired contract path.
+- `services/fleet-service/src/fleet_service/routers/trailer_router.py` — wired Trip reference checks into trailer hard-delete.
+- `services/fleet-service/src/fleet_service/routers/vehicle_router.py` — wired Trip reference checks into vehicle hard-delete.
+- `services/fleet-service/src/fleet_service/schemas/requests.py` — allowed nullable vehicle/trailer inputs for Trip compatibility requests.
+- `services/fleet-service/src/fleet_service/services/internal_service.py` — returned Trip-compatible validation fields and preserved fuel-metadata resolution behavior.
+- `services/fleet-service/src/fleet_service/services/trailer_service.py` — normalized trailer-domain timestamps and derived `is_selectable` without async lazy-loads.
+- `services/fleet-service/src/fleet_service/services/vehicle_service.py` — normalized vehicle-domain timestamps and derived `is_selectable` without async lazy-loads.
+- `services/fleet-service/src/fleet_service/services/vehicle_spec_service.py` — normalized spec-version timestamps and effective-from inputs.
+- `services/fleet-service/src/fleet_service/timestamps.py` — added shared naive-UTC timestamp helpers for the current Fleet schema.
+- `services/fleet-service/src/fleet_service/worker_heartbeats.py` — normalized heartbeat persistence/comparisons across naive and aware UTC values.
+- `services/fleet-service/src/fleet_service/workers/outbox_relay.py` — normalized relay retry/publish timestamps to the current naive-UTC schema.
+- `services/fleet-service/tests/conftest.py` — fixed test bootstrap imports, dependency stubs, and readiness heartbeat setup.
+- `services/fleet-service/tests/contract/test_internal_contracts.py` — aligned the internal contract tests with the repaired Trip-compat and fuel-metadata flows.
+- `services/fleet-service/tests/smoke/test_smoke_probes.py` — aligned smoke expectations with the current `/health` and `/ready` payloads.
+- `services/driver-service/.env.example` — documented the temporary `PLATFORM_JWT_SECRET` bridge for Driver.
+- `services/driver-service/pyproject.toml` — configured pytest to resolve the local `src/` package path directly from the service root.
+- `services/driver-service/src/driver_service/auth.py` — generated `SERVICE` role internal tokens and enforced internal allowlists.
+- `services/driver-service/src/driver_service/config.py` — added resolved auth-secret bridge handling.
+- `services/driver-service/src/driver_service/routers/__init__.py` — made readiness broker-aware and kept worker heartbeat gating truthful.
+- `services/driver-service/src/driver_service/routers/maintenance.py` — switched Trip reference checks to the generic asset endpoint and service-token flow.
+- `services/driver-service/tests/conftest.py` — added a healthy broker fixture and stabilized auth overrides for readiness testing.
+- `services/driver-service/tests/test_contract.py` — added coverage for the repaired Trip contract and `SERVICE` token generation.
+- `services/driver-service/tests/test_smoke.py` — aligned smoke/readiness checks with the repaired hard-delete and broker-aware readiness behavior.
+
+## Not Touched
+
+- `services/driver-service/uv.lock` is dirty in the worktree but was intentionally left unchanged because it was outside TASK-0045 scope.

@@ -1,25 +1,37 @@
-# =============================================================================
-# Trip + Location Service — Production Compose Stack
-# =============================================================================
-# Usage:
-#   cp .env.example .env   # then fill in real secrets
-#   docker compose -f docker-compose.prod.yml up -d
-#
-# Split topology:
-#   trip-api              → HTTP API (port 8101)
-#   trip-enrichment       → Enrichment claim worker
-#   trip-outbox           → Outbox relay worker
-#   trip-cleanup          → Idempotency/outbox cleanup worker
-#   location-api          → HTTP API (port 8103)
-#   location-processing   → Durable processing worker
-# =============================================================================
-
 name: lojinextv2
+
+x-identity-common: &identity-common
+  build:
+    context: ../../..
+    dockerfile: services/identity-service/Dockerfile
+  env_file: .env
+  environment:
+    IDENTITY_ENVIRONMENT: prod
+    IDENTITY_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-lojinext}:${POSTGRES_PASSWORD}@postgres:5432/${IDENTITY_DB_NAME:-identity_service}
+    IDENTITY_AUTH_JWT_ALGORITHM: RS256
+    IDENTITY_AUTH_ISSUER: ${AUTH_ISSUER:-lojinext-platform}
+    IDENTITY_AUTH_AUDIENCE: ${AUTH_AUDIENCE:-lojinext-platform}
+    IDENTITY_KEY_ENCRYPTION_KEY_B64: ${IDENTITY_KEY_ENCRYPTION_KEY_B64:?IDENTITY_KEY_ENCRYPTION_KEY_B64 is required}
+    IDENTITY_KEY_ENCRYPTION_KEY_VERSION: ${IDENTITY_KEY_ENCRYPTION_KEY_VERSION:?IDENTITY_KEY_ENCRYPTION_KEY_VERSION is required}
+    IDENTITY_BOOTSTRAP_SUPERADMIN_USERNAME: ${IDENTITY_BOOTSTRAP_SUPERADMIN_USERNAME:-superadmin}
+    IDENTITY_BOOTSTRAP_SUPERADMIN_EMAIL: ${IDENTITY_BOOTSTRAP_SUPERADMIN_EMAIL:-superadmin@example.com}
+    IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD: ${IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD:?IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD is required}
+    IDENTITY_SERVICE_CLIENTS: trip-service,location-service,driver-service,fleet-service
+    IDENTITY_SERVICE_CLIENT_SECRET__TRIP_SERVICE: ${TRIP_SERVICE_CLIENT_SECRET:?TRIP_SERVICE_CLIENT_SECRET is required}
+    IDENTITY_SERVICE_CLIENT_SECRET__LOCATION_SERVICE: ${LOCATION_SERVICE_CLIENT_SECRET:?LOCATION_SERVICE_CLIENT_SECRET is required}
+    IDENTITY_SERVICE_CLIENT_SECRET__DRIVER_SERVICE: ${DRIVER_SERVICE_CLIENT_SECRET:?DRIVER_SERVICE_CLIENT_SECRET is required}
+    IDENTITY_SERVICE_CLIENT_SECRET__FLEET_SERVICE: ${FLEET_SERVICE_CLIENT_SECRET:?FLEET_SERVICE_CLIENT_SECRET is required}
+  depends_on:
+    postgres:
+      condition: service_healthy
+  restart: unless-stopped
+  networks:
+    - backend
 
 x-trip-common: &trip-common
   build:
-    context: ../../../services/trip-service
-    dockerfile: Dockerfile
+    context: ../../..
+    dockerfile: services/trip-service/Dockerfile
   env_file: .env
   environment:
     TRIP_ENVIRONMENT: prod
@@ -27,11 +39,20 @@ x-trip-common: &trip-common
     TRIP_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
     TRIP_LOCATION_SERVICE_URL: http://location-api:8103
     TRIP_FLEET_SERVICE_URL: http://fleet-api:8102
+    TRIP_AUTH_JWT_ALGORITHM: RS256
+    TRIP_AUTH_ISSUER: ${AUTH_ISSUER:-lojinext-platform}
+    TRIP_AUTH_AUDIENCE: ${AUTH_AUDIENCE:-lojinext-platform}
+    TRIP_AUTH_JWKS_URL: http://identity-api:8105/.well-known/jwks.json
+    TRIP_AUTH_SERVICE_TOKEN_URL: http://identity-api:8105/auth/v1/token/service
+    TRIP_AUTH_SERVICE_CLIENT_ID: trip-service
+    TRIP_AUTH_SERVICE_CLIENT_SECRET: ${TRIP_SERVICE_CLIENT_SECRET:?TRIP_SERVICE_CLIENT_SECRET is required}
     TRIP_ALLOW_PLAINTEXT_IN_PROD: ${TRIP_ALLOW_PLAINTEXT_IN_PROD:-true}
   depends_on:
     postgres:
       condition: service_healthy
     redpanda:
+      condition: service_healthy
+    identity-api:
       condition: service_healthy
   restart: unless-stopped
   networks:
@@ -39,23 +60,87 @@ x-trip-common: &trip-common
 
 x-location-common: &location-common
   build:
-    context: ../../../services/location-service
-    dockerfile: Dockerfile
+    context: ../../..
+    dockerfile: services/location-service/Dockerfile
   env_file: .env
   environment:
     LOCATION_ENVIRONMENT: prod
     LOCATION_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-lojinext}:${POSTGRES_PASSWORD}@postgres:5432/${LOCATION_DB_NAME:-location_service}
+    LOCATION_AUTH_JWT_ALGORITHM: RS256
+    LOCATION_AUTH_ISSUER: ${AUTH_ISSUER:-lojinext-platform}
+    LOCATION_AUTH_AUDIENCE: ${AUTH_AUDIENCE:-lojinext-platform}
+    LOCATION_AUTH_JWKS_URL: http://identity-api:8105/.well-known/jwks.json
   depends_on:
     postgres:
+      condition: service_healthy
+    identity-api:
+      condition: service_healthy
+  restart: unless-stopped
+  networks:
+    - backend
+
+x-driver-common: &driver-common
+  build:
+    context: ../../..
+    dockerfile: services/driver-service/Dockerfile
+  env_file: .env
+  environment:
+    DRIVER_ENVIRONMENT: prod
+    DRIVER_BROKER_TYPE: kafka
+    DRIVER_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-lojinext}:${POSTGRES_PASSWORD}@postgres:5432/${DRIVER_DB_NAME:-driver_service}
+    DRIVER_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    DRIVER_TRIP_SERVICE_BASE_URL: http://trip-api:8101
+    DRIVER_AUTH_JWT_ALGORITHM: RS256
+    DRIVER_AUTH_ISSUER: ${AUTH_ISSUER:-lojinext-platform}
+    DRIVER_AUTH_AUDIENCE: ${AUTH_AUDIENCE:-lojinext-platform}
+    DRIVER_AUTH_JWKS_URL: http://identity-api:8105/.well-known/jwks.json
+    DRIVER_AUTH_SERVICE_TOKEN_URL: http://identity-api:8105/auth/v1/token/service
+    DRIVER_AUTH_SERVICE_CLIENT_ID: driver-service
+    DRIVER_AUTH_SERVICE_CLIENT_SECRET: ${DRIVER_SERVICE_CLIENT_SECRET:?DRIVER_SERVICE_CLIENT_SECRET is required}
+    DRIVER_ALLOW_PLAINTEXT_IN_PROD: ${DRIVER_ALLOW_PLAINTEXT_IN_PROD:-true}
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redpanda:
+      condition: service_healthy
+    identity-api:
+      condition: service_healthy
+  restart: unless-stopped
+  networks:
+    - backend
+
+x-fleet-common: &fleet-common
+  build:
+    context: ../../..
+    dockerfile: services/fleet-service/Dockerfile
+  env_file: .env
+  environment:
+    FLEET_ENVIRONMENT: prod
+    FLEET_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-lojinext}:${POSTGRES_PASSWORD}@postgres:5432/${FLEET_DB_NAME:-fleet_service}
+    FLEET_BROKER_TYPE: kafka
+    FLEET_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    FLEET_DRIVER_SERVICE_BASE_URL: http://driver-api:8104
+    FLEET_TRIP_SERVICE_BASE_URL: http://trip-api:8101
+    FLEET_AUTH_JWT_ALGORITHM: RS256
+    FLEET_AUTH_ISSUER: ${AUTH_ISSUER:-lojinext-platform}
+    FLEET_AUTH_AUDIENCE: ${AUTH_AUDIENCE:-lojinext-platform}
+    FLEET_AUTH_JWKS_URL: http://identity-api:8105/.well-known/jwks.json
+    FLEET_AUTH_SERVICE_TOKEN_URL: http://identity-api:8105/auth/v1/token/service
+    FLEET_AUTH_SERVICE_CLIENT_ID: fleet-service
+    FLEET_AUTH_SERVICE_CLIENT_SECRET: ${FLEET_SERVICE_CLIENT_SECRET:?FLEET_SERVICE_CLIENT_SECRET is required}
+    FLEET_ALLOW_PLAINTEXT_IN_PROD: ${FLEET_ALLOW_PLAINTEXT_IN_PROD:-true}
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redpanda:
+      condition: service_healthy
+    identity-api:
       condition: service_healthy
   restart: unless-stopped
   networks:
     - backend
 
 services:
-  # ---------------------------------------------------------------------------
-  # Infrastructure
-  # ---------------------------------------------------------------------------
   postgres:
     image: postgres:16-alpine
     environment:
@@ -79,20 +164,25 @@ services:
   redpanda:
     image: docker.redpanda.com/redpandadata/redpanda:v24.1.7
     command:
-      - redpanda start
-      - --smp 1
-      - --memory 256M
+      - redpanda
+      - start
+      - --smp
+      - "1"
+      - --memory
+      - 256M
       - --overprovisioned
-      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
-      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
-      - --mode dev-container
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://localhost:19092
+      - --mode
+      - dev-container
     ports:
       - "${REDPANDA_EXTERNAL_PORT:-19092}:19092"
     volumes:
       - redpanda_data:/var/lib/redpanda/data
     healthcheck:
-      test:
-        ["CMD-SHELL", "curl -f http://localhost:9644/v1/status/ready || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:9644/v1/status/ready || exit 1"]
       interval: 5s
       timeout: 10s
       retries: 20
@@ -100,20 +190,24 @@ services:
     networks:
       - backend
 
-  # ---------------------------------------------------------------------------
-  # Trip Service — Split Topology
-  # ---------------------------------------------------------------------------
+  identity-api:
+    <<: *identity-common
+    command: ["identity-api"]
+    ports:
+      - "${IDENTITY_API_PORT:-8105}:8105"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8105/ready')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
   trip-api:
     <<: *trip-common
     command: ["trip-api"]
     ports:
       - "${TRIP_API_PORT:-8101}:8101"
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8101/ready'')"',
-        ]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8101/ready')\""]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -130,20 +224,13 @@ services:
     <<: *trip-common
     command: ["trip-cleanup-worker"]
 
-  # ---------------------------------------------------------------------------
-  # Location Service — Split Topology
-  # ---------------------------------------------------------------------------
   location-api:
     <<: *location-common
     command: ["location-api"]
     ports:
       - "${LOCATION_API_PORT:-8103}:8103"
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8103/ready'')"',
-        ]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8103/ready')\""]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -152,88 +239,63 @@ services:
     <<: *location-common
     command: ["location-processing-worker"]
 
-  # ---------------------------------------------------------------------------
-  # Driver Service — Multi-process
-  # ---------------------------------------------------------------------------
   driver-api:
-    build:
-      context: ../../../services/driver-service
-      dockerfile: Dockerfile
+    <<: *driver-common
     command: ["driver-api"]
-    env_file: .env
-    environment:
-      DRIVER_ENVIRONMENT: prod
-      DRIVER_BROKER_TYPE: kafka
-      DRIVER_AUTH_JWT_SECRET: ${DRIVER_AUTH_JWT_SECRET:-driver-production-secret-override-in-env}
-      DRIVER_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-lojinext}:${POSTGRES_PASSWORD}@postgres:5432/${DRIVER_DB_NAME:-driver_service}
-      DRIVER_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
-      DRIVER_ALLOW_PLAINTEXT_IN_PROD: ${DRIVER_ALLOW_PLAINTEXT_IN_PROD:-true}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redpanda:
-        condition: service_healthy
     ports:
       - "${DRIVER_API_PORT:-8104}:8104"
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8104/ready'')"',
-        ]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8104/ready')\""]
       interval: 10s
       timeout: 5s
       retries: 3
-    restart: unless-stopped
-    networks:
-      - backend
 
   driver-worker:
-    build:
-      context: ../../../services/driver-service
-      dockerfile: Dockerfile
+    <<: *driver-common
     command: ["driver-worker"]
-    env_file: .env
-    environment:
-      DRIVER_ENVIRONMENT: prod
-      DRIVER_BROKER_TYPE: kafka
-      DRIVER_AUTH_JWT_SECRET: ${DRIVER_AUTH_JWT_SECRET:-driver-production-secret-override-in-env}
-      DRIVER_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-lojinext}:${POSTGRES_PASSWORD}@postgres:5432/${DRIVER_DB_NAME:-driver_service}
-      DRIVER_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
-      DRIVER_ALLOW_PLAINTEXT_IN_PROD: ${DRIVER_ALLOW_PLAINTEXT_IN_PROD:-true}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redpanda:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - backend
 
-  # ---------------------------------------------------------------------------
-  # Reverse Proxy
-  # ---------------------------------------------------------------------------
+  fleet-api:
+    <<: *fleet-common
+    command: ["fleet-api"]
+    ports:
+      - "${FLEET_API_PORT:-8102}:8102"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8102/ready')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  fleet-worker:
+    <<: *fleet-common
+    command: ["fleet-worker"]
+
   nginx:
     image: nginx:1.27-alpine
     volumes:
       - ./nginx/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
     environment:
+      IDENTITY_API_UPSTREAM: identity-api:8105
       TRIP_API_UPSTREAM: trip-api:8101
       LOCATION_API_UPSTREAM: location-api:8103
+      DRIVER_API_UPSTREAM: driver-api:8104
+      FLEET_API_UPSTREAM: fleet-api:8102
     ports:
       - "${NGINX_PORT:-80}:80"
     depends_on:
+      identity-api:
+        condition: service_healthy
       trip-api:
         condition: service_healthy
       location-api:
+        condition: service_healthy
+      driver-api:
+        condition: service_healthy
+      fleet-api:
         condition: service_healthy
     restart: unless-stopped
     networks:
       - backend
 
-  # ---------------------------------------------------------------------------
-  # Monitoring
-  # ---------------------------------------------------------------------------
   prometheus:
     image: prom/prometheus:v2.53.0
     volumes:

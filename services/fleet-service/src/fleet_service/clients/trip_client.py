@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 
-from fleet_service.auth import sign_service_token
+from fleet_service.auth import issue_service_token
 from fleet_service.config import settings
 from fleet_service.errors import DependencyUnavailableError
 
@@ -68,13 +68,13 @@ def _record_failure() -> None:
 async def check_asset_references(asset_id: str, asset_type: str) -> dict[str, Any]:
     """Call trip-service to check if an asset is referenced by active trips.
 
-    Returns dict with at least: {"has_references": bool, ...}
+    Returns a normalized reference-check payload.
     Raises DependencyUnavailableError on failure / circuit-open.
     """
     _check_breaker()
 
-    url = f"{settings.trip_service_base_url}/internal/v1/references/check"
-    token = sign_service_token(settings.trip_service_jwt_secret, "fleet-to-trip")
+    url = f"{settings.trip_service_base_url}/internal/v1/assets/reference-check"
+    token = await issue_service_token(audience="trip-service")
     payload = {"asset_id": asset_id, "asset_type": asset_type}
 
     try:
@@ -88,8 +88,15 @@ async def check_asset_references(asset_id: str, asset_type: str) -> dict[str, An
         ) as client:
             resp = await client.post(url, json=payload, headers={"Authorization": f"Bearer {token}"})
             resp.raise_for_status()
+            data = resp.json()
             _record_success()
-            return resp.json()
+            return {
+                "asset_id": asset_id,
+                "asset_type": asset_type,
+                "is_referenced": bool(data.get("is_referenced", False)),
+                "has_references": bool(data.get("is_referenced", False)),
+                "active_trip_count": int(data.get("active_trip_count", 0) or 0),
+            }
     except Exception as exc:
         _record_failure()
         logger.error("trip-client check_asset_references(%s, %s) failed: %s", asset_id, asset_type, exc)

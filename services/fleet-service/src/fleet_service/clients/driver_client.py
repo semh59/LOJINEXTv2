@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 
-from fleet_service.auth import sign_service_token
+from fleet_service.auth import issue_service_token
 from fleet_service.config import settings
 from fleet_service.errors import DependencyUnavailableError
 
@@ -66,15 +66,16 @@ def _record_failure() -> None:
 
 
 async def validate_driver(driver_id: str) -> dict[str, Any]:
-    """Call driver-service /internal/v1/drivers/{id}/validate.
+    """Call driver-service eligibility check for a single driver ID.
 
-    Returns the JSON body (always 200 from driver-service).
-    Raises DependencyUnavailableError on failure / circuit-open.
+    Returns a normalized single-driver result payload.
+    Raises DependencyUnavailableError on failure or circuit-open.
     """
     _check_breaker()
 
-    url = f"{settings.driver_service_base_url}/internal/v1/drivers/{driver_id}/validate"
-    token = sign_service_token(settings.driver_service_jwt_secret, "fleet-to-driver")
+    url = f"{settings.driver_service_base_url}/internal/v1/drivers/eligibility/check"
+    token = await issue_service_token(audience="driver-service")
+    payload = {"driver_ids": [driver_id]}
 
     try:
         async with httpx.AsyncClient(
@@ -85,10 +86,23 @@ async def validate_driver(driver_id: str) -> dict[str, Any]:
                 pool=settings.http_total_timeout,
             ),
         ) as client:
-            resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+            resp = await client.post(url, json=payload, headers={"Authorization": f"Bearer {token}"})
             resp.raise_for_status()
+            data = resp.json()
+            items = data.get("items", [])
+            if not isinstance(items, list) or not items:
+                raise ValueError("Driver eligibility response did not include items.")
+            item = items[0]
+            if not isinstance(item, dict):
+                raise ValueError("Driver eligibility response item was not an object.")
             _record_success()
-            return resp.json()
+            return {
+                "driver_id": driver_id,
+                "exists": bool(item.get("exists", False)),
+                "status": item.get("status"),
+                "lifecycle_state": item.get("lifecycle_state"),
+                "is_assignable": bool(item.get("is_assignable", False)),
+            }
     except Exception as exc:
         _record_failure()
         logger.error("driver-client validate_driver(%s) failed: %s", driver_id, exc)

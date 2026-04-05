@@ -19,8 +19,8 @@ from ulid import ULID
 
 from driver_service.auth import (
     AuthContext,
-    admin_or_internal_auth_dependency,
-    generate_internal_service_token,
+    internal_service_auth_dependency,
+    issue_internal_service_token,
 )
 from driver_service.config import settings
 from driver_service.database import get_session
@@ -75,12 +75,13 @@ async def _check_trip_references(driver_id: str) -> bool:
 
     Returns True if safe to delete (no active trips), False if blocked.
     """
-    token = generate_internal_service_token()
-    url = f"{settings.trip_service_base_url}/internal/v1/trips/driver-check/{driver_id}"
+    token = await issue_internal_service_token(audience="trip-service")
+    url = f"{settings.trip_service_base_url}/internal/v1/assets/reference-check"
+    payload = {"asset_id": driver_id, "asset_type": "DRIVER"}
 
     try:
         async with httpx.AsyncClient(timeout=settings.dependency_timeout_seconds) as client:
-            resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+            resp = await client.post(url, json=payload, headers={"Authorization": f"Bearer {token}"})
             if resp.status_code == 200:
                 data = resp.json()
                 # is_referenced=True means there ARE active trips, so NOT safe to delete
@@ -103,7 +104,7 @@ async def _check_trip_references(driver_id: str) -> bool:
 async def hard_delete_driver(
     driver_id: str,
     request: Request,
-    auth: AuthContext = Depends(admin_or_internal_auth_dependency),
+    auth: AuthContext = Depends(internal_service_auth_dependency),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Permanently delete a driver record (spec §3.14).
@@ -174,7 +175,7 @@ async def hard_delete_driver(
 async def merge_drivers(
     body: MergeDriversRequest,
     request: Request,
-    auth: AuthContext = Depends(admin_or_internal_auth_dependency),
+    auth: AuthContext = Depends(internal_service_auth_dependency),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Merge a source driver into a target driver (spec §3.15).

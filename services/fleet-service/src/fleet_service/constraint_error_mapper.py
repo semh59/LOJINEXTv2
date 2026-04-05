@@ -43,6 +43,8 @@ def map_integrity_error(exc: IntegrityError, aggregate_type: str = "VEHICLE") ->
     # SQLSTATE 23P01 — exclusion constraint violation (spec window overlap)
     if pg_code == "23P01":
         return SpecVersionOverlapError()
+    if pg_code == "23514" and ("chk_fleet_vspec_window" in orig or "chk_fleet_tspec_window" in orig):
+        return SpecVersionOverlapError()
 
     # SQLSTATE 23505 — unique constraint violation
     if pg_code == "23505":

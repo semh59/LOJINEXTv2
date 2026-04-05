@@ -1,5 +1,7 @@
 """Application configuration via environment variables."""
 
+import os
+
 from typing import Literal
 
 from pydantic_settings import BaseSettings
@@ -25,6 +27,15 @@ class Settings(BaseSettings):
 
     auth_jwt_secret: str = DEFAULT_AUTH_JWT_SECRET
     auth_jwt_algorithm: str = "HS256"
+    auth_issuer: str = ""
+    auth_audience: str = ""
+    auth_public_key: str = ""
+    auth_private_key: str = ""
+    auth_jwks_url: str = ""
+    auth_jwks_cache_ttl_seconds: int = 300
+    auth_service_token_url: str = ""
+    auth_service_client_id: str = "location-service"
+    auth_service_client_secret: str = ""
 
     mapbox_api_key: str = ""
     mapbox_directions_base_url: str = DEFAULT_MAPBOX_DIRECTIONS_BASE_URL
@@ -64,6 +75,11 @@ class Settings(BaseSettings):
     run_stuck_sla_minutes: int = 30
 
     @property
+    def resolved_auth_jwt_secret(self) -> str:
+        """Return the recovery-time shared secret if set, otherwise the local auth secret."""
+        return os.getenv("PLATFORM_JWT_SECRET") or self.auth_jwt_secret
+
+    @property
     def provider_timeout_seconds(self) -> float:
         """Return the provider timeout in seconds for HTTPX clients."""
         return max(self.provider_timeout_ms, 1) / 1000.0
@@ -80,8 +96,15 @@ def validate_prod_settings(current: Settings) -> None:
         return
 
     errors: list[str] = []
-    if not current.auth_jwt_secret or current.auth_jwt_secret == DEFAULT_AUTH_JWT_SECRET:
+    if current.auth_jwt_algorithm.upper().startswith("HS") and (
+        not current.resolved_auth_jwt_secret or current.resolved_auth_jwt_secret == DEFAULT_AUTH_JWT_SECRET
+    ):
         errors.append("LOCATION_AUTH_JWT_SECRET must be set to a non-default value in prod.")
+    if current.auth_jwt_algorithm.upper().startswith("RS"):
+        if not current.auth_jwks_url and not current.auth_public_key:
+            errors.append("LOCATION_AUTH_JWKS_URL or LOCATION_AUTH_PUBLIC_KEY must be set for RS* auth in prod.")
+        if current.auth_private_key:
+            errors.append("LOCATION_AUTH_PRIVATE_KEY must not be set in prod; signing belongs to identity-service.")
     if not current.database_url or current.database_url == DEFAULT_DATABASE_URL:
         errors.append("LOCATION_DATABASE_URL must be set to a non-default value in prod.")
     if not current.mapbox_api_key:

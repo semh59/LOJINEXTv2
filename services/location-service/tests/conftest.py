@@ -31,7 +31,7 @@ settings.enable_ors_validation = False
 
 
 def _token(payload: dict[str, str]) -> str:
-    return jwt.encode(payload, settings.auth_jwt_secret, algorithm=settings.auth_jwt_algorithm)
+    return jwt.encode(payload, settings.resolved_auth_jwt_secret, algorithm=settings.auth_jwt_algorithm)
 
 
 def _bearer_headers(payload: dict[str, str]) -> dict[str, str]:

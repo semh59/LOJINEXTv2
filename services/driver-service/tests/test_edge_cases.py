@@ -77,7 +77,9 @@ async def test_reactivate_conflict(client: AsyncClient, auth_admin: dict[str, st
 
 
 @pytest.mark.asyncio
-async def test_hard_delete_blocked(client: AsyncClient, auth_admin: dict[str, str], monkeypatch):
+async def test_hard_delete_blocked(
+    client: AsyncClient, auth_admin: dict[str, str], auth_internal: dict[str, str], monkeypatch
+):
     """Edge Case 31: Hard delete blocked by trips."""
     from unittest.mock import patch
 
@@ -113,14 +115,16 @@ async def test_hard_delete_blocked(client: AsyncClient, auth_admin: dict[str, st
 
     with patch("httpx.AsyncClient.get", return_value=mock_response):
         # Attempt hard delete
-        hd_resp = await client.post(f"/internal/v1/drivers/{driver_id}/hard-delete", headers=auth_admin)
+        hd_resp = await client.post(f"/internal/v1/drivers/{driver_id}/hard-delete", headers=auth_internal)
 
     assert hd_resp.status_code == 409
     assert hd_resp.json()["code"] == "DRIVER_HARD_DELETE_BLOCKED_BY_HISTORY"
 
 
 @pytest.mark.asyncio
-async def test_merge_disabled_by_flag(client: AsyncClient, auth_admin: dict[str, str], monkeypatch):
+async def test_merge_disabled_by_flag(
+    client: AsyncClient, auth_admin: dict[str, str], auth_internal: dict[str, str], monkeypatch
+):
     """Edge Case 32: Merge disabled -> error."""
     # Disable via env
     monkeypatch.setenv("ENABLE_MERGE_ENDPOINT", "false")
@@ -132,7 +136,7 @@ async def test_merge_disabled_by_flag(client: AsyncClient, auth_admin: dict[str,
     resp = await client.post(
         "/internal/v1/drivers/merge",
         json={"source_driver_id": "A", "target_driver_id": "B", "reason": "test"},
-        headers=auth_admin,
+        headers=auth_internal,
     )
     assert resp.status_code == 403
     assert resp.json()["code"] == "DRIVER_FORBIDDEN"

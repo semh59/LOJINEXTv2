@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import time
 
+import jwt
 import pytest
 from httpx import AsyncClient
 
@@ -16,6 +18,17 @@ from tests.conftest import (
 )
 from trip_service.config import settings
 from trip_service.worker_heartbeats import record_worker_heartbeat
+
+
+def _internal_service_headers(service_name: str) -> dict[str, str]:
+    """Build internal service headers for trip-service contract tests."""
+    now = int(time.time())
+    token = jwt.encode(
+        {"sub": service_name, "role": "SERVICE", "service": service_name, "iat": now, "exp": now + 300},
+        settings.resolved_auth_jwt_secret,
+        algorithm=settings.auth_jwt_algorithm,
+    )
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.mark.asyncio
@@ -137,6 +150,75 @@ async def test_excel_service_token_is_required_for_export_feed(client: AsyncClie
 
 
 @pytest.mark.asyncio
+async def test_internal_reference_endpoints_reject_unknown_service_tokens(client: AsyncClient):
+    response = await client.post(
+        "/internal/v1/assets/reference-check",
+        json={"asset_type": "DRIVER", "asset_id": "driver-001"},
+        headers=_internal_service_headers("rogue-service"),
+    )
+    assert response.status_code == 403
+    assert response.json()["code"] == "TRIP_FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_internal_reference_endpoints_reject_admin_tokens(client: AsyncClient):
+    response = await client.post(
+        "/internal/v1/assets/reference-check",
+        json={"asset_type": "DRIVER", "asset_id": "driver-001"},
+        headers=ADMIN_HEADERS,
+    )
+    assert response.status_code == 403
+    assert response.json()["code"] == "TRIP_FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_internal_asset_reference_endpoints_report_driver_vehicle_and_trailer_usage(client: AsyncClient):
+    created = await client.post(
+        "/api/v1/trips",
+        json=make_manual_trip_payload(trip_no="TR-REF-CHECK", trailer_id="trailer-001"),
+        headers=ADMIN_HEADERS,
+    )
+    assert created.status_code == 201
+
+    driver_response = await client.get(
+        "/internal/v1/trips/driver-check/driver-001",
+        headers=_internal_service_headers("driver-service"),
+    )
+    assert driver_response.status_code == 200
+    assert driver_response.json() == {
+        "driver_id": "driver-001",
+        "is_referenced": True,
+        "active_trip_count": 1,
+    }
+
+    vehicle_response = await client.post(
+        "/internal/v1/assets/reference-check",
+        json={"asset_type": "VEHICLE", "asset_id": "vehicle-001"},
+        headers=_internal_service_headers("fleet-service"),
+    )
+    assert vehicle_response.status_code == 200
+    assert vehicle_response.json() == {
+        "asset_type": "VEHICLE",
+        "asset_id": "vehicle-001",
+        "is_referenced": True,
+        "active_trip_count": 1,
+    }
+
+    trailer_response = await client.post(
+        "/internal/v1/assets/reference-check",
+        json={"asset_type": "TRAILER", "asset_id": "trailer-001"},
+        headers=_internal_service_headers("fleet-service"),
+    )
+    assert trailer_response.status_code == 200
+    assert trailer_response.json() == {
+        "asset_type": "TRAILER",
+        "asset_id": "trailer-001",
+        "is_referenced": True,
+        "active_trip_count": 1,
+    }
+
+
+@pytest.mark.asyncio
 async def test_metrics_endpoint_exposes_prometheus_payload(client: AsyncClient):
     await client.get("/health")
 
@@ -156,4 +238,31 @@ async def test_readiness_requires_cleanup_worker_heartbeat(client: AsyncClient):
     response = await client.get("/ready")
 
     assert response.status_code == 503
+    assert response.json()["status"] == "not_ready"
+    assert response.json()["checks"]["auth_verify"] == "ok"
+    assert response.json()["checks"]["auth_outbound"] == "ok"
     assert response.json()["checks"]["cleanup_worker"] == "stale"
+    assert response.json()["checks"]["broker"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_readiness_allows_cold_outbound_auth(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("trip_service.routers.health.auth_outbound_status", lambda: "cold")
+
+    response = await client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
+    assert response.json()["checks"]["auth_outbound"] == "cold"
+    assert response.json()["checks"]["broker"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_readiness_fails_when_outbound_auth_is_invalid(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("trip_service.routers.health.auth_outbound_status", lambda: "fail")
+
+    response = await client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json()["status"] == "not_ready"
+    assert response.json()["checks"]["auth_outbound"] == "fail"

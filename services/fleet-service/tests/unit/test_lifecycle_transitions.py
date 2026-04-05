@@ -24,7 +24,24 @@ def auth_context():
 @pytest.fixture
 def active_vehicle():
     return FleetVehicle(
-        vehicle_id="01H1234567890ABCDEFGHJKMNP", status=MasterStatus.ACTIVE, row_version=1, soft_deleted_at_utc=None
+        vehicle_id="01H1234567890ABCDEFGHJKMNP",
+        asset_code="V-UNIT-001",
+        plate_raw_current="34 UNIT 01",
+        normalized_plate_current="34UNIT01",
+        brand="Mercedes",
+        model="Actros",
+        model_year=2024,
+        ownership_type="OWNED",
+        status=MasterStatus.ACTIVE,
+        row_version=1,
+        spec_stream_version=0,
+        created_at_utc=datetime.datetime.now(datetime.UTC).replace(tzinfo=None),
+        created_by_actor_type=ActorType.ADMIN,
+        created_by_actor_id="test-admin",
+        updated_at_utc=datetime.datetime.now(datetime.UTC).replace(tzinfo=None),
+        updated_by_actor_type=ActorType.ADMIN,
+        updated_by_actor_id="test-admin",
+        soft_deleted_at_utc=None,
     )
 
 
@@ -58,7 +75,7 @@ async def test_transition_active_to_inactive_success(active_vehicle, auth_contex
 
         assert active_vehicle.status == MasterStatus.INACTIVE
         assert active_vehicle.row_version == 2
-        assert "VEHICLE" in new_etag
+        assert new_etag.startswith('W/"vehicle-')
 
 
 @pytest.mark.asyncio
@@ -100,7 +117,7 @@ async def test_transition_invalid_source_state(active_vehicle, auth_context):
                 active_vehicle.vehicle_id,
                 "reason",
                 auth_context,
-                target_status=MasterStatus.ACTIVE,  # Target is same as current, but valid_from doesn't match
+                target_status=MasterStatus.INACTIVE,
                 valid_from={MasterStatus.INACTIVE},  # It must be INACTIVE first
                 event_name="test.event",
                 if_match=etag,

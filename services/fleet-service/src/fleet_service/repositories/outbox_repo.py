@@ -7,7 +7,15 @@ import datetime
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fleet_service.config import settings
 from fleet_service.models import FleetOutbox
+from fleet_service.timestamps import to_utc_naive, utc_now_naive
+
+
+def _claim_deadline(now: datetime.datetime) -> datetime.datetime:
+    """Return the retry visibility timeout used when a batch is claimed."""
+    claim_window_seconds = max(settings.outbox_poll_interval_seconds * 3, 15)
+    return now + datetime.timedelta(seconds=claim_window_seconds)
 
 
 async def insert_outbox_event(session: AsyncSession, event: FleetOutbox) -> None:
@@ -43,7 +51,9 @@ async def claim_batch(
     Only rows with next_attempt_at_utc <= now and status in (PENDING, FAILED).
     """
     if now is None:
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = utc_now_naive()
+    else:
+        now = to_utc_naive(now)
     stmt = (
         select(FleetOutbox)
         .where(
@@ -55,13 +65,26 @@ async def claim_batch(
         .with_for_update(skip_locked=True)
     )
     result = await session.execute(stmt)
-    return list(result.scalars().all())
+    rows = list(result.scalars().all())
+    if not rows:
+        return rows
+
+    claimed_until = _claim_deadline(now)
+    row_ids = [row.outbox_id for row in rows]
+    await session.execute(
+        update(FleetOutbox)
+        .where(FleetOutbox.outbox_id.in_(row_ids))
+        .values(next_attempt_at_utc=claimed_until)
+    )
+    return rows
 
 
 async def mark_published(session: AsyncSession, outbox_id: str, now: datetime.datetime | None = None) -> None:
     """Mark an outbox row as PUBLISHED."""
     if now is None:
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = utc_now_naive()
+    else:
+        now = to_utc_naive(now)
     stmt = (
         update(FleetOutbox)
         .where(FleetOutbox.outbox_id == outbox_id)
@@ -78,6 +101,7 @@ async def mark_failed(
     next_attempt_at: datetime.datetime,
 ) -> None:
     """Mark an outbox row as FAILED with error details and next retry time."""
+    normalized_next_attempt_at = to_utc_naive(next_attempt_at)
     stmt = (
         update(FleetOutbox)
         .where(FleetOutbox.outbox_id == outbox_id)
@@ -86,7 +110,7 @@ async def mark_failed(
             attempt_count=FleetOutbox.attempt_count + 1,
             last_error_code=error_code,
             last_error_message=error_message,
-            next_attempt_at_utc=next_attempt_at,
+            next_attempt_at_utc=normalized_next_attempt_at,
         )
     )
     await session.execute(stmt)

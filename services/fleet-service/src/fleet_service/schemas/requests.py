@@ -156,7 +156,7 @@ class TripCompatRequest(BaseModel):
     """POST /internal/v1/trip-references/validate (Section 9)."""
 
     driver_id: str = Field(..., min_length=1)
-    vehicle_id: str = Field(..., min_length=1)
+    vehicle_id: str | None = Field(None, min_length=1)
     trailer_id: str | None = None
 
 

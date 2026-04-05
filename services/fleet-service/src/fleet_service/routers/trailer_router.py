@@ -11,6 +11,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Header, Query, Response
 
 from fleet_service.auth import AuthContext, admin_auth, super_admin_auth
+from fleet_service.clients import trip_client
 from fleet_service.database import AsyncSessionDep
 from fleet_service.schemas.requests import (
     HardDeleteRequest,
@@ -237,6 +238,7 @@ async def hard_delete_trailer(
         if_match=if_match,
         request_id=x_request_id,
         correlation_id=x_correlation_id,
+        trip_reference_checker=trip_client.check_asset_references,
     )
     await session.commit()
     return HardDeleteResponse(**result)
