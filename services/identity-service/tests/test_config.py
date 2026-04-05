@@ -6,8 +6,14 @@ from identity_service.config import Settings, validate_prod_settings
 
 
 def test_service_client_secret_env_name_normalizes_dashes() -> None:
-    assert Settings.service_client_secret_env_name("trip-service") == "IDENTITY_SERVICE_CLIENT_SECRET__TRIP_SERVICE"
-    assert Settings.service_client_secret_env_name("fleet-service") == "IDENTITY_SERVICE_CLIENT_SECRET__FLEET_SERVICE"
+    assert (
+        Settings.service_client_secret_env_name("trip-service")
+        == "IDENTITY_SERVICE_CLIENT_SECRET__TRIP_SERVICE"
+    )
+    assert (
+        Settings.service_client_secret_env_name("fleet-service")
+        == "IDENTITY_SERVICE_CLIENT_SECRET__FLEET_SERVICE"
+    )
 
 
 def test_validate_prod_settings_rejects_json_bootstrap() -> None:
@@ -24,5 +30,8 @@ def test_validate_prod_settings_rejects_json_bootstrap() -> None:
         key_encryption_key_version="prod-v1",
     )
 
-    with pytest.raises(ValueError, match="IDENTITY_BOOTSTRAP_SERVICE_CLIENTS_JSON is not allowed in prod."):
+    with pytest.raises(
+        ValueError,
+        match="IDENTITY_BOOTSTRAP_SERVICE_CLIENTS_JSON is not allowed in prod.",
+    ):
         validate_prod_settings(settings)

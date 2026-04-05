@@ -34,9 +34,11 @@ class SortContract:
 
 
 def _validation(field: str, message: str) -> Exception:
-    return request_validation_error([
-        {"field": field, "message": message, "type": "value_error"},
-    ])
+    return request_validation_error(
+        [
+            {"field": field, "message": message, "type": "value_error"},
+        ]
+    )
 
 
 def resolve_pagination(

@@ -46,7 +46,7 @@ x-trip-common: &trip-common
     TRIP_AUTH_SERVICE_TOKEN_URL: http://identity-api:8105/auth/v1/token/service
     TRIP_AUTH_SERVICE_CLIENT_ID: trip-service
     TRIP_AUTH_SERVICE_CLIENT_SECRET: ${TRIP_SERVICE_CLIENT_SECRET:?TRIP_SERVICE_CLIENT_SECRET is required}
-    TRIP_ALLOW_PLAINTEXT_IN_PROD: ${TRIP_ALLOW_PLAINTEXT_IN_PROD:-true}
+    TRIP_ALLOW_PLAINTEXT_IN_PROD: ${TRIP_ALLOW_PLAINTEXT_IN_PROD:-false}
   depends_on:
     postgres:
       condition: service_healthy
@@ -97,7 +97,7 @@ x-driver-common: &driver-common
     DRIVER_AUTH_SERVICE_TOKEN_URL: http://identity-api:8105/auth/v1/token/service
     DRIVER_AUTH_SERVICE_CLIENT_ID: driver-service
     DRIVER_AUTH_SERVICE_CLIENT_SECRET: ${DRIVER_SERVICE_CLIENT_SECRET:?DRIVER_SERVICE_CLIENT_SECRET is required}
-    DRIVER_ALLOW_PLAINTEXT_IN_PROD: ${DRIVER_ALLOW_PLAINTEXT_IN_PROD:-true}
+    DRIVER_ALLOW_PLAINTEXT_IN_PROD: ${DRIVER_ALLOW_PLAINTEXT_IN_PROD:-false}
   depends_on:
     postgres:
       condition: service_healthy
@@ -128,7 +128,7 @@ x-fleet-common: &fleet-common
     FLEET_AUTH_SERVICE_TOKEN_URL: http://identity-api:8105/auth/v1/token/service
     FLEET_AUTH_SERVICE_CLIENT_ID: fleet-service
     FLEET_AUTH_SERVICE_CLIENT_SECRET: ${FLEET_SERVICE_CLIENT_SECRET:?FLEET_SERVICE_CLIENT_SECRET is required}
-    FLEET_ALLOW_PLAINTEXT_IN_PROD: ${FLEET_ALLOW_PLAINTEXT_IN_PROD:-true}
+    FLEET_ALLOW_PLAINTEXT_IN_PROD: ${FLEET_ALLOW_PLAINTEXT_IN_PROD:-false}
   depends_on:
     postgres:
       condition: service_healthy

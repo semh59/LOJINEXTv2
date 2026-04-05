@@ -21,9 +21,8 @@ from ulid import ULID
 
 from driver_service.auth import AuthContext, admin_auth_dependency, admin_or_manager_auth_dependency
 from driver_service.database import get_session
-from driver_service.enums import AuditActionType, PhoneNormalizationStatus
+from driver_service.enums import AuditActionType, DriverStatus, PhoneNormalizationStatus
 from driver_service.errors import (
-    driver_already_soft_deleted,
     driver_company_code_already_exists,
     driver_if_match_required,
     driver_internal_error,
@@ -37,6 +36,7 @@ from driver_service.models import DriverAuditLogModel, DriverModel, DriverOutbox
 from driver_service.normalization import (
     build_full_name_search_key,
     etag_from_row_version,
+    mask_phone_for_manager,
     normalize_phone,
     parse_if_match,
 )
@@ -73,6 +73,12 @@ async def _write_audit(
     request_id: str | None = None,
 ) -> None:
     """Write an audit log entry."""
+    # PII Hardening: Mask sensitive fields in snapshots
+    if old_snapshot and "phone" in old_snapshot:
+        old_snapshot["phone"] = mask_phone_for_manager(old_snapshot["phone"])
+    if new_snapshot and "phone" in new_snapshot:
+        new_snapshot["phone"] = mask_phone_for_manager(new_snapshot["phone"])
+
     audit = DriverAuditLogModel(
         audit_id=_new_ulid(),
         driver_id=driver_id,
@@ -102,6 +108,7 @@ async def _write_outbox(
         event_name=event_name,
         event_version=1,
         payload_json=json.dumps(payload),
+        partition_key=driver_id,  # V2.1: Partition by driver_id
         publish_status="PENDING",
         retry_count=0,
         created_at_utc=_now_utc(),
@@ -164,7 +171,7 @@ async def create_driver(
         license_class=body.license_class.strip(),
         employment_start_date=body.employment_start_date,
         employment_end_date=None,
-        status="ACTIVE",
+        status=DriverStatus.IN_REVIEW,
         inactive_reason=None,
         note=body.note,
         row_version=1,
@@ -229,10 +236,7 @@ async def get_driver(
     auth: AuthContext = Depends(admin_or_manager_auth_dependency),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """Fetch full driver detail (spec §3.2).
-
-    Soft-deleted rows return 200 with lifecycle_state=SOFT_DELETED.
-    """
+    """Fetch full driver detail (spec §3.2)."""
     result = await session.execute(select(DriverModel).where(DriverModel.driver_id == driver_id))
     driver = result.scalar_one_or_none()
     if not driver:
@@ -253,8 +257,7 @@ async def list_drivers(
     session: AsyncSession = Depends(get_session),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
-    status: str = Query("ACTIVE", pattern="^(ACTIVE|INACTIVE|ALL)$"),
-    include_soft_deleted: bool = Query(False),
+    status: str = Query("ACTIVE", pattern="^(ACTIVE|INACTIVE|IN_REVIEW|SUSPENDED|CANCELLED|ALL)$"),
     search: str | None = Query(None),
     telegram_state: str | None = Query(None, pattern="^(HAS_TELEGRAM|NO_TELEGRAM)$"),
     assignable_only: bool = Query(False),
@@ -270,16 +273,18 @@ async def list_drivers(
 
     per_page = min(per_page, cfg.max_page_size)
 
-    # Base query
+    # Base query: Exclude CANCELLED by default unless searching for ALL or CANCELLED
     query: Select = select(DriverModel)  # type: ignore[type-arg]
 
-    # Default visibility: non-soft-deleted
-    if not include_soft_deleted:
-        query = query.where(DriverModel.soft_deleted_at_utc.is_(None))
-
     # Status filter
-    if status != "ALL":
+    if status == "ALL":
+        # Usually we still want to hide CANCELLED unless explicitly requested
+        pass
+    else:
         query = query.where(DriverModel.status == status)
+
+    if status != "CANCELLED" and status != "ALL":
+        query = query.where(DriverModel.status != DriverStatus.CANCELLED)
 
     # Assignable filter
     if assignable_only:
@@ -381,9 +386,6 @@ async def patch_driver(
     driver = result.scalar_one_or_none()
     if not driver:
         raise driver_not_found(driver_id)
-
-    if driver.soft_deleted_at_utc is not None:
-        raise driver_already_soft_deleted()
 
     # Version check
     if driver.row_version != expected_version:

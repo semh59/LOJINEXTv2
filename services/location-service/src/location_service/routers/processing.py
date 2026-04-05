@@ -182,12 +182,16 @@ async def list_pair_processing_runs(
     total_items = (await db.execute(select(func.count()).select_from(stmt.order_by(None).subquery()))).scalar() or 0
     total_pages = (total_items + pagination.per_page - 1) // pagination.per_page if total_items else 0
     runs = (
-        await db.execute(
-            stmt.order_by(order_by, ProcessingRun.processing_run_id.desc())
-            .offset(pagination.offset)
-            .limit(pagination.per_page)
+        (
+            await db.execute(
+                stmt.order_by(order_by, ProcessingRun.processing_run_id.desc())
+                .offset(pagination.offset)
+                .limit(pagination.per_page)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     return {
         "data": [_serialize_run(run, pair) for run in runs],

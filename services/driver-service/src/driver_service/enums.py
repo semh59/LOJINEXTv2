@@ -4,18 +4,13 @@ import enum
 
 
 class DriverStatus(str, enum.Enum):
-    """Persisted driver status (DB column)."""
+    """Production driver lifecycle status."""
 
     ACTIVE = "ACTIVE"
     INACTIVE = "INACTIVE"
-
-
-class LifecycleState(str, enum.Enum):
-    """Derived response-only field; never stored in DB."""
-
-    ACTIVE = "ACTIVE"
-    INACTIVE = "INACTIVE"
-    SOFT_DELETED = "SOFT_DELETED"
+    IN_REVIEW = "IN_REVIEW"
+    SUSPENDED = "SUSPENDED"
+    CANCELLED = "CANCELLED"
 
 
 class PhoneNormalizationStatus(str, enum.Enum):

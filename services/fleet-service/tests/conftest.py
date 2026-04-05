@@ -1,6 +1,7 @@
 """Shared test fixtures for Fleet Service tests."""
 
 from __future__ import annotations
+
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -9,21 +10,18 @@ from typing import Any
 import jwt
 import pytest
 import pytest_asyncio
-from alembic import command
 from alembic.config import Config
 from fastapi import FastAPI
-from fastapi.exceptions import RequestValidationError
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 from testcontainers.postgres import PostgresContainer
 
+from alembic import command
+from fleet_service.broker import NoOpBroker
 from fleet_service.config import settings
 from fleet_service.database import get_session
-from fleet_service.errors import ProblemDetailError, problem_detail_handler, validation_exception_handler
-from fleet_service.middleware import PrometheusMiddleware, RequestIdMiddleware
-from fleet_service.broker import NoOpBroker
 from fleet_service.worker_heartbeats import record_worker_heartbeat
 
 TRUNCATE_TABLES = (

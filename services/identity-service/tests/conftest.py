@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import asyncio
 from pathlib import Path
@@ -23,7 +22,9 @@ os.environ["IDENTITY_KEY_ENCRYPTION_KEY_B64"] = os.getenv(
     "IDENTITY_KEY_ENCRYPTION_KEY_B64",
     "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
 )
-os.environ["IDENTITY_KEY_ENCRYPTION_KEY_VERSION"] = os.getenv("IDENTITY_KEY_ENCRYPTION_KEY_VERSION", "test-v1")
+os.environ["IDENTITY_KEY_ENCRYPTION_KEY_VERSION"] = os.getenv(
+    "IDENTITY_KEY_ENCRYPTION_KEY_VERSION", "test-v1"
+)
 
 from identity_service.database import async_session_factory, engine  # noqa: E402
 from identity_service.main import app  # noqa: E402
@@ -54,5 +55,7 @@ async def reset_db() -> None:
 @pytest.fixture
 async def client() -> httpx.AsyncClient:
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as async_client:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as async_client:
         yield async_client

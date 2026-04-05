@@ -12,6 +12,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from fastapi import Header
+
+from fleet_service.config import settings
+from fleet_service.domain.enums import ActorType
+from fleet_service.errors import ProblemDetailError
 from platform_auth import (
     AuthSettings,
     ServiceTokenAcquisitionError,
@@ -20,12 +24,8 @@ from platform_auth import (
     TokenMissingError,
     decode_bearer_token,
 )
-from platform_auth.token_factory import ServiceTokenFactory
 from platform_auth.key_provider import build_verification_provider
-
-from fleet_service.config import settings
-from fleet_service.domain.enums import ActorType
-from fleet_service.errors import ProblemDetailError
+from platform_auth.token_factory import ServiceTokenFactory
 
 _TRIP_SERVICE_ALLOWLIST = {"trip-service"}
 _SERVICE_TOKEN_CACHE = ServiceTokenCache()
@@ -72,7 +72,9 @@ def _platform_auth_settings(*, audience: str | None = None) -> AuthSettings:
     effective_audience = settings.auth_audience or audience or None
     return AuthSettings(
         algorithm=settings.auth_jwt_algorithm,
-        shared_secret=settings.resolved_auth_jwt_secret if settings.auth_jwt_algorithm.upper().startswith("HS") else None,
+        shared_secret=(
+            settings.resolved_auth_jwt_secret if settings.auth_jwt_algorithm.upper().startswith("HS") else None
+        ),
         issuer=settings.auth_issuer or None,
         audience=effective_audience,
         public_key=settings.auth_public_key or None,
@@ -162,7 +164,7 @@ def require_admin_token(authorization: str | None) -> AuthContext:
 
     claims = _decode_claims(authorization)
     role = claims.role
-    if role not in {ActorType.ADMIN, ActorType.SUPER_ADMIN}:
+    if role not in {ActorType.ADMIN, ActorType.MANAGER, ActorType.SUPER_ADMIN}:
         raise InsufficientRoleError("ADMIN")
     actor_id = claims.sub.strip()
     if not actor_id:

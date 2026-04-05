@@ -22,7 +22,9 @@ async def current_user(
         token = parse_bearer_token(authorization)
         claims = await decode_access_token(session, token)
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=401, detail="Invalid or expired token.") from exc
+        raise HTTPException(
+            status_code=401, detail="Invalid or expired token."
+        ) from exc
 
     user = await session.get(IdentityUserModel, claims.sub)
     if user is None or not user.is_active:

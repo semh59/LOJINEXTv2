@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import re
 from typing import Annotated
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from ulid import ULID
 
+from location_service.audit_helpers import (
+    _write_audit,
+    _write_outbox,
+    serialize_point,
+)
+from location_service.auth import user_auth_dependency, AuthContext
 from location_service.database import get_db
 from location_service.domain.normalization import normalize_en, normalize_tr
 from location_service.enums import PairStatus
@@ -28,9 +34,16 @@ from location_service.errors import (
 from location_service.middleware import check_version_match, set_etag
 from location_service.models import LocationPoint, RoutePair
 from location_service.query_contracts import build_order_by, resolve_pagination, resolve_sort
-from location_service.schemas import PaginationMeta, PointCreate, PointListResponse, PointResponse, PointUpdate
+from location_service.schemas import (
+    PaginationMeta,
+    PointCreate,
+    PointListResponse,
+    PointResponse,
+    PointUpdate,
+)
 
-router = APIRouter(prefix="/v1/points", tags=["points"])
+router = APIRouter(prefix="/points", tags=["points"])
+
 
 _CODE_PATTERN = re.compile(r"^[A-Z0-9_]{2,32}$")
 _COORDINATE_CONSTRAINTS = {
@@ -124,7 +137,7 @@ async def _raise_name_conflict_if_needed(
     *,
     normalized_name_tr: str,
     normalized_name_en: str,
-    exclude_location_id: UUID | None = None,
+    exclude_location_id: str | None = None,
 ) -> None:
     stmt = select(LocationPoint).where(
         or_(
@@ -145,6 +158,7 @@ async def create_point(
     payload: PointCreate,
     response: Response,
     session: Annotated[AsyncSession, Depends(get_db)],
+    auth: Annotated[AuthContext, Depends(user_auth_dependency)],
 ) -> PointResponse:
     """Create a canonical Location Point."""
     code = _validate_code(payload.code)
@@ -167,6 +181,7 @@ async def create_point(
     )
 
     point = LocationPoint(
+        location_id=str(ULID()),
         code=code,
         name_tr=name_tr,
         name_en=name_en,
@@ -177,6 +192,28 @@ async def create_point(
         is_active=payload.is_active,
     )
     session.add(point)
+    await session.flush()
+
+    # High-fidelity audit & outbox
+    new_snapshot = serialize_point(point)
+    await _write_audit(
+        session,
+        target_type="POINT",
+        target_id=str(point.location_id),
+        action_type="CREATE",
+        actor_id=auth.actor_id if "auth" in locals() else "SYSTEM",
+        actor_role=auth.actor_type if "auth" in locals() else "ADMIN",
+        new_snapshot=new_snapshot,
+    )
+    await _write_outbox(
+        session,
+        event_name="location.point.created.v1",
+        payload={
+            "location_id": str(point.location_id),
+            "code": point.code,
+            "occurred_at_utc": new_snapshot["created_at_utc"],
+        },
+    )
 
     try:
         await session.commit()
@@ -194,7 +231,7 @@ async def create_point(
 
 @router.get("/{location_id}", response_model=PointResponse)
 async def get_point(
-    location_id: UUID,
+    location_id: str,
     response: Response,
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> PointResponse:
@@ -276,11 +313,12 @@ async def list_points(
 
 @router.patch("/{location_id}", response_model=PointResponse)
 async def update_point(
-    location_id: UUID,
+    location_id: str,
     payload: PointUpdate,
     request: Request,
     response: Response,
     session: Annotated[AsyncSession, Depends(get_db)],
+    auth: Annotated[AuthContext, Depends(user_auth_dependency)],
 ) -> PointResponse:
     """Partial update of a Location Point."""
     point = (
@@ -343,7 +381,32 @@ async def update_point(
         changed = True
 
     if changed:
+        old_snapshot = serialize_point(point)
         point.row_version += 1
+        await session.flush()
+        new_snapshot = serialize_point(point)
+
+        # High-fidelity audit & outbox
+        await _write_audit(
+            session,
+            target_type="POINT",
+            target_id=str(point.location_id),
+            action_type="UPDATE",
+            actor_id=auth.actor_id if "auth" in locals() else "SYSTEM",
+            actor_role=auth.actor_type if "auth" in locals() else "ADMIN",
+            old_snapshot=old_snapshot,
+            new_snapshot=new_snapshot,
+            request_id=request.headers.get("X-Request-ID"),
+        )
+        await _write_outbox(
+            session,
+            event_name="location.point.updated.v1",
+            payload={
+                "location_id": str(point.location_id),
+                "code": point.code,
+                "occurred_at_utc": new_snapshot["updated_at_utc"],
+            },
+        )
 
     try:
         await session.commit()

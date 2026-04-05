@@ -5,16 +5,85 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from ulid import ULID
 
 from location_service.database import async_session_factory
 from location_service.enums import DirectionCode, PairStatus, ProcessingStatus
-from location_service.models import Route, RoutePair, RouteVersion
+from location_service.models import (
+    LocationAuditLogModel,
+    LocationOutboxModel,
+    Route,
+    RoutePair,
+    RouteVersion,
+)
 
 logger = logging.getLogger(__name__)
+
+
+async def _write_audit(
+    session: AsyncSession,
+    target_type: str,
+    target_id: str,
+    action_type: str,
+    actor_id: str,
+    actor_role: str,
+    *,
+    old_snapshot: dict | None = None,
+    new_snapshot: dict | None = None,
+    request_id: str | None = None,
+) -> None:
+    audit = LocationAuditLogModel(
+        audit_id=str(ULID()),
+        target_type=target_type,
+        target_id=target_id,
+        action_type=action_type,
+        actor_id=actor_id,
+        actor_role=actor_role,
+        old_snapshot_json=old_snapshot,
+        new_snapshot_json=new_snapshot,
+        request_id=request_id,
+        created_at_utc=datetime.now(UTC),
+    )
+    session.add(audit)
+
+
+async def _write_outbox(
+    session: AsyncSession,
+    event_name: str,
+    payload: dict,
+) -> None:
+    outbox = LocationOutboxModel(
+        outbox_id=str(ULID()),
+        event_name=event_name,
+        event_version=1,
+        payload_json=payload,
+        publish_status="PENDING",
+        retry_count=0,
+        created_at_utc=datetime.now(UTC),
+        next_attempt_at_utc=datetime.now(UTC),
+    )
+    session.add(outbox)
+
+
+def serialize_pair(pair: RoutePair) -> dict[str, object]:
+    """Fallback serialization for audit snapshots when full schema-based validation is overkill or missing fields."""
+    return {
+        "route_pair_id": str(pair.route_pair_id),
+        "pair_code": pair.pair_code,
+        "pair_status": pair.pair_status,
+        "row_version": pair.row_version,
+        "forward_route_id": str(pair.forward_route_id) if pair.forward_route_id else None,
+        "reverse_route_id": str(pair.reverse_route_id) if pair.reverse_route_id else None,
+        "current_active_forward_version_no": pair.current_active_forward_version_no,
+        "current_active_reverse_version_no": pair.current_active_reverse_version_no,
+        "pending_forward_version_no": pair.pending_forward_version_no,
+        "pending_reverse_version_no": pair.pending_reverse_version_no,
+    }
 
 
 @asynccontextmanager
@@ -93,6 +162,29 @@ async def approve_route_versions(pair_id: UUID, *, session: AsyncSession | None 
         pair.pair_status = PairStatus.ACTIVE
         pair.row_version += 1
 
+        # NEW: Phase 3 Audit & Outbox
+        new_snapshot = serialize_pair(pair)
+        await _write_audit(
+            session=active_session,
+            target_type="PAIR",
+            target_id=str(pair.route_pair_id),
+            action_type="APPROVE",
+            actor_id="SYSTEM",
+            actor_role="MANAGER",
+            new_snapshot=new_snapshot,
+        )
+        await _write_outbox(
+            session=active_session,
+            event_name="location.route.activated.v1",
+            payload={
+                "pair_id": str(pair.route_pair_id),
+                "pair_code": pair.pair_code,
+                "forward_route_id": str(pair.forward_route_id),
+                "reverse_route_id": str(pair.reverse_route_id),
+                "occurred_at_utc": datetime.now(UTC).isoformat(),
+            },
+        )
+
         await active_session.commit()
         logger.info("Approved route versions for pair %s", pair_id)
         return pair
@@ -126,6 +218,25 @@ async def discard_route_versions(pair_id: UUID, *, session: AsyncSession | None 
         pair.pending_forward_version_no = None
         pair.pending_reverse_version_no = None
         pair.row_version += 1
+
+        # NEW: Phase 3 Audit & Outbox
+        await _write_audit(
+            session=active_session,
+            target_type="PAIR",
+            target_id=str(pair.route_pair_id),
+            action_type="DISCARD",
+            actor_id="SYSTEM",
+            actor_role="MANAGER",
+        )
+        await _write_outbox(
+            session=active_session,
+            event_name="location.route.discarded.v1",
+            payload={
+                "pair_id": str(pair.route_pair_id),
+                "pair_code": pair.pair_code,
+                "occurred_at_utc": datetime.now(UTC).isoformat(),
+            },
+        )
 
         await active_session.commit()
         logger.info("Discarded pending route versions for pair %s", pair_id)

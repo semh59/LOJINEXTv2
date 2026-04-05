@@ -13,7 +13,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
-from fleet_service.auth import AuthContext
 from fleet_service.constraint_error_mapper import map_integrity_error
 from fleet_service.domain.enums import (
     AggregateType,
@@ -62,8 +61,8 @@ from fleet_service.schemas.responses import (
     VehicleDetailResponse,
     VehicleListItemResponse,
 )
-from fleet_service.timestamps import utc_now_naive
-from fleet_service.timestamps import to_utc_naive
+from fleet_service.timestamps import to_utc_naive, utc_now_naive
+from platform_auth import AuthContext
 
 logger = logging.getLogger("fleet_service.vehicle_service")
 
@@ -149,57 +148,64 @@ async def create_vehicle(
         updated_by_actor_id=auth.actor_id,
     )
 
-    # Step 6: INSERT
+    # Step 6: INSERT Master & Spec
     try:
         await vehicle_repo.create_vehicle(session, vehicle)
+        if body.initial_spec is not None:
+            vehicle.spec_stream_version = 1
+            effective_from = (
+                to_utc_naive(body.initial_spec.effective_from_utc) if body.initial_spec.effective_from_utc else now
+            )
+            current_spec = FleetVehicleSpecVersion(
+                vehicle_spec_version_id=str(ULID()),
+                vehicle_id=vehicle_id,
+                version_no=1,
+                effective_from_utc=effective_from,
+                is_current=True,
+                fuel_type=body.initial_spec.fuel_type,
+                powertrain_type=body.initial_spec.powertrain_type,
+                engine_power_kw=body.initial_spec.engine_power_kw,
+                engine_displacement_l=body.initial_spec.engine_displacement_l,
+                emission_class=body.initial_spec.emission_class,
+                transmission_type=body.initial_spec.transmission_type,
+                gear_count=body.initial_spec.gear_count,
+                final_drive_ratio=body.initial_spec.final_drive_ratio,
+                axle_config=body.initial_spec.axle_config,
+                total_axle_count=body.initial_spec.total_axle_count,
+                driven_axle_count=body.initial_spec.driven_axle_count,
+                curb_weight_kg=body.initial_spec.curb_weight_kg,
+                gvwr_kg=body.initial_spec.gvwr_kg,
+                gcwr_kg=body.initial_spec.gcwr_kg,
+                payload_capacity_kg=body.initial_spec.payload_capacity_kg,
+                tractor_cab_type=body.initial_spec.tractor_cab_type,
+                roof_height_class=body.initial_spec.roof_height_class,
+                aero_package_level=body.initial_spec.aero_package_level,
+                tire_rr_class=body.initial_spec.tire_rr_class,
+                tire_type=body.initial_spec.tire_type,
+                speed_limiter_kph=body.initial_spec.speed_limiter_kph,
+                pto_present=body.initial_spec.pto_present,
+                apu_present=body.initial_spec.apu_present,
+                idle_reduction_type=body.initial_spec.idle_reduction_type,
+                first_registration_date=body.initial_spec.first_registration_date,
+                in_service_date=body.initial_spec.in_service_date,
+                change_reason=body.initial_spec.change_reason,
+                created_at_utc=now,
+                created_by_actor_type=auth.actor_type,
+                created_by_actor_id=auth.actor_id,
+            )
+            await vehicle_spec_repo.insert_spec_version(session, current_spec)
+
+        # CRITICAL: Flush to ensure DB state is stable before event generation
+        await session.flush()
     except IntegrityError as exc:
         raise map_integrity_error(exc, "VEHICLE") from exc
 
-    current_spec: FleetVehicleSpecVersion | None = None
-    if body.initial_spec is not None:
-        effective_from = to_utc_naive(body.initial_spec.effective_from_utc) if body.initial_spec.effective_from_utc else now
-        current_spec = FleetVehicleSpecVersion(
-            vehicle_spec_version_id=str(ULID()),
-            vehicle_id=vehicle_id,
-            version_no=1,
-            effective_from_utc=effective_from,
-            effective_to_utc=None,
-            is_current=True,
-            fuel_type=body.initial_spec.fuel_type,
-            powertrain_type=body.initial_spec.powertrain_type,
-            engine_power_kw=body.initial_spec.engine_power_kw,
-            engine_displacement_l=body.initial_spec.engine_displacement_l,
-            emission_class=body.initial_spec.emission_class,
-            transmission_type=body.initial_spec.transmission_type,
-            gear_count=body.initial_spec.gear_count,
-            final_drive_ratio=body.initial_spec.final_drive_ratio,
-            axle_config=body.initial_spec.axle_config,
-            total_axle_count=body.initial_spec.total_axle_count,
-            driven_axle_count=body.initial_spec.driven_axle_count,
-            curb_weight_kg=body.initial_spec.curb_weight_kg,
-            gvwr_kg=body.initial_spec.gvwr_kg,
-            gcwr_kg=body.initial_spec.gcwr_kg,
-            payload_capacity_kg=body.initial_spec.payload_capacity_kg,
-            tractor_cab_type=body.initial_spec.tractor_cab_type,
-            roof_height_class=body.initial_spec.roof_height_class,
-            aero_package_level=body.initial_spec.aero_package_level,
-            tire_rr_class=body.initial_spec.tire_rr_class,
-            tire_type=body.initial_spec.tire_type,
-            speed_limiter_kph=body.initial_spec.speed_limiter_kph,
-            pto_present=body.initial_spec.pto_present,
-            apu_present=body.initial_spec.apu_present,
-            idle_reduction_type=body.initial_spec.idle_reduction_type,
-            first_registration_date=body.initial_spec.first_registration_date,
-            in_service_date=body.initial_spec.in_service_date,
-            change_reason=body.initial_spec.change_reason,
-            created_at_utc=now,
-            created_by_actor_type=auth.actor_type,
-            created_by_actor_id=auth.actor_id,
-        )
-        await vehicle_spec_repo.insert_spec_version(session, current_spec)
-
     # Step 7: Timeline event
+    from fleet_service.services.audit_helpers import serialize_vehicle_admin
+
+    vehicle_snapshot = serialize_vehicle_admin(vehicle)
     event_id = str(ULID())
+
     timeline_event = FleetAssetTimelineEvent(
         event_id=event_id,
         aggregate_type=AggregateType.VEHICLE,
@@ -210,11 +216,11 @@ async def create_vehicle(
         request_id=request_id,
         correlation_id=correlation_id,
         occurred_at_utc=now,
-        payload_json={"vehicle_id": vehicle_id, "asset_code": body.asset_code, "plate": body.plate},
+        payload_json={"snapshot": vehicle_snapshot},
     )
     await timeline_repo.insert_timeline_event(session, timeline_event)
 
-    # Step 8: Outbox event
+    # Step 8: Outbox event (Enriched)
     outbox_event = FleetOutbox(
         outbox_id=str(ULID()),
         aggregate_type=AggregateType.VEHICLE,
@@ -230,6 +236,7 @@ async def create_vehicle(
             "row_version": 1,
             "request_id": request_id,
             "correlation_id": correlation_id,
+            "data": vehicle_snapshot,
         },
         publish_status=PublishStatus.PENDING,
         next_attempt_at_utc=now,
@@ -373,6 +380,9 @@ async def patch_vehicle(
         vehicle.plate_raw_current = body.plate
         vehicle.normalized_plate_current = new_normalized
         changes["plate"] = body.plate
+    from fleet_service.services.audit_helpers import _write_fleet_audit, serialize_vehicle_admin
+
+    old_snapshot = serialize_vehicle_admin(vehicle)
 
     if body.brand is not None:
         vehicle.brand = body.brand
@@ -417,6 +427,21 @@ async def patch_vehicle(
             occurred_at_utc=now,
             payload_json={"changes": changes, "row_version": vehicle.row_version},
         ),
+    )
+
+    # High-fidelity audit
+    await _write_fleet_audit(
+        session,
+        aggregate_type=AggregateType.VEHICLE,
+        aggregate_id=vehicle_id,
+        action_type="UPDATE",
+        actor_id=auth.actor_id,
+        actor_role=auth.actor_type,
+        old_snapshot=old_snapshot,
+        new_snapshot=serialize_vehicle_admin(vehicle),
+        changed_fields=changes,
+        reason=body.notes or f"Fields changed: {', '.join(changes.keys())}",
+        request_id=request_id,
     )
 
     # Outbox

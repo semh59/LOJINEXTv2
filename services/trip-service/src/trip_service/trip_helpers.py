@@ -9,25 +9,39 @@ from typing import Any
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from ulid import ULID
 
+from platform_auth import TokenClaims
 from trip_service.dependencies import LocationTripContext
 from trip_service.enums import TripStatus
-from trip_service.errors import trip_driver_overlap, trip_trailer_overlap, trip_vehicle_overlap
-from trip_service.models import TripTrip, TripTripDeleteAudit, TripTripEvidence
+from trip_service.errors import (
+    trip_driver_overlap,
+    trip_not_found,
+    trip_trailer_overlap,
+    trip_vehicle_overlap,
+)
+from trip_service.models import (
+    TripIdempotencyRecord,
+    TripTrip,
+    TripTripDeleteAudit,
+    TripTripEvidence,
+)
 from trip_service.schemas import EnrichmentSummary, EvidenceSummary, TripResource
+from trip_service.state_machine import TripStateMachine
 
 
 def latest_evidence(trip: TripTrip) -> TripTripEvidence | None:
-    """Return the most recent evidence row without relying on relationship order."""
-    if not trip.evidence:
+    """Return the most recent piece of evidence for this trip without lazy-loading."""
+    if "evidence" not in trip.__dict__ or not trip.evidence:
         return None
-    return max(trip.evidence, key=lambda evidence: evidence.created_at_utc)
+    return sorted(trip.evidence, key=lambda e: e.created_at_utc, reverse=True)[0]
 
 
 def trip_to_resource(trip: TripTrip) -> TripResource:
     """Map ORM model to the public trip resource contract."""
+    # Avoid lazy-loading if not already present
     enrichment_summary = None
-    if trip.enrichment:
+    if "enrichment" in trip.__dict__ and trip.enrichment:
         enrichment_summary = EnrichmentSummary(
             enrichment_status=trip.enrichment.enrichment_status,
             route_status=trip.enrichment.route_status,
@@ -107,6 +121,26 @@ def trip_is_complete(trip: TripTrip) -> bool:
     return not trip_complete_errors(trip)
 
 
+def validate_trip_transition(trip: TripTrip, next_status: TripStatus) -> None:
+    """
+    Validate that the trip can transition to the given status.
+    Raises ValueError if invalid.
+    """
+    sm = TripStateMachine(trip.status)
+    sm.transition_to(next_status)
+
+
+def transition_trip(trip: TripTrip, next_status: TripStatus) -> None:
+    """
+    Transition the trip to the next status using the state machine.
+    Updates the model status and version.
+    """
+    validate_trip_transition(trip, next_status)
+    trip.status = next_status
+    trip.version += 1
+    trip.updated_at_utc = utc_now()
+
+
 def calculate_planned_end(trip_start_utc: datetime, planned_duration_s: int) -> datetime:
     """Calculate the planned trip end timestamp from start + duration."""
     return trip_start_utc + timedelta(seconds=planned_duration_s)
@@ -165,7 +199,7 @@ async def _find_overlap(
     column = getattr(TripTrip, field_name)
     conditions = [
         column == field_value,
-        TripTrip.status.not_in((TripStatus.SOFT_DELETED, TripStatus.REJECTED)),
+        TripTrip.status.not_in((TripStatus.CANCELLED, TripStatus.REJECTED)),
         TripTrip.planned_end_utc.is_not(None),
         TripTrip.trip_datetime_utc < planned_end_utc,
         TripTrip.planned_end_utc > trip_start_utc,
@@ -235,6 +269,74 @@ async def assert_no_trip_overlap(
             raise trip_trailer_overlap(
                 f"Trailer {trailer_id} already overlaps trip {trailer_overlap.trip_no} between planned windows."
             )
+
+
+def serialize_trip_admin(trip: TripTrip) -> dict[str, Any]:
+    """Serialize a full trip aggregate for high-fidelity audit snapshots."""
+    return serialize_trip_snapshot(trip)
+
+
+async def _write_audit(
+    session: AsyncSession,
+    *,
+    trip_id: str,
+    action_type: str,
+    actor_id: str,
+    actor_role: str,
+    old_snapshot: dict[str, Any] | None = None,
+    new_snapshot: dict[str, Any] | None = None,
+    changed_fields: list[str] | None = None,
+    reason: str | None = None,
+    request_id: str | None = None,
+) -> None:
+    """Write a high-fidelity audit log entry for a trip mutation."""
+    from trip_service.models import TripAuditLogModel  # Avoid circular import
+
+    audit_id = str(ULID())
+    session.add(
+        TripAuditLogModel(
+            audit_id=audit_id,
+            trip_id=trip_id,
+            action_type=action_type,
+            old_snapshot_json=json.dumps(old_snapshot, default=str) if old_snapshot else None,
+            new_snapshot_json=json.dumps(new_snapshot, default=str) if new_snapshot else None,
+            changed_fields_json=json.dumps(changed_fields) if changed_fields else None,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            reason=reason,
+            request_id=request_id,
+            created_at_utc=utc_now(),
+        )
+    )
+
+
+def _write_outbox(
+    *,
+    trip_id: str,
+    event_name: str,
+    payload: dict[str, Any],
+) -> Any:
+    """Create an outbox event for reliable delivery via the outbox relay."""
+    from trip_service.models import TripOutbox  # Avoid circular import
+
+    return TripOutbox(
+        event_id=str(ULID()),
+        aggregate_type="TRIP",
+        aggregate_id=trip_id,
+        aggregate_version=payload.get("version", 1),
+        event_name=event_name,
+        schema_version=1,
+        payload_json=json.dumps(payload, default=str),
+        partition_key=trip_id,
+        publish_status="PENDING",
+        attempt_count=0,
+        next_attempt_at_utc=utc_now(),
+        last_error_code=None,
+        claim_token=None,
+        claim_expires_at_utc=None,
+        claimed_by_worker=None,
+        created_at_utc=utc_now(),
+    )
 
 
 def serialize_trip_snapshot(trip: TripTrip) -> dict[str, Any]:
@@ -313,3 +415,117 @@ def build_delete_audit(
 def utc_now() -> datetime:
     """Return the current timezone-aware UTC timestamp."""
     return datetime.now(UTC)
+
+
+async def _check_idempotency_key(
+    session: AsyncSession,
+    idempotency_key: str | None,
+    endpoint_fingerprint: str,
+    request_hash: str,
+) -> dict[str, Any] | None:
+    """Check if an idempotency key has already been used for this endpoint."""
+    if not idempotency_key:
+        return None
+
+    stmt = select(TripIdempotencyRecord).where(
+        and_(
+            TripIdempotencyRecord.idempotency_key == idempotency_key,
+            TripIdempotencyRecord.endpoint_fingerprint == endpoint_fingerprint,
+        )
+    )
+    result = await session.execute(stmt)
+    record = result.scalar_one_or_none()
+
+    if record:
+        # Simple hash check to ensure payload hasn't changed for the same key
+        if record.request_hash != request_hash:
+            raise ValueError("Idempotency key already used with a different request payload.")
+        return json.loads(record.response_body_json)
+    return None
+
+
+async def _save_idempotency_response(
+    session: AsyncSession,
+    *,
+    idempotency_key: str,
+    endpoint_fingerprint: str,
+    request_payload: dict[str, Any],
+    response_body: dict[str, Any],
+    status_code: int,
+) -> None:
+    """Persist the response for an idempotency key."""
+    payload_hash = hashlib.sha256(json.dumps(request_payload, sort_keys=True).encode()).hexdigest()
+    session.add(
+        TripIdempotencyRecord(
+            idempotency_key=idempotency_key,
+            endpoint_fingerprint=endpoint_fingerprint,
+            request_hash=payload_hash,
+            response_status=status_code,
+            response_body_json=json.dumps(response_body),
+            created_at_utc=utc_now(),
+            expires_at_utc=utc_now() + timedelta(hours=24),
+        )
+    )
+
+
+def get_actor_actor_role(claims: TokenClaims) -> tuple[str, str]:
+    """Extract actor ID and role from token claims."""
+    return str(claims.sub), str(claims.role)
+
+
+async def _get_trip_or_404(session: AsyncSession, trip_id: str) -> TripTrip:
+    """Fetch a trip by ID or raise a 404 NOT FOUND error."""
+    stmt = (
+        select(TripTrip)
+        .where(TripTrip.id == trip_id)
+        .outerjoin(TripTrip.enrichment)
+        .outerjoin(TripTrip.evidence)
+        .outerjoin(TripTrip.timeline)
+    )
+    result = await session.execute(stmt)
+    trip = result.unique().scalar_one_or_none()
+    if not trip:
+        raise trip_not_found(f"Trip {trip_id} not found.")
+    return trip
+
+
+def _event_payload(trip: TripTrip) -> dict[str, Any]:
+    """Generate a standard event payload for a trip."""
+    return {
+        "trip_id": trip.id,
+        "trip_no": trip.trip_no,
+        "status": trip.status,
+        "version": trip.version,
+        "updated_at_utc": (
+            trip.updated_at_utc.isoformat()
+            if hasattr(trip, "updated_at_utc") and trip.updated_at_utc
+            else utc_now().isoformat()
+        ),
+    }
+
+
+async def _classify_manual_status(auth: Any, trip_datetime_utc: datetime) -> tuple[TripStatus, str | None]:
+    """Determine initial status and review reason for a manually created trip."""
+    try:
+        from trip_service.enums import ActorType, ReviewReasonCode
+
+        if auth.role in {ActorType.MANAGER.value, ActorType.SUPER_ADMIN.value}:
+            return TripStatus.ASSIGNED, None
+        return TripStatus.PENDING_REVIEW, ReviewReasonCode.MANUAL_ENTRY
+    except Exception as e:
+        import traceback
+
+        print(f"DEBUG_STACKTRACER: {traceback.format_exc()}")
+        raise e
+
+
+def _ensure_complete_for_completion(trip: TripTrip) -> None:
+    """Raise ValueError if the trip is not complete enough for a final transition."""
+    errors = trip_complete_errors(trip)
+    if errors:
+        raise ValueError(f"Trip is incomplete: {errors}")
+
+
+def _merged_payload_hash(payload: dict[str, Any]) -> str:
+    """Generate a stable hash for a request payload."""
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()

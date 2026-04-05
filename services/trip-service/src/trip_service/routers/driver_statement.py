@@ -58,27 +58,23 @@ async def driver_statement(
 
     total_items = (await session.execute(select(func.count()).select_from(stmt.subquery()))).scalar() or 0
     trips = (
-        await session.execute(
-            stmt.order_by(TripTrip.trip_datetime_utc.asc(), TripTrip.id.asc())
-            .offset(pagination.offset)
-            .limit(pagination.per_page)
+        (
+            await session.execute(
+                stmt.order_by(TripTrip.trip_datetime_utc.asc(), TripTrip.id.asc())
+                .offset(pagination.offset)
+                .limit(pagination.per_page)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     rows: list[dict[str, Any]] = []
     for trip in trips:
         evidence = latest_evidence(trip)
         truck_plate = (evidence.normalized_truck_plate if evidence else None) or ""
-        origin_name = (
-            (evidence.origin_name_raw if evidence else None)
-            or trip.origin_name_snapshot
-            or ""
-        )
-        destination_name = (
-            (evidence.destination_name_raw if evidence else None)
-            or trip.destination_name_snapshot
-            or ""
-        )
+        origin_name = (evidence.origin_name_raw if evidence else None) or trip.origin_name_snapshot or ""
+        destination_name = (evidence.destination_name_raw if evidence else None) or trip.destination_name_snapshot or ""
 
         try:
             local_dt = utc_to_local(trip.trip_datetime_utc, trip.trip_timezone or timezone)

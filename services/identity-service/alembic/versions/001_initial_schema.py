@@ -58,19 +58,44 @@ def upgrade() -> None:
     )
     op.create_table(
         "identity_user_groups",
-        sa.Column("user_id", sa.String(length=26), sa.ForeignKey("identity_users.user_id", ondelete="CASCADE"), primary_key=True),
-        sa.Column("group_id", sa.String(length=26), sa.ForeignKey("identity_groups.group_id", ondelete="CASCADE"), primary_key=True),
+        sa.Column(
+            "user_id",
+            sa.String(length=26),
+            sa.ForeignKey("identity_users.user_id", ondelete="CASCADE"),
+            primary_key=True,
+        ),
+        sa.Column(
+            "group_id",
+            sa.String(length=26),
+            sa.ForeignKey("identity_groups.group_id", ondelete="CASCADE"),
+            primary_key=True,
+        ),
         sa.Column("assigned_at", sa.DateTime(timezone=True), nullable=False),
     )
     op.create_table(
         "identity_group_permissions",
-        sa.Column("group_id", sa.String(length=26), sa.ForeignKey("identity_groups.group_id", ondelete="CASCADE"), primary_key=True),
-        sa.Column("permission_key", sa.String(length=128), sa.ForeignKey("identity_permissions.permission_key", ondelete="CASCADE"), primary_key=True),
+        sa.Column(
+            "group_id",
+            sa.String(length=26),
+            sa.ForeignKey("identity_groups.group_id", ondelete="CASCADE"),
+            primary_key=True,
+        ),
+        sa.Column(
+            "permission_key",
+            sa.String(length=128),
+            sa.ForeignKey("identity_permissions.permission_key", ondelete="CASCADE"),
+            primary_key=True,
+        ),
     )
     op.create_table(
         "identity_refresh_tokens",
         sa.Column("token_id", sa.String(length=26), primary_key=True),
-        sa.Column("user_id", sa.String(length=26), sa.ForeignKey("identity_users.user_id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "user_id",
+            sa.String(length=26),
+            sa.ForeignKey("identity_users.user_id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("token_hash", sa.String(length=128), nullable=False, unique=True),
         sa.Column("expires_at_utc", sa.DateTime(timezone=True), nullable=False),
         sa.Column("revoked_at_utc", sa.DateTime(timezone=True), nullable=True),

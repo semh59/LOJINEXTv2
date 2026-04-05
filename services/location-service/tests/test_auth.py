@@ -17,6 +17,7 @@ def _point_payload() -> dict[str, object]:
         "is_active": True,
     }
 
+
 @pytest.mark.asyncio
 async def test_public_endpoints_require_admin_token(raw_client: AsyncClient) -> None:
     response = await raw_client.post("/v1/points", json=_point_payload())

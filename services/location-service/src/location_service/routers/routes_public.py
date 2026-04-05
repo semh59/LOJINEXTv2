@@ -84,22 +84,21 @@ async def get_route_version_geometry(
     """Return reconstructed 2D geometry for a route version."""
     version, route, _pair = await _get_route_version_row(session, route_id=route_id, version_no=version_no)
     segments = (
-        await session.execute(
-            select(RouteSegment)
-            .where(RouteSegment.route_id == route_id, RouteSegment.version_no == version_no)
-            .order_by(RouteSegment.segment_no.asc())
+        (
+            await session.execute(
+                select(RouteSegment)
+                .where(RouteSegment.route_id == route_id, RouteSegment.version_no == version_no)
+                .order_by(RouteSegment.segment_no.asc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     if not segments:
         raise internal_error("Route version geometry is incomplete.")
 
-    coordinates: list[list[float]] = [
-        [float(segments[0].start_longitude_6dp), float(segments[0].start_latitude_6dp)]
-    ]
-    coordinates.extend(
-        [float(segment.end_longitude_6dp), float(segment.end_latitude_6dp)]
-        for segment in segments
-    )
+    coordinates: list[list[float]] = [[float(segments[0].start_longitude_6dp), float(segments[0].start_latitude_6dp)]]
+    coordinates.extend([float(segment.end_longitude_6dp), float(segment.end_latitude_6dp)] for segment in segments)
 
     return RouteGeometryResponse(
         route_id=route.route_id,

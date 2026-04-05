@@ -13,8 +13,8 @@ from platform_auth import (
     TokenMissingError,
     decode_bearer_token,
 )
-from platform_auth.token_factory import ServiceTokenFactory
 from platform_auth.key_provider import build_verification_provider
+from platform_auth.token_factory import ServiceTokenFactory
 
 from driver_service.config import settings
 from driver_service.enums import ActorRole
@@ -60,7 +60,9 @@ def _platform_auth_settings(*, audience: str | None = None) -> AuthSettings:
     effective_audience = settings.auth_audience or audience or None
     return AuthSettings(
         algorithm=settings.auth_jwt_algorithm,
-        shared_secret=settings.resolved_auth_jwt_secret if settings.auth_jwt_algorithm.upper().startswith("HS") else None,
+        shared_secret=(
+            settings.resolved_auth_jwt_secret if settings.auth_jwt_algorithm.upper().startswith("HS") else None
+        ),
         issuer=settings.auth_issuer or None,
         audience=effective_audience,
         public_key=settings.auth_public_key or None,

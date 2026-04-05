@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
@@ -15,13 +15,21 @@ from fleet_service.worker_heartbeats import get_worker_heartbeat_snapshot
 
 logger = logging.getLogger("fleet_service.routers.health")
 
-router = APIRouter(tags=["health"])
+router = APIRouter(prefix="/v1", tags=["health"])
 
 
 @router.get("/health")
 async def health() -> dict[str, str]:
     """Liveness probe that only reflects process health."""
     return {"status": "ok", "service": "fleet-service"}
+
+
+@router.get("/metrics")
+async def metrics() -> Response:
+    """Prometheus metrics endpoint."""
+    from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @router.get("/ready")

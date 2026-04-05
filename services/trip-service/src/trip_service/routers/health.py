@@ -12,7 +12,7 @@ from trip_service.config import settings
 from trip_service.database import async_session_factory
 from trip_service.worker_heartbeats import get_worker_heartbeat_snapshot
 
-router = APIRouter(tags=["health"])
+router = APIRouter(prefix="/v1", tags=["health"])
 
 
 @router.get("/health")

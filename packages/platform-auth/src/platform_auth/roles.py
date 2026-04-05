@@ -4,9 +4,18 @@ from enum import StrEnum
 
 
 class PlatformRole(StrEnum):
-    """Cross-service actor roles supported by the platform."""
+    """Cross-service authorization roles."""
 
-    ADMIN = "ADMIN"
     SUPER_ADMIN = "SUPER_ADMIN"
     MANAGER = "MANAGER"
+    OPERATOR = "OPERATOR"
     SERVICE = "SERVICE"
+
+
+class PlatformActorType(StrEnum):
+    """Standardized actor types for audit logs and events."""
+
+    SYSTEM = "SYSTEM"
+    SERVICE = "SERVICE"
+    USER = "USER"
+    DRIVER = "DRIVER"

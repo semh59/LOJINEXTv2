@@ -52,19 +52,15 @@ class TripTrip(Base):
     source_reference_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
     source_payload_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     review_reason_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    base_trip_id: Mapped[str | None] = mapped_column(
-        String(26),
-        ForeignKey("trip_trips.id", ondelete="RESTRICT"),
-        nullable=True,
-    )
-    driver_id: Mapped[str] = mapped_column(String(50), nullable=False)
-    vehicle_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    trailer_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    route_pair_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    route_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    origin_location_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    base_trip_id: Mapped[str | None] = mapped_column(String(26), ForeignKey("trip_trips.id"), nullable=True)
+    driver_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
+    vehicle_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
+    trailer_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
+    route_pair_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
+    route_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
+    origin_location_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     origin_name_snapshot: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    destination_location_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    destination_location_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     destination_name_snapshot: Mapped[str | None] = mapped_column(String(200), nullable=True)
     trip_datetime_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     trip_timezone: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -76,8 +72,8 @@ class TripTrip(Base):
     is_empty_return: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    created_by_actor_type: Mapped[str] = mapped_column(String(20), nullable=False)
-    created_by_actor_id: Mapped[str] = mapped_column(String(50), nullable=False)
+    created_by_actor_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_by_actor_id: Mapped[str] = mapped_column(String(26), nullable=False)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     soft_deleted_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -253,8 +249,8 @@ class TripTripTimeline(Base):
     id: Mapped[str] = mapped_column(String(26), primary_key=True)
     trip_id: Mapped[str] = mapped_column(String(26), ForeignKey("trip_trips.id", ondelete="CASCADE"), nullable=False)
     event_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    actor_type: Mapped[str] = mapped_column(String(20), nullable=False)
-    actor_id: Mapped[str] = mapped_column(String(50), nullable=False)
+    actor_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(26), nullable=False)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -275,8 +271,8 @@ class TripTripDeleteAudit(Base):
     audit_id: Mapped[str] = mapped_column(String(26), primary_key=True)
     trip_id: Mapped[str] = mapped_column(String(26), nullable=False)
     trip_no: Mapped[str] = mapped_column(String(100), nullable=False)
-    actor_id: Mapped[str] = mapped_column(String(50), nullable=False)
-    actor_role: Mapped[str] = mapped_column(String(20), nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(26), nullable=False)
+    actor_role: Mapped[str] = mapped_column(String(32), nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     snapshot_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     deleted_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -286,6 +282,26 @@ class TripTripDeleteAudit(Base):
         Index("ix_trip_delete_audit_trip", "trip_id", "deleted_at_utc"),
         Index("ix_trip_delete_audit_actor", "actor_id", "deleted_at_utc"),
     )
+
+
+class TripAuditLogModel(Base):
+    """General high-fidelity audit log for Trip Service mutations."""
+
+    __tablename__ = "trip_audit_log"
+
+    audit_id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    trip_id: Mapped[str] = mapped_column(String(26), nullable=False)
+    action_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    changed_fields_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    old_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    actor_id: Mapped[str] = mapped_column(String(26), nullable=False)
+    actor_role: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    request_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (Index("idx_trip_audit_trip_created", "trip_id", "created_at_utc"),)
 
 
 class TripOutbox(Base):

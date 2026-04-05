@@ -12,6 +12,13 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from testcontainers.postgres import PostgresContainer
 
+from driver_service.auth import (
+    AuthContext,
+    admin_auth_dependency,
+    admin_or_internal_auth_dependency,
+    admin_or_manager_auth_dependency,
+    internal_service_auth_dependency,
+)
 from driver_service.database import get_session
 from driver_service.main import app
 from driver_service.models import Base
@@ -92,15 +99,6 @@ async def db_session(engine) -> AsyncGenerator[AsyncSession, None]:
 # ---------------------------------------------------------------------------
 # FastAPI Test Client and Auth Mocks
 # ---------------------------------------------------------------------------
-
-
-from driver_service.auth import (
-    AuthContext,
-    admin_auth_dependency,
-    admin_or_internal_auth_dependency,
-    admin_or_manager_auth_dependency,
-    internal_service_auth_dependency,
-)
 
 
 @pytest.fixture(scope="function")

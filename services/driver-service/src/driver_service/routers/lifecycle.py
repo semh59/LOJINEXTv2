@@ -21,9 +21,8 @@ from ulid import ULID
 
 from driver_service.auth import AuthContext, admin_auth_dependency
 from driver_service.database import get_session
-from driver_service.enums import AuditActionType
+from driver_service.enums import AuditActionType, DriverStatus
 from driver_service.errors import (
-    driver_already_soft_deleted,
     driver_company_code_already_exists,
     driver_if_match_required,
     driver_internal_error,
@@ -34,8 +33,9 @@ from driver_service.errors import (
     driver_version_mismatch,
 )
 from driver_service.models import DriverAuditLogModel, DriverModel, DriverOutboxModel
-from driver_service.normalization import etag_from_row_version, parse_if_match
+from driver_service.normalization import etag_from_row_version, mask_phone_for_manager, parse_if_match
 from driver_service.serializers import serialize_driver_admin, serialize_driver_for_role
+from driver_service.state_machine import DriverStateMachine
 
 logger = logging.getLogger("driver_service")
 router = APIRouter(prefix="/api/v1/drivers", tags=["driver-lifecycle"])
@@ -62,6 +62,12 @@ async def _write_audit(
     reason: str | None = None,
     request_id: str | None = None,
 ) -> None:
+    # PII Hardening: Mask sensitive fields in snapshots
+    if old_snapshot and "phone" in old_snapshot:
+        old_snapshot["phone"] = mask_phone_for_manager(old_snapshot["phone"])
+    if new_snapshot and "phone" in new_snapshot:
+        new_snapshot["phone"] = mask_phone_for_manager(new_snapshot["phone"])
+
     audit = DriverAuditLogModel(
         audit_id=_new_ulid(),
         driver_id=driver_id,
@@ -85,6 +91,7 @@ async def _write_outbox(session: AsyncSession, driver_id: str, event_name: str, 
         event_name=event_name,
         event_version=1,
         payload_json=json.dumps(payload),
+        partition_key=driver_id,  # V2.1: Partition by driver_id
         publish_status="PENDING",
         retry_count=0,
         created_at_utc=_now_utc(),
@@ -138,10 +145,7 @@ async def inactivate_driver(
     if_match: str | None = Header(None, alias="If-Match"),
 ) -> dict:
     """Deactivate a driver (spec §3.5).
-
-    State transitions: ACTIVE → INACTIVE (idempotent if already INACTIVE).
-    SOFT_DELETED → INACTIVE is forbidden.
-    BR-08: inactive_reason is required.
+    State transitions: ACTIVE → INACTIVE.
     """
     from driver_service.schemas import InactivateDriverRequest
 
@@ -150,27 +154,26 @@ async def inactivate_driver(
 
     driver = await _get_driver_with_etag_check(session, driver_id, if_match)
 
-    if driver.soft_deleted_at_utc is not None:
-        raise driver_already_soft_deleted()
-
     # Parse body
     body_bytes = await request.body()
     if not body_bytes:
         raise driver_validation_error("Request body is required.")
-
     body = InactivateDriverRequest.model_validate_json(body_bytes)
 
     # Idempotent if already INACTIVE
-    if driver.status == "INACTIVE":
+    if driver.status == DriverStatus.INACTIVE:
         response.headers["ETag"] = etag_from_row_version(driver.row_version)
         return serialize_driver_for_role(driver, auth.role)
 
     # Capture snapshots
     old_snapshot = serialize_driver_admin(driver)
-
-    # Transition ACTIVE → INACTIVE
     old_status = driver.status
-    driver.status = "INACTIVE"
+
+    # Transition to INACTIVE
+    sm = DriverStateMachine(driver.status)
+    sm.transition_to(DriverStatus.INACTIVE)
+
+    driver.status = DriverStatus.INACTIVE
     driver.inactive_reason = body.inactive_reason
     if body.employment_end_date:
         driver.employment_end_date = body.employment_end_date
@@ -186,7 +189,7 @@ async def inactivate_driver(
         AuditActionType.STATUS_CHANGE,
         auth.actor_id,
         auth.role,
-        changed_fields={"status": [old_status, "INACTIVE"]},
+        changed_fields={"status": [old_status, DriverStatus.INACTIVE]},
         old_snapshot=old_snapshot,
         new_snapshot=new_snapshot,
         reason=body.inactive_reason,
@@ -225,51 +228,41 @@ async def reactivate_driver(
     if_match: str | None = Header(None, alias="If-Match"),
 ) -> dict:
     """Reactivate a driver (spec §3.6).
-
-    Transitions: INACTIVE → ACTIVE, SOFT_DELETED → ACTIVE (restore).
-    On restore: clears soft_deleted_at_utc, soft_deleted_by_actor_id, soft_delete_reason.
-    If ALREADY ACTIVE, idempotent return.
-    Reactivation may conflict if phone/tel/code is now taken by another live driver.
+    Transitions: INACTIVE → ACTIVE, SUSPENDED → ACTIVE.
     """
     request_id = getattr(request.state, "request_id", None)
     now = _now_utc()
 
     driver = await _get_driver_with_etag_check(session, driver_id, if_match)
 
-    # Idempotent if already ACTIVE and not soft-deleted
-    if driver.status == "ACTIVE" and driver.soft_deleted_at_utc is None:
+    # Idempotent if already ACTIVE
+    if driver.status == DriverStatus.ACTIVE:
         response.headers["ETag"] = etag_from_row_version(driver.row_version)
         return serialize_driver_for_role(driver, auth.role)
 
     # Capture status and snapshots
     old_status = driver.status
-    was_soft_deleted = driver.soft_deleted_at_utc is not None
     old_snapshot = serialize_driver_admin(driver)
 
-    # Perform reactivation
-    driver.status = "ACTIVE"
+    # Transition to ACTIVE
+    sm = DriverStateMachine(driver.status)
+    sm.transition_to(DriverStatus.ACTIVE)
+
+    driver.status = DriverStatus.ACTIVE
     driver.inactive_reason = None
-
-    # If restoring from soft delete, clear soft-delete fields
-    if was_soft_deleted:
-        driver.soft_deleted_at_utc = None
-        driver.soft_deleted_by_actor_id = None
-        driver.soft_delete_reason = None
-
     driver.row_version += 1
     driver.updated_at_utc = now
     driver.updated_by_actor_id = auth.actor_id
 
     new_snapshot = serialize_driver_admin(driver)
 
-    action_type = AuditActionType.RESTORE if was_soft_deleted else AuditActionType.STATUS_CHANGE
     await _write_audit(
         session,
         driver_id,
-        action_type,
+        AuditActionType.STATUS_CHANGE,
         auth.actor_id,
         auth.role,
-        changed_fields={"status": [old_status, "ACTIVE"], "restored_from_soft_delete": was_soft_deleted},
+        changed_fields={"status": [old_status, DriverStatus.ACTIVE]},
         old_snapshot=old_snapshot,
         new_snapshot=new_snapshot,
         request_id=request_id,
@@ -280,7 +273,6 @@ async def reactivate_driver(
         "driver.reactivated.v1",
         {
             "driver_id": driver_id,
-            "restored_from_soft_delete": was_soft_deleted,
             "row_version": driver.row_version,
             "updated_at_utc": now.isoformat(),
         },
@@ -311,10 +303,8 @@ async def soft_delete_driver(
     session: AsyncSession = Depends(get_session),
     if_match: str | None = Header(None, alias="If-Match"),
 ) -> dict:
-    """Soft-delete a driver (spec §3.7).
-
-    Any status → SOFT_DELETED. Idempotent if already soft-deleted.
-    Soft-deleted drivers remain queryable via GET detail with lifecycle_state=SOFT_DELETED.
+    """Cancel/Decommission a driver (spec §3.7).
+    Any status → CANCELLED.
     """
     from driver_service.schemas import SoftDeleteDriverRequest
 
@@ -324,7 +314,7 @@ async def soft_delete_driver(
     driver = await _get_driver_with_etag_check(session, driver_id, if_match)
 
     # Idempotent
-    if driver.soft_deleted_at_utc is not None:
+    if driver.status == DriverStatus.CANCELLED:
         response.headers["ETag"] = etag_from_row_version(driver.row_version)
         return serialize_driver_for_role(driver, auth.role)
 
@@ -336,10 +326,14 @@ async def soft_delete_driver(
 
     # Capture snapshots
     old_snapshot = serialize_driver_admin(driver)
+    old_status = driver.status
 
-    driver.soft_deleted_at_utc = now
-    driver.soft_deleted_by_actor_id = auth.actor_id
-    driver.soft_delete_reason = body.reason
+    # Transition to CANCELLED
+    sm = DriverStateMachine(driver.status)
+    sm.transition_to(DriverStatus.CANCELLED)
+
+    driver.status = DriverStatus.CANCELLED
+    driver.inactive_reason = body.reason
     driver.row_version += 1
     driver.updated_at_utc = now
     driver.updated_by_actor_id = auth.actor_id
@@ -352,6 +346,7 @@ async def soft_delete_driver(
         AuditActionType.SOFT_DELETE,
         auth.actor_id,
         auth.role,
+        changed_fields={"status": [old_status, DriverStatus.CANCELLED]},
         old_snapshot=old_snapshot,
         new_snapshot=new_snapshot,
         reason=body.reason,
@@ -360,12 +355,12 @@ async def soft_delete_driver(
     await _write_outbox(
         session,
         driver_id,
-        "driver.soft_deleted.v1",
+        "driver.cancelled.v1",
         {
             "driver_id": driver_id,
             "reason": body.reason,
             "row_version": driver.row_version,
-            "soft_deleted_at_utc": now.isoformat(),
+            "cancelled_at_utc": now.isoformat(),
         },
     )
 

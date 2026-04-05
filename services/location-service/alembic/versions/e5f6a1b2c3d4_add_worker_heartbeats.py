@@ -1,4 +1,4 @@
-﻿"""add worker heartbeats
+"""add worker heartbeats
 
 Revision ID: e5f6a1b2c3d4
 Revises: 7b1e9b8b2c6a

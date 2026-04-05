@@ -30,7 +30,9 @@ router = APIRouter(tags=["identity-auth"])
 
 
 @router.post("/auth/v1/login", response_model=TokenPairResponse)
-async def login(body: LoginRequest, session: AsyncSession = Depends(get_session)) -> TokenPairResponse:
+async def login(
+    body: LoginRequest, session: AsyncSession = Depends(get_session)
+) -> TokenPairResponse:
     """Authenticate a user and issue access/refresh tokens."""
     user = await authenticate_user(session, body.username, body.password)
     if user is None:
@@ -41,7 +43,9 @@ async def login(body: LoginRequest, session: AsyncSession = Depends(get_session)
 
 
 @router.post("/auth/v1/logout", status_code=200)
-async def logout(body: LogoutRequest, session: AsyncSession = Depends(get_session)) -> dict[str, str]:
+async def logout(
+    body: LogoutRequest, session: AsyncSession = Depends(get_session)
+) -> dict[str, str]:
     """Revoke a refresh token."""
     await revoke_refresh_token(session, body.refresh_token)
     await session.commit()
@@ -49,7 +53,9 @@ async def logout(body: LogoutRequest, session: AsyncSession = Depends(get_sessio
 
 
 @router.post("/auth/v1/refresh", response_model=TokenPairResponse)
-async def refresh(body: RefreshRequest, session: AsyncSession = Depends(get_session)) -> TokenPairResponse:
+async def refresh(
+    body: RefreshRequest, session: AsyncSession = Depends(get_session)
+) -> TokenPairResponse:
     """Rotate a refresh token into a fresh token pair."""
     try:
         token_pair = await rotate_refresh_token(session, body.refresh_token)
@@ -72,7 +78,9 @@ async def service_token(
 ) -> ServiceTokenResponse:
     """Issue a short-lived service token for internal service-to-service auth."""
     try:
-        result = await issue_service_token(session, body.client_id, body.client_secret, body.audience)
+        result = await issue_service_token(
+            session, body.client_id, body.client_secret, body.audience
+        )
     except ValueError as exc:
         status_code = 400 if "audience" in str(exc).lower() else 401
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
@@ -80,7 +88,9 @@ async def service_token(
     return ServiceTokenResponse(**result)
 
 
-@router.get("/.well-known/jwks.json", response_model=JWKSResponse, include_in_schema=False)
+@router.get(
+    "/.well-known/jwks.json", response_model=JWKSResponse, include_in_schema=False
+)
 async def jwks(session: AsyncSession = Depends(get_session)) -> JWKSResponse:
     """Expose the published JWKS document."""
     return JWKSResponse(**(await jwks_document(session)))

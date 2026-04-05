@@ -13,12 +13,16 @@ from platform_auth import (
     TokenMissingError,
     decode_bearer_token,
 )
-from platform_auth.token_factory import ServiceTokenFactory
 from platform_auth.key_provider import build_verification_provider
+from platform_auth.token_factory import ServiceTokenFactory
 
 from trip_service.config import settings
 from trip_service.enums import ActorType
-from trip_service.errors import trip_auth_invalid, trip_auth_required, trip_forbidden, trip_validation_error
+from trip_service.errors import (
+    trip_auth_invalid,
+    trip_auth_required,
+    trip_forbidden,
+)
 
 _SERVICE_TOKEN_CACHE = ServiceTokenCache()
 _DEFAULT_SERVICE_AUDIENCE = "lojinext-platform"
@@ -36,7 +40,7 @@ class AuthContext:
     @property
     def is_super_admin(self) -> bool:
         """Return whether the caller is a super admin."""
-        return self.role == ActorType.SUPER_ADMIN
+        return self.role == ActorType.SUPER_ADMIN.value
 
 
 def _platform_auth_settings(*, audience: str | None = None) -> AuthSettings:
@@ -44,7 +48,9 @@ def _platform_auth_settings(*, audience: str | None = None) -> AuthSettings:
     effective_audience = settings.auth_audience or audience or None
     return AuthSettings(
         algorithm=settings.auth_jwt_algorithm,
-        shared_secret=settings.resolved_auth_jwt_secret if settings.auth_jwt_algorithm.upper().startswith("HS") else None,
+        shared_secret=settings.resolved_auth_jwt_secret
+        if settings.auth_jwt_algorithm.upper().startswith("HS")
+        else None,
         issuer=settings.auth_issuer or None,
         audience=effective_audience,
         public_key=settings.auth_public_key or None,
@@ -121,59 +127,51 @@ async def issue_internal_service_token(*, audience: str | None = None) -> str:
         raise RuntimeError(str(exc)) from exc
 
 
-def _legacy_header_context(x_actor_type: str | None, x_actor_id: str | None) -> AuthContext:
-    """Build an auth context from legacy headers when compatibility is enabled."""
-    if not settings.allow_legacy_actor_headers:
-        raise trip_auth_required()
-    if not x_actor_type or not x_actor_id:
-        raise trip_auth_required()
-    if x_actor_type not in {ActorType.ADMIN, ActorType.SUPER_ADMIN}:
-        raise trip_validation_error(
-            "Request validation failed.",
-            errors=[{"field": "header.X-Actor-Type", "message": "Legacy actor type must be ADMIN or SUPER_ADMIN."}],
-        )
-    return AuthContext(actor_id=x_actor_id, actor_type=x_actor_type, role=x_actor_type)
-
-
 def require_user_token(
     authorization: str | None,
-    x_actor_type: str | None = None,
-    x_actor_id: str | None = None,
 ) -> AuthContext:
     """Validate a user bearer token and return the caller context."""
     if authorization is None:
-        return _legacy_header_context(x_actor_type, x_actor_id)
+        raise trip_auth_required()
 
     claims = _decode_claims(authorization)
-    role = claims.role
-    if role not in {ActorType.ADMIN, ActorType.SUPER_ADMIN}:
-        raise trip_forbidden("User token does not have an admin role.")
+    role = str(claims.role)
+
+    # Map legacy or platform roles to local ActorType
+    effective_role = role
+    if role in {"ADMIN", "MANAGER"}:
+        effective_role = ActorType.MANAGER.value
+    elif role == "SUPER_ADMIN":
+        effective_role = ActorType.SUPER_ADMIN.value
+
+    authorized_roles = {ActorType.MANAGER.value, ActorType.OPERATOR.value, ActorType.SUPER_ADMIN.value}
+    if effective_role not in authorized_roles:
+        raise trip_forbidden(f"User token does not have an authorized role: {role} (mapped to {effective_role})")
+
     actor_id = claims.sub.strip()
     if not actor_id:
         raise trip_auth_invalid("Token is missing sub.")
-    return AuthContext(actor_id=actor_id, actor_type=role, role=role)
+    return AuthContext(actor_id=actor_id, actor_type=effective_role, role=effective_role)
 
 
 def require_service_token(authorization: str | None, allowed_services: set[str]) -> AuthContext:
     """Validate a service bearer token and enforce the allowed service names."""
     claims = _decode_claims(authorization)
-    role = claims.role
+    role = str(claims.role)
     service_name = (claims.service or "").strip()
     actor_id = claims.sub.strip()
-    if role != ActorType.SERVICE or not service_name or not actor_id:
+    if role != ActorType.SERVICE.value or not service_name or not actor_id:
         raise trip_forbidden("Token is not a valid service token.")
     if service_name not in allowed_services:
         raise trip_forbidden("Service token is not allowed for this endpoint.")
-    return AuthContext(actor_id=actor_id, actor_type=ActorType.SERVICE, role=role, service_name=service_name)
+    return AuthContext(actor_id=actor_id, actor_type=ActorType.SERVICE.value, role=role, service_name=service_name)
 
 
 def user_auth_dependency(
     authorization: str | None = Header(None, alias="Authorization"),
-    x_actor_type: str | None = Header(None, alias="X-Actor-Type"),
-    x_actor_id: str | None = Header(None, alias="X-Actor-Id"),
 ) -> AuthContext:
     """FastAPI dependency for public user-authenticated endpoints."""
-    return require_user_token(authorization, x_actor_type, x_actor_id)
+    return require_user_token(authorization)
 
 
 def telegram_service_auth_dependency(
@@ -199,21 +197,26 @@ def reference_service_auth_dependency(
 
 def admin_or_internal_auth_dependency(
     authorization: str | None = Header(None, alias="Authorization"),
-    x_actor_type: str | None = Header(None, alias="X-Actor-Type"),
-    x_actor_id: str | None = Header(None, alias="X-Actor-Id"),
 ) -> AuthContext:
     """FastAPI dependency for ADMIN or internal service endpoints."""
     if authorization is None:
-        return _legacy_header_context(x_actor_type, x_actor_id)
+        raise trip_auth_required()
 
     claims = _decode_claims(authorization)
-    role = claims.role
-    if role in {ActorType.ADMIN, ActorType.SUPER_ADMIN}:
+    role = str(claims.role)
+    effective_role = role
+    if role in {"ADMIN", "MANAGER"}:
+        effective_role = ActorType.MANAGER.value
+    elif role == "SUPER_ADMIN":
+        effective_role = ActorType.SUPER_ADMIN.value
+
+    authorized_roles = {ActorType.MANAGER.value, ActorType.OPERATOR.value, ActorType.SUPER_ADMIN.value}
+    if effective_role in authorized_roles:
         actor_id = claims.sub.strip()
-        return AuthContext(actor_id=actor_id, actor_type=role, role=role)
+        return AuthContext(actor_id=actor_id, actor_type=effective_role, role=effective_role)
 
     service_name = (claims.service or "").strip()
-    if role == ActorType.SERVICE and service_name:
+    if role == ActorType.SERVICE.value and service_name:
         actor_id = claims.sub.strip()
         return AuthContext(actor_id=actor_id, actor_type=role, role=role, service_name=service_name)
 

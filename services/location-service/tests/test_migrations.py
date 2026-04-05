@@ -104,8 +104,14 @@ def test_alembic_live_pair_uniqueness_migration_blocks_duplicate_drafts() -> Non
                                     updated_at_utc
                                 )
                                 VALUES
-                                    (:origin_id, 'DUP_ORIGIN', 'Dup Origin', 'Dup Origin', 'DUP ORIGIN', 'DUP ORIGIN', 41.000001, 29.000001, true, 1, :now, :now),
-                                    (:destination_id, 'DUP_DEST', 'Dup Dest', 'Dup Dest', 'DUP DEST', 'DUP DEST', 41.000002, 29.000002, true, 1, :now, :now)
+                                    (
+                                        :origin_id, 'DUP_ORIGIN', 'Dup Origin', 'Dup Origin',
+                                        'DUP ORIGIN', 'DUP ORIGIN', 41.000001, 29.000001, true, 1, :now, :now
+                                    ),
+                                    (
+                                        :destination_id, 'DUP_DEST', 'Dup Dest', 'Dup Dest',
+                                        'DUP DEST', 'DUP DEST', 41.000002, 29.000002, true, 1, :now, :now
+                                    )
                                 """
                             ),
                             {
@@ -129,8 +135,14 @@ def test_alembic_live_pair_uniqueness_migration_blocks_duplicate_drafts() -> Non
                                     updated_at_utc
                                 )
                                 VALUES
-                                    (:pair_id_1, 'RP_00000000000000000000000001', :origin_id, :destination_id, 'TIR', 'DRAFT', 1, :now, :now),
-                                    (:pair_id_2, 'RP_00000000000000000000000002', :origin_id, :destination_id, 'TIR', 'DRAFT', 1, :now, :now)
+                                    (
+                                        :pair_id_1, 'RP_00000000000000000000000001', :origin_id,
+                                        :destination_id, 'TIR', 'DRAFT', 1, :now, :now
+                                    ),
+                                    (
+                                        :pair_id_2, 'RP_00000000000000000000000002', :origin_id,
+                                        :destination_id, 'TIR', 'DRAFT', 1, :now, :now
+                                    )
                                 """
                             ),
                             {

@@ -17,6 +17,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from ulid import ULID
 
 from location_service.enums import (
     BulkRefreshItemStatus,
@@ -46,7 +47,7 @@ class Base(DeclarativeBase):
 class LocationPoint(Base):
     __tablename__ = "location_points"
 
-    location_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    location_id: Mapped[str] = mapped_column(String(26), primary_key=True)
     code: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
     name_tr: Mapped[str] = mapped_column(String(255), nullable=False)
     name_en: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -73,19 +74,17 @@ class LocationPoint(Base):
 class RoutePair(Base):
     __tablename__ = "route_pairs"
 
-    route_pair_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    route_pair_id: Mapped[str] = mapped_column(String(26), primary_key=True)
     pair_code: Mapped[str] = mapped_column(String(29), unique=True, nullable=False)  # Format RP_<ULID>
-    origin_location_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("location_points.location_id"), nullable=False)
-    destination_location_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("location_points.location_id"), nullable=False
-    )
+    origin_location_id: Mapped[str] = mapped_column(ForeignKey("location_points.location_id"), nullable=False)
+    destination_location_id: Mapped[str] = mapped_column(ForeignKey("location_points.location_id"), nullable=False)
     profile_code: Mapped[str] = mapped_column(String(32), default="TIR", server_default="TIR", nullable=False)
     pair_status: Mapped[PairStatus] = mapped_column(String(50), nullable=False)
 
-    forward_route_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    forward_route_id: Mapped[Optional[str]] = mapped_column(
         ForeignKey("routes.route_id", use_alter=True), nullable=True
     )
-    reverse_route_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    reverse_route_id: Mapped[Optional[str]] = mapped_column(
         ForeignKey("routes.route_id", use_alter=True), nullable=True
     )
 
@@ -124,8 +123,8 @@ class RoutePair(Base):
 class Route(Base):
     __tablename__ = "routes"
 
-    route_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    route_pair_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("route_pairs.route_pair_id"), nullable=False)
+    route_id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    route_pair_id: Mapped[str] = mapped_column(ForeignKey("route_pairs.route_pair_id"), nullable=False)
     route_code: Mapped[str] = mapped_column(String(31), unique=True, nullable=False)
     direction: Mapped[DirectionCode] = mapped_column(String(20), nullable=False)
     created_by: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -135,7 +134,7 @@ class Route(Base):
 class RouteVersionCounter(Base):
     __tablename__ = "route_version_counters"
 
-    route_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("routes.route_id"), primary_key=True)
+    route_id: Mapped[str] = mapped_column(ForeignKey("routes.route_id"), primary_key=True)
     next_version_no: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_utcnow, nullable=False)
     updated_at_utc: Mapped[datetime] = mapped_column(
@@ -146,9 +145,9 @@ class RouteVersionCounter(Base):
 class RouteVersion(Base):
     __tablename__ = "route_versions"
 
-    route_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("routes.route_id"), primary_key=True)
+    route_id: Mapped[str] = mapped_column(ForeignKey("routes.route_id"), primary_key=True)
     version_no: Mapped[int] = mapped_column(Integer, primary_key=True)
-    processing_run_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    processing_run_id: Mapped[Optional[str]] = mapped_column(
         ForeignKey("processing_runs.processing_run_id"), nullable=True
     )
     processing_status: Mapped[ProcessingStatus] = mapped_column(String(50), nullable=False)
@@ -199,7 +198,7 @@ class RouteVersion(Base):
 class RouteSegment(Base):
     __tablename__ = "route_segments"
 
-    route_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    route_id: Mapped[str] = mapped_column(String(26), primary_key=True)
     version_no: Mapped[int] = mapped_column(Integer, primary_key=True)
     segment_no: Mapped[int] = mapped_column(Integer, primary_key=True)
 
@@ -232,14 +231,24 @@ class RouteSegment(Base):
         ),
         CheckConstraint("distance_m >= 0", name="chk_route_segments_distance"),
         CheckConstraint("segment_no >= 1", name="chk_route_segments_segment_no"),
+        CheckConstraint(
+            "start_latitude_6dp >= -90.0 AND start_latitude_6dp <= 90.0", name="chk_route_segments_start_lat"
+        ),
+        CheckConstraint(
+            "start_longitude_6dp >= -180.0 AND start_longitude_6dp <= 180.0", name="chk_route_segments_start_lng"
+        ),
+        CheckConstraint("end_latitude_6dp >= -90.0 AND end_latitude_6dp <= 90.0", name="chk_route_segments_end_lat"),
+        CheckConstraint(
+            "end_longitude_6dp >= -180.0 AND end_longitude_6dp <= 180.0", name="chk_route_segments_end_lng"
+        ),
     )
 
 
 class ProcessingRun(Base):
     __tablename__ = "processing_runs"
 
-    processing_run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    route_pair_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("route_pairs.route_pair_id"), nullable=False)
+    processing_run_id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    route_pair_id: Mapped[str] = mapped_column(ForeignKey("route_pairs.route_pair_id"), nullable=False)
     run_status: Mapped[RunStatus] = mapped_column(String(50), nullable=False)
     trigger_type: Mapped[TriggerType] = mapped_column(String(50), nullable=False)
     attempt_no: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
@@ -254,7 +263,7 @@ class ProcessingRun(Base):
     expected_forward_version_no: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     expected_reverse_version_no: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
-    bulk_refresh_job_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    bulk_refresh_job_id: Mapped[Optional[str]] = mapped_column(
         ForeignKey("bulk_refresh_jobs.bulk_refresh_job_id"), nullable=True
     )
     started_at_utc: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -305,7 +314,7 @@ class RouteUsageRef(Base):
 class BulkRefreshJob(Base):
     __tablename__ = "bulk_refresh_jobs"
 
-    bulk_refresh_job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    bulk_refresh_job_id: Mapped[str] = mapped_column(String(26), primary_key=True)
     job_status: Mapped[BulkRefreshStatus] = mapped_column(String(50), nullable=False)
     trigger_type: Mapped[TriggerType] = mapped_column(String(50), nullable=False)
     selection_scope_json: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
@@ -335,16 +344,16 @@ class BulkRefreshJob(Base):
 class BulkRefreshJobItem(Base):
     __tablename__ = "bulk_refresh_job_items"
 
-    item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    bulk_refresh_job_id: Mapped[uuid.UUID] = mapped_column(
+    item_id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    bulk_refresh_job_id: Mapped[str] = mapped_column(
         ForeignKey("bulk_refresh_jobs.bulk_refresh_job_id", ondelete="CASCADE"), nullable=False
     )
     item_no: Mapped[int] = mapped_column(Integer, nullable=False)
-    route_pair_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    route_pair_id: Mapped[Optional[str]] = mapped_column(
         ForeignKey("route_pairs.route_pair_id", ondelete="SET NULL"), nullable=True
     )
     item_status: Mapped[BulkRefreshItemStatus] = mapped_column(String(50), nullable=False)
-    processing_run_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    processing_run_id: Mapped[Optional[str]] = mapped_column(
         ForeignKey("processing_runs.processing_run_id", ondelete="SET NULL"), nullable=True
     )
     error_code: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
@@ -380,4 +389,36 @@ class WorkerHeartbeat(Base):
     __tablename__ = "worker_heartbeats"
 
     worker_name: Mapped[str] = mapped_column(String(100), primary_key=True)
-    recorded_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class LocationOutboxModel(Base):
+    """Transactional outbox for reliable event publishing."""
+
+    __tablename__ = "location_outbox"
+
+    outbox_id: Mapped[str] = mapped_column(String(26), primary_key=True, default=lambda: str(ULID()))
+    event_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    event_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    payload_json: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    publish_status: Mapped[str] = mapped_column(String(16), nullable=False, default="PENDING")
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    next_attempt_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    published_at_utc: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class LocationAuditLogModel(Base):
+    """Deep audit log for location mutations (Point, Pair, Route)."""
+
+    __tablename__ = "location_audit_log"
+
+    audit_id: Mapped[str] = mapped_column(String(26), primary_key=True, default=lambda: str(ULID()))
+    target_type: Mapped[str] = mapped_column(String(32), nullable=False)  # POINT, PAIR, ROUTE
+    target_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    action_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    actor_role: Mapped[str] = mapped_column(String(32), nullable=False)
+    old_snapshot_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    new_snapshot_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    request_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

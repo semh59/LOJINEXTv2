@@ -88,7 +88,8 @@ async def claim_next_processing_run(worker_name: str | None = None) -> ClaimedPr
                 or_(
                     ProcessingRun.run_status == RunStatus.QUEUED,
                     _claim_expired_or_stale(now),
-                )
+                ),
+                ProcessingRun.attempt_no < settings.processing_max_attempts,
             )
             .order_by(ProcessingRun.created_at_utc.asc(), ProcessingRun.processing_run_id.asc())
             .with_for_update(skip_locked=True)
@@ -110,6 +111,8 @@ async def claim_next_processing_run(worker_name: str | None = None) -> ClaimedPr
         run.error_message = None
         if is_reclaim:
             run.attempt_no += 1
+        elif run.attempt_no == 0:  # Safety for legacy data or different defaults
+            run.attempt_no = 1
 
         await session.commit()
 

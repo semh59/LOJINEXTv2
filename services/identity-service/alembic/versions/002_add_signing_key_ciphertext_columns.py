@@ -16,8 +16,14 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("identity_signing_keys", sa.Column("private_key_ciphertext_b64", sa.Text(), nullable=True))
-    op.add_column("identity_signing_keys", sa.Column("private_key_kek_version", sa.String(length=64), nullable=True))
+    op.add_column(
+        "identity_signing_keys",
+        sa.Column("private_key_ciphertext_b64", sa.Text(), nullable=True),
+    )
+    op.add_column(
+        "identity_signing_keys",
+        sa.Column("private_key_kek_version", sa.String(length=64), nullable=True),
+    )
 
 
 def downgrade() -> None:

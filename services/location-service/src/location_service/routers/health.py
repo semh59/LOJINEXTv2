@@ -15,7 +15,7 @@ from location_service.worker_heartbeats import get_worker_heartbeat_snapshot
 
 logger = logging.getLogger("location_service.health")
 
-router = APIRouter(tags=["health"])
+router = APIRouter(prefix="/v1", tags=["health"])
 
 
 @router.get("/health")

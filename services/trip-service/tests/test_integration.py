@@ -22,7 +22,12 @@ from tests.conftest import (
     make_slip_payload,
 )
 from trip_service.config import settings
-from trip_service.dependencies import fetch_trip_context, probe_location_service, resolve_route_by_names, validate_trip_references
+from trip_service.dependencies import (
+    fetch_trip_context,
+    probe_location_service,
+    resolve_route_by_names,
+    validate_trip_references,
+)
 from trip_service.errors import ProblemDetailError
 from trip_service.models import TripIdempotencyRecord, TripOutbox, TripTrip, TripTripDeleteAudit, TripTripEnrichment
 from trip_service.routers.trips import _merged_payload_hash
@@ -37,7 +42,7 @@ async def test_manual_create_uses_route_pair_and_snapshots_locations(client: Asy
     )
     body = response.json()
     assert response.status_code == 201
-    assert body["status"] == "COMPLETED"
+    assert body["status"] == "ASSIGNED"
     assert body["route_pair_id"] == "pair-001"
     assert body["route_id"] == "route-ist-ank"
     assert body["origin_name_snapshot"] == "Istanbul"
@@ -748,7 +753,9 @@ async def test_validate_trip_references_sends_fleet_auth_and_accepts_compat_resp
     captured: dict[str, object] = {}
 
     class StubClient:
-        async def post(self, url: str, *, json: dict[str, object], headers: dict[str, str] | None = None) -> httpx.Response:
+        async def post(
+            self, url: str, *, json: dict[str, object], headers: dict[str, str] | None = None
+        ) -> httpx.Response:
             captured["url"] = url
             captured["json"] = json
             captured["headers"] = headers or {}

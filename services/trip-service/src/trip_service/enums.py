@@ -1,13 +1,15 @@
-"""Enum types for Trip Service."""
-
 import enum
+
+from platform_auth import PlatformActorType, PlatformRole
 
 
 class TripStatus(str, enum.Enum):
-    PENDING_REVIEW = "PENDING_REVIEW"
+    REQUESTED = "REQUESTED"
+    ASSIGNED = "ASSIGNED"
+    IN_PROGRESS = "IN_PROGRESS"
     COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
     REJECTED = "REJECTED"
-    SOFT_DELETED = "SOFT_DELETED"
 
 
 class EnrichmentStatus(str, enum.Enum):
@@ -39,11 +41,14 @@ class DataQualityFlag(str, enum.Enum):
 
 
 class ActorType(str, enum.Enum):
-    ADMIN = "ADMIN"
-    SUPER_ADMIN = "SUPER_ADMIN"
-    DRIVER = "DRIVER"
-    SERVICE = "SERVICE"
-    SYSTEM = "SYSTEM"
+    """Local alias for platform actor types for backward compatibility and trip-specific actors."""
+
+    SUPER_ADMIN = str(PlatformRole.SUPER_ADMIN.value)
+    MANAGER = str(PlatformRole.MANAGER.value)
+    OPERATOR = str(PlatformRole.OPERATOR.value)
+    SERVICE = str(PlatformRole.SERVICE.value)
+    SYSTEM = str(PlatformActorType.SYSTEM.value)
+    DRIVER = str(PlatformActorType.DRIVER.value)
 
 
 class OutboxPublishStatus(str, enum.Enum):

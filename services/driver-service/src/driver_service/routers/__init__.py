@@ -1,7 +1,7 @@
 """Health and readiness router for Driver Service (spec Section 10)."""
 
-from datetime import datetime, timedelta, timezone
 import logging
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Request
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
@@ -14,7 +14,7 @@ from driver_service.database import async_session_factory
 from driver_service.models import WorkerHeartbeat
 
 logger = logging.getLogger("driver_service")
-router = APIRouter(tags=["health"])
+router = APIRouter(prefix="/v1", tags=["health"])
 
 
 @router.get("/health")

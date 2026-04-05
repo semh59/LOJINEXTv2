@@ -178,22 +178,6 @@ def mask_phone_for_manager(phone_e164: str | None) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# lifecycle_state derivation (spec Section 4 State Machine)
-# ---------------------------------------------------------------------------
-
-
-def derive_lifecycle_state(status: str, soft_deleted_at_utc: object | None) -> str:
-    """Derive lifecycle_state from DB status and soft_deleted_at_utc.
-
-    Rule: soft_deleted_at_utc is checked first. If non-null → SOFT_DELETED
-    regardless of the status column value.
-    """
-    if soft_deleted_at_utc is not None:
-        return "SOFT_DELETED"
-    return status  # ACTIVE or INACTIVE
-
-
-# ---------------------------------------------------------------------------
 # ETag helpers (spec Section 12)
 # ---------------------------------------------------------------------------
 

@@ -1,4 +1,5 @@
 import pytest
+
 from fleet_service.domain.normalization import normalize_plate
 
 

@@ -9,8 +9,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from location_service.enums import DirectionCode, PairStatus, RunStatus, TriggerType
-from location_service.enums import RoadClass, UrbanClass, ValidationResult
+from location_service.enums import (
+    DirectionCode,
+    PairStatus,
+    RoadClass,
+    RunStatus,
+    TriggerType,
+    UrbanClass,
+    ValidationResult,
+)
 from location_service.models import LocationPoint, ProcessingRun, Route, RoutePair, RouteSegment, RouteVersion
 from location_service.processing.approval import approve_route_versions, discard_route_versions
 from location_service.processing.bulk import trigger_bulk_refresh
@@ -105,8 +112,12 @@ async def test_processing_flow_full_mock() -> None:
 
         await _process_route_pair(run_id, pair_id)
 
-    route_versions = [call.args[0] for call in mock_session.add.call_args_list if isinstance(call.args[0], RouteVersion)]
-    route_segments = [call.args[0] for call in mock_session.add.call_args_list if isinstance(call.args[0], RouteSegment)]
+    route_versions = [
+        call.args[0] for call in mock_session.add.call_args_list if isinstance(call.args[0], RouteVersion)
+    ]
+    route_segments = [
+        call.args[0] for call in mock_session.add.call_args_list if isinstance(call.args[0], RouteSegment)
+    ]
 
     assert mock_run.run_status == RunStatus.SUCCEEDED
     assert mock_pair.pending_forward_version_no == 1

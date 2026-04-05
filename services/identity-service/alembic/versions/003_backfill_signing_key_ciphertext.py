@@ -24,24 +24,32 @@ depends_on = None
 def _decode_kek() -> bytes:
     raw = os.getenv("IDENTITY_KEY_ENCRYPTION_KEY_B64", "").strip()
     if not raw:
-        raise RuntimeError("IDENTITY_KEY_ENCRYPTION_KEY_B64 is required for signing-key backfill.")
+        raise RuntimeError(
+            "IDENTITY_KEY_ENCRYPTION_KEY_B64 is required for signing-key backfill."
+        )
     padding = "=" * (-len(raw) % 4)
     decoded = base64.urlsafe_b64decode(f"{raw}{padding}")
     if len(decoded) != 32:
-        raise RuntimeError("IDENTITY_KEY_ENCRYPTION_KEY_B64 must decode to exactly 32 bytes.")
+        raise RuntimeError(
+            "IDENTITY_KEY_ENCRYPTION_KEY_B64 must decode to exactly 32 bytes."
+        )
     return decoded
 
 
 def _kek_version() -> str:
     version = os.getenv("IDENTITY_KEY_ENCRYPTION_KEY_VERSION", "").strip()
     if not version:
-        raise RuntimeError("IDENTITY_KEY_ENCRYPTION_KEY_VERSION is required for signing-key backfill.")
+        raise RuntimeError(
+            "IDENTITY_KEY_ENCRYPTION_KEY_VERSION is required for signing-key backfill."
+        )
     return version
 
 
 def _encrypt(private_key_pem: str, *, kid: str, key_bytes: bytes) -> str:
     nonce = os.urandom(12)
-    ciphertext = AESGCM(key_bytes).encrypt(nonce, private_key_pem.encode("utf-8"), kid.encode("utf-8"))
+    ciphertext = AESGCM(key_bytes).encrypt(
+        nonce, private_key_pem.encode("utf-8"), kid.encode("utf-8")
+    )
     return base64.urlsafe_b64encode(nonce + ciphertext).decode("ascii")
 
 
@@ -49,9 +57,15 @@ def upgrade() -> None:
     key_bytes = _decode_kek()
     version = _kek_version()
     bind = op.get_bind()
-    rows = bind.execute(sa.text("SELECT kid, private_key_pem FROM identity_signing_keys")).mappings().all()
+    rows = (
+        bind.execute(sa.text("SELECT kid, private_key_pem FROM identity_signing_keys"))
+        .mappings()
+        .all()
+    )
     for row in rows:
-        ciphertext = _encrypt(row["private_key_pem"], kid=row["kid"], key_bytes=key_bytes)
+        ciphertext = _encrypt(
+            row["private_key_pem"], kid=row["kid"], key_bytes=key_bytes
+        )
         bind.execute(
             sa.text(
                 """

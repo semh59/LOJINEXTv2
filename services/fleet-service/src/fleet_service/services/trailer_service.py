@@ -14,7 +14,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
-from fleet_service.auth import AuthContext
 from fleet_service.constraint_error_mapper import map_integrity_error
 from fleet_service.domain.enums import (
     AggregateType,
@@ -70,6 +69,7 @@ from fleet_service.schemas.responses import (
     TrailerSpecResponse,
 )
 from fleet_service.timestamps import to_utc_naive, utc_now_naive
+from platform_auth import AuthContext
 
 logger = logging.getLogger("fleet_service.trailer_service")
 
@@ -80,6 +80,21 @@ _IDEMPOTENCY_TTL_HOURS = 72
 def _utc_now() -> datetime.datetime:
     """Return the current naive UTC timestamp for the Fleet schema."""
     return utc_now_naive()
+
+
+def serialize_trailer_admin(trailer: FleetTrailer) -> dict[str, Any]:
+    """Helper for timeline snapshots."""
+    return {
+        "trailer_id": trailer.trailer_id,
+        "asset_code": trailer.asset_code,
+        "plate_raw_current": trailer.plate_raw_current,
+        "normalized_plate_current": trailer.normalized_plate_current,
+        "brand": trailer.brand,
+        "model": trailer.model,
+        "model_year": trailer.model_year,
+        "ownership_type": trailer.ownership_type,
+        "status": trailer.status,
+    }
 
 
 # === CREATE ===
@@ -144,12 +159,54 @@ async def create_trailer(
         updated_by_actor_id=auth.actor_id,
     )
 
+    # Step 6: INSERT Master & Spec
+    current_spec = None
     try:
         await trailer_repo.create_trailer(session, trailer)
+        if body.initial_spec is not None:
+            trailer.spec_stream_version = 1
+            effective_from = (
+                to_utc_naive(body.initial_spec.effective_from_utc) if body.initial_spec.effective_from_utc else now
+            )
+            current_spec = FleetTrailerSpecVersion(
+                trailer_spec_version_id=str(ULID()),
+                trailer_id=trailer_id,
+                version_no=1,
+                effective_from_utc=effective_from,
+                is_current=True,
+                trailer_type=body.initial_spec.trailer_type,
+                body_type=body.initial_spec.body_type,
+                tare_weight_kg=body.initial_spec.tare_weight_kg,
+                max_payload_kg=body.initial_spec.max_payload_kg,
+                axle_count=body.initial_spec.axle_count,
+                lift_axle_present=body.initial_spec.lift_axle_present,
+                body_height_mm=body.initial_spec.body_height_mm,
+                body_length_mm=body.initial_spec.body_length_mm,
+                body_width_mm=body.initial_spec.body_width_mm,
+                tire_rr_class=body.initial_spec.tire_rr_class,
+                tire_type=body.initial_spec.tire_type,
+                side_skirts_present=body.initial_spec.side_skirts_present,
+                rear_tail_present=body.initial_spec.rear_tail_present,
+                gap_reducer_present=body.initial_spec.gap_reducer_present,
+                wheel_covers_present=body.initial_spec.wheel_covers_present,
+                reefer_unit_present=body.initial_spec.reefer_unit_present,
+                reefer_unit_type=body.initial_spec.reefer_unit_type,
+                reefer_power_source=body.initial_spec.reefer_power_source,
+                aero_package_level=body.initial_spec.aero_package_level,
+                change_reason=body.initial_spec.change_reason,
+                created_at_utc=now,
+                created_by_actor_type=auth.actor_type,
+                created_by_actor_id=auth.actor_id,
+            )
+            await trailer_spec_repo.insert_spec_version(session, current_spec)
+
+        await session.flush()
     except IntegrityError as exc:
         raise map_integrity_error(exc, "TRAILER") from exc
 
+    trailer_snapshot = serialize_trailer_admin(trailer)
     event_id = str(ULID())
+
     await timeline_repo.insert_timeline_event(
         session,
         FleetAssetTimelineEvent(
@@ -162,35 +219,35 @@ async def create_trailer(
             request_id=request_id,
             correlation_id=correlation_id,
             occurred_at_utc=now,
-            payload_json={"trailer_id": trailer_id, "asset_code": body.asset_code, "plate": body.plate},
+            payload_json={"snapshot": trailer_snapshot},
         ),
     )
 
-    await outbox_repo.insert_outbox_event(
-        session,
-        FleetOutbox(
-            outbox_id=str(ULID()),
-            aggregate_type=AggregateType.TRAILER,
-            aggregate_id=trailer_id,
-            event_name="fleet.trailer.created.v1",
-            event_version=1,
-            payload_json={
-                "event_id": event_id,
-                "event_name": "fleet.trailer.created.v1",
-                "occurred_at_utc": now.isoformat(),
-                "aggregate_type": "TRAILER",
-                "aggregate_id": trailer_id,
-                "row_version": 1,
-                "request_id": request_id,
-                "correlation_id": correlation_id,
-            },
-            publish_status=PublishStatus.PENDING,
-            next_attempt_at_utc=now,
-            created_at_utc=now,
-        ),
+    # Step 8: Outbox event (Enriched)
+    outbox_event = FleetOutbox(
+        outbox_id=str(ULID()),
+        aggregate_type=AggregateType.TRAILER,
+        aggregate_id=trailer_id,
+        event_name="fleet.trailer.created.v1",
+        event_version=1,
+        payload_json={
+            "event_id": event_id,
+            "event_name": "fleet.trailer.created.v1",
+            "occurred_at_utc": now.isoformat(),
+            "aggregate_type": "TRAILER",
+            "aggregate_id": trailer_id,
+            "row_version": 1,
+            "request_id": request_id,
+            "correlation_id": correlation_id,
+            "data": trailer_snapshot,
+        },
+        publish_status=PublishStatus.PENDING,
+        next_attempt_at_utc=now,
+        created_at_utc=now,
     )
+    await outbox_repo.insert_outbox_event(session, outbox_event)
 
-    response = _build_trailer_detail_response(trailer, current_spec=None)
+    response = _build_trailer_detail_response(trailer, current_spec=current_spec)
 
     idem_record = FleetIdempotencyRecord(
         idempotency_key=idempotency_key,

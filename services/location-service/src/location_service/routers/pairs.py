@@ -3,22 +3,28 @@
 from __future__ import annotations
 
 from typing import Annotated
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
+from ulid import ULID
 
+from location_service.audit_helpers import (
+    _write_audit,
+    _write_outbox,
+    serialize_pair_audit,
+)
+from location_service.auth import user_auth_dependency, AuthContext
 from location_service.database import get_db
 from location_service.domain.codes import generate_pair_code
 from location_service.domain.normalization import normalize_en, normalize_tr
 from location_service.enums import PairStatus
 from location_service.errors import (
     ProblemDetailError,
-    invalid_filter_combination,
     internal_error,
+    invalid_filter_combination,
     point_inactive_for_new_pair,
     route_origin_equals_destination,
     route_pair_already_exists_active,
@@ -40,7 +46,8 @@ from location_service.schemas import (
     ProfileCode,
 )
 
-router = APIRouter(prefix="/v1/pairs", tags=["pairs"])
+router = APIRouter(prefix="/pairs", tags=["pairs"])
+
 
 _ALLOWED_SORTS = {
     "updated_at_utc:desc",
@@ -77,10 +84,10 @@ async def _get_point_by_code(session: AsyncSession, code: str) -> LocationPoint 
 async def _assert_pair_uniqueness(
     session: AsyncSession,
     *,
-    origin_location_id: UUID,
-    destination_location_id: UUID,
+    origin_location_id: str,
+    destination_location_id: str,
     profile_code: str,
-    exclude_pair_id: UUID | None = None,
+    exclude_pair_id: str | None = None,
 ) -> None:
     stmt = select(RoutePair).where(
         RoutePair.origin_location_id == origin_location_id,
@@ -97,14 +104,14 @@ async def _assert_pair_uniqueness(
         raise route_pair_already_exists_deleted()
 
 
-async def _get_pair(session: AsyncSession, pair_id: UUID) -> RoutePair:
+async def _get_pair(session: AsyncSession, pair_id: str) -> RoutePair:
     pair = (await session.execute(select(RoutePair).where(RoutePair.route_pair_id == pair_id))).scalar_one_or_none()
     if pair is None:
         raise route_pair_not_found(str(pair_id))
     return pair
 
 
-async def _get_pair_detail(session: AsyncSession, pair_id: UUID) -> tuple[RoutePair, LocationPoint, LocationPoint]:
+async def _get_pair_detail(session: AsyncSession, pair_id: str) -> tuple[RoutePair, LocationPoint, LocationPoint]:
     origin_point = aliased(LocationPoint)
     destination_point = aliased(LocationPoint)
     row = (
@@ -120,7 +127,7 @@ async def _get_pair_detail(session: AsyncSession, pair_id: UUID) -> tuple[RouteP
     return row
 
 
-def serialize_pair(pair: RoutePair, origin: LocationPoint, destination: LocationPoint) -> PairResponse:
+def serialize_pair_response(pair: RoutePair, origin: LocationPoint, destination: LocationPoint) -> PairResponse:
     """Build the public pair response from the pair row plus joined points."""
     return PairResponse(
         pair_id=pair.route_pair_id,
@@ -152,6 +159,7 @@ async def create_pair(
     payload: PairCreateRequest,
     response: Response,
     session: Annotated[AsyncSession, Depends(get_db)],
+    auth: Annotated[AuthContext, Depends(user_auth_dependency)],
 ) -> PairResponse:
     """Create a new Route Pair."""
     origin = await _get_point_by_code(session, payload.origin_code)
@@ -179,6 +187,7 @@ async def create_pair(
     )
 
     pair = RoutePair(
+        route_pair_id=str(ULID()),
         pair_code=generate_pair_code(),
         pair_status=PairStatus.DRAFT,
         origin_location_id=origin.location_id,
@@ -186,6 +195,28 @@ async def create_pair(
         profile_code=payload.profile_code,
     )
     session.add(pair)
+    await session.flush()
+
+    # High-fidelity audit & outbox
+    new_snapshot = serialize_pair_audit(pair)
+    await _write_audit(
+        session,
+        target_type="PAIR",
+        target_id=str(pair.route_pair_id),
+        action_type="CREATE",
+        actor_id=auth.actor_id,
+        actor_role=auth.actor_type,
+        new_snapshot=new_snapshot,
+    )
+    await _write_outbox(
+        session,
+        event_name="location.pair.created.v1",
+        payload={
+            "pair_id": str(pair.route_pair_id),
+            "pair_code": pair.pair_code,
+            "occurred_at_utc": new_snapshot["created_at_utc"],
+        },
+    )
 
     try:
         await session.commit()
@@ -198,19 +229,19 @@ async def create_pair(
 
     await session.refresh(pair)
     set_etag(response, pair.row_version)
-    return serialize_pair(pair, origin, destination)
+    return serialize_pair_response(pair, origin, destination)
 
 
 @router.get("/{pair_id}", response_model=PairResponse)
 async def get_pair(
-    pair_id: UUID,
+    pair_id: str,
     response: Response,
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> PairResponse:
     """Retrieve a Route Pair by ID."""
     pair, origin, destination = await _get_pair_detail(session, pair_id)
     set_etag(response, pair.row_version)
-    return serialize_pair(pair, origin, destination)
+    return serialize_pair_response(pair, origin, destination)
 
 
 @router.get("", response_model=PairListResponse)
@@ -282,14 +313,12 @@ async def list_pairs(
     total_pages = (total_items + pagination.per_page - 1) // pagination.per_page if total_items else 0
     rows = (
         await session.execute(
-            stmt.order_by(order_by, RoutePair.route_pair_id.desc())
-            .offset(pagination.offset)
-            .limit(pagination.per_page)
+            stmt.order_by(order_by, RoutePair.route_pair_id.desc()).offset(pagination.offset).limit(pagination.per_page)
         )
     ).all()
 
     return {
-        "data": [serialize_pair(pair, origin, destination) for pair, origin, destination in rows],
+        "data": [serialize_pair_response(pair, origin, destination) for pair, origin, destination in rows],
         "meta": PaginationMeta(
             page=pagination.page,
             per_page=pagination.per_page,
@@ -302,11 +331,12 @@ async def list_pairs(
 
 @router.patch("/{pair_id}", response_model=PairResponse)
 async def update_pair(
-    pair_id: UUID,
+    pair_id: str,
     payload: PairUpdateRequest,
     request: Request,
     response: Response,
     session: Annotated[AsyncSession, Depends(get_db)],
+    auth: Annotated[AuthContext, Depends(user_auth_dependency)],
 ) -> PairResponse:
     """Edit route pair properties."""
     pair = await _get_pair(session, pair_id)
@@ -335,7 +365,32 @@ async def update_pair(
         changed = True
 
     if changed:
+        old_snapshot = serialize_pair_audit(pair)
         pair.row_version += 1
+        await session.flush()
+        new_snapshot = serialize_pair_audit(pair)
+
+        # High-fidelity audit & outbox
+        await _write_audit(
+            session,
+            target_type="PAIR",
+            target_id=str(pair.route_pair_id),
+            action_type="UPDATE",
+            actor_id=auth.actor_id,
+            actor_role=auth.actor_type,
+            old_snapshot=old_snapshot,
+            new_snapshot=new_snapshot,
+            request_id=request.headers.get("X-Request-ID"),
+        )
+        await _write_outbox(
+            session,
+            event_name="location.pair.updated.v1",
+            payload={
+                "pair_id": str(pair.route_pair_id),
+                "pair_code": pair.pair_code,
+                "occurred_at_utc": new_snapshot["updated_at_utc"],
+            },
+        )
 
     try:
         await session.commit()
@@ -349,14 +404,15 @@ async def update_pair(
     await session.refresh(pair)
     pair, origin, destination = await _get_pair_detail(session, pair_id)
     set_etag(response, pair.row_version)
-    return serialize_pair(pair, origin, destination)
+    return serialize_pair_response(pair, origin, destination)
 
 
 @router.delete("/{pair_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def soft_delete_pair(
-    pair_id: UUID,
+    pair_id: str,
     request: Request,
     session: Annotated[AsyncSession, Depends(get_db)],
+    auth: Annotated[AuthContext, Depends(user_auth_dependency)],
 ) -> None:
     """Soft-delete a Route Pair."""
     pair = await _get_pair(session, pair_id)
@@ -364,8 +420,33 @@ async def soft_delete_pair(
         raise route_pair_already_soft_deleted()
     check_version_match(request, pair.row_version, mismatch_factory=route_pair_version_mismatch)
 
+    old_snapshot = serialize_pair_audit(pair)
     pair.pair_status = PairStatus.SOFT_DELETED
     pair.row_version += 1
+    await session.flush()
+    new_snapshot = serialize_pair_audit(pair)
+
+    # High-fidelity audit & outbox
+    await _write_audit(
+        session,
+        target_type="PAIR",
+        target_id=str(pair.route_pair_id),
+        action_type="SOFT_DELETE",
+        actor_id=auth.actor_id,
+        actor_role=auth.actor_type,
+        old_snapshot=old_snapshot,
+        new_snapshot=new_snapshot,
+        request_id=request.headers.get("X-Request-ID"),
+    )
+    await _write_outbox(
+        session,
+        event_name="location.pair.soft_deleted.v1",
+        payload={
+            "pair_id": str(pair.route_pair_id),
+            "pair_code": pair.pair_code,
+            "occurred_at_utc": new_snapshot["updated_at_utc"],
+        },
+    )
 
     try:
         await session.commit()

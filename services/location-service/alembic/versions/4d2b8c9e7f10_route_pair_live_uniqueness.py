@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "4d2b8c9e7f10"
@@ -20,9 +21,10 @@ depends_on: Sequence[str] | None = None
 
 def upgrade() -> None:
     connection = op.get_bind()
-    duplicates = connection.execute(
-        sa.text(
-            """
+    duplicates = (
+        connection.execute(
+            sa.text(
+                """
             SELECT
                 origin_location_id::text AS origin_location_id,
                 destination_location_id::text AS destination_location_id,
@@ -34,16 +36,19 @@ def upgrade() -> None:
             HAVING COUNT(*) > 1
             ORDER BY duplicate_count DESC, origin_location_id, destination_location_id, profile_code
             """
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     if duplicates:
         detail = "; ".join(
-            f"({row['origin_location_id']}, {row['destination_location_id']}, {row['profile_code']}) x{row['duplicate_count']}"
+            f"({row['origin_location_id']}, {row['destination_location_id']}, "
+            f"{row['profile_code']}) x{row['duplicate_count']}"
             for row in duplicates
         )
         raise RuntimeError(
-            "Cannot create idx_route_pairs_live_unique because duplicate ACTIVE/DRAFT route_pairs exist: "
-            f"{detail}"
+            f"Cannot create idx_route_pairs_live_unique because duplicate ACTIVE/DRAFT route_pairs exist: {detail}"
         )
 
     op.drop_index("idx_route_pairs_active_unique", table_name="route_pairs")

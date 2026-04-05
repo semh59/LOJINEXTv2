@@ -49,10 +49,7 @@ class MapboxTerrainClient:
         if not self.api_key:
             raise internal_error("Mapbox API key is missing.")
 
-        url = (
-            f"{self.base_url}/mapbox.terrain-rgb/{self.ZOOM}/{xtile}/{ytile}.pngraw"
-            f"?access_token={self.api_key}"
-        )
+        url = f"{self.base_url}/mapbox.terrain-rgb/{self.ZOOM}/{xtile}/{ytile}.pngraw?access_token={self.api_key}"
 
         max_retries = max(self.max_retries, 0)
         for attempt in range(max_retries + 1):

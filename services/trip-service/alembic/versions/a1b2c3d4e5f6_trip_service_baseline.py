@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "a1b2c3d4e5f6"
@@ -72,7 +73,9 @@ def upgrade() -> None:
         ["publish_status", "next_attempt_at_utc", "created_at_utc"],
         unique=False,
     )
-    op.create_index("ix_outbox_aggregate", "trip_outbox", ["aggregate_type", "aggregate_id", "created_at_utc"], unique=False)
+    op.create_index(
+        "ix_outbox_aggregate", "trip_outbox", ["aggregate_type", "aggregate_id", "created_at_utc"], unique=False
+    )
     op.create_index("ix_outbox_event_name", "trip_outbox", ["event_name", "created_at_utc"], unique=False)
 
     op.create_table(
@@ -110,7 +113,9 @@ def upgrade() -> None:
         sa.Column("updated_at_utc", sa.DateTime(timezone=True), nullable=False),
         sa.Column("soft_deleted_at_utc", sa.DateTime(timezone=True), nullable=True),
         sa.Column("soft_deleted_by_actor_id", sa.String(length=50), nullable=True),
-        sa.CheckConstraint("planned_duration_s IS NULL OR planned_duration_s >= 0", name="ck_trips_duration_non_negative"),
+        sa.CheckConstraint(
+            "planned_duration_s IS NULL OR planned_duration_s >= 0", name="ck_trips_duration_non_negative"
+        ),
         sa.CheckConstraint("tare_weight_kg IS NULL OR tare_weight_kg >= 0", name="ck_trips_tare_positive"),
         sa.CheckConstraint("gross_weight_kg IS NULL OR gross_weight_kg >= 0", name="ck_trips_gross_positive"),
         sa.CheckConstraint("net_weight_kg IS NULL OR net_weight_kg >= 0", name="ck_trips_net_positive"),
@@ -143,10 +148,27 @@ def upgrade() -> None:
         sa.UniqueConstraint("trip_no", name="uq_trip_trips_trip_no"),
     )
     op.create_index("ix_trips_status_datetime", "trip_trips", ["status", "trip_datetime_utc", "id"], unique=False)
-    op.create_index("ix_trips_driver_window", "trip_trips", ["driver_id", "trip_datetime_utc", "planned_end_utc"], unique=False)
-    op.create_index("ix_trips_vehicle_window", "trip_trips", ["vehicle_id", "trip_datetime_utc", "planned_end_utc"], unique=False)
-    op.create_index("ix_trips_trailer_window", "trip_trips", ["trailer_id", "trip_datetime_utc", "planned_end_utc"], unique=False)
-    op.create_index("ix_trips_route_pair_datetime", "trip_trips", ["route_pair_id", "trip_datetime_utc", "id"], unique=False)
+    op.create_index(
+        "ix_trips_driver_window",
+        "trip_trips",
+        ["driver_id", "trip_datetime_utc", "planned_end_utc"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_trips_vehicle_window",
+        "trip_trips",
+        ["vehicle_id", "trip_datetime_utc", "planned_end_utc"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_trips_trailer_window",
+        "trip_trips",
+        ["trailer_id", "trip_datetime_utc", "planned_end_utc"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_trips_route_pair_datetime", "trip_trips", ["route_pair_id", "trip_datetime_utc", "id"], unique=False
+    )
     op.create_index("ix_trips_base_trip", "trip_trips", ["base_trip_id"], unique=False)
     op.create_index(
         "uq_trips_empty_return_base_trip",
@@ -192,7 +214,9 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_evidence_trip_id", "trip_trip_evidence", ["trip_id"], unique=False)
-    op.create_index("ix_evidence_source_slip", "trip_trip_evidence", ["evidence_source", "source_slip_no"], unique=False)
+    op.create_index(
+        "ix_evidence_source_slip", "trip_trip_evidence", ["evidence_source", "source_slip_no"], unique=False
+    )
     op.create_index("ix_evidence_telegram_msg", "trip_trip_evidence", ["telegram_message_id"], unique=False)
     op.create_index("ix_evidence_row_number", "trip_trip_evidence", ["row_number"], unique=False)
 
@@ -215,7 +239,9 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("trip_id"),
     )
-    op.create_index("ix_enrichment_status_retry", "trip_trip_enrichment", ["enrichment_status", "next_retry_at_utc"], unique=False)
+    op.create_index(
+        "ix_enrichment_status_retry", "trip_trip_enrichment", ["enrichment_status", "next_retry_at_utc"], unique=False
+    )
     op.create_index("ix_enrichment_route", "trip_trip_enrichment", ["route_status"], unique=False)
     op.create_index("ix_enrichment_claim_exp", "trip_trip_enrichment", ["claim_expires_at_utc"], unique=False)
 
@@ -249,7 +275,9 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("audit_id"),
     )
     op.create_index("ix_trip_delete_audit_trip", "trip_trip_delete_audit", ["trip_id", "deleted_at_utc"], unique=False)
-    op.create_index("ix_trip_delete_audit_actor", "trip_trip_delete_audit", ["actor_id", "deleted_at_utc"], unique=False)
+    op.create_index(
+        "ix_trip_delete_audit_actor", "trip_trip_delete_audit", ["actor_id", "deleted_at_utc"], unique=False
+    )
 
 
 def downgrade() -> None:
@@ -272,9 +300,21 @@ def downgrade() -> None:
     op.drop_index("ix_evidence_trip_id", table_name="trip_trip_evidence")
     op.drop_table("trip_trip_evidence")
 
-    op.drop_index("uq_trips_source_reference_key", table_name="trip_trips", postgresql_where=sa.text("source_reference_key IS NOT NULL"))
-    op.drop_index("uq_trips_source_slip_no_telegram", table_name="trip_trips", postgresql_where=sa.text("source_type = 'TELEGRAM_TRIP_SLIP' AND source_slip_no IS NOT NULL"))
-    op.drop_index("uq_trips_empty_return_base_trip", table_name="trip_trips", postgresql_where=sa.text("is_empty_return = true"))
+    op.drop_index(
+        "uq_trips_source_reference_key",
+        table_name="trip_trips",
+        postgresql_where=sa.text("source_reference_key IS NOT NULL"),
+    )
+    op.drop_index(
+        "uq_trips_source_slip_no_telegram",
+        table_name="trip_trips",
+        postgresql_where=sa.text("source_type = 'TELEGRAM_TRIP_SLIP' AND source_slip_no IS NOT NULL"),
+    )
+    op.drop_index(
+        "uq_trips_empty_return_base_trip",
+        table_name="trip_trips",
+        postgresql_where=sa.text("is_empty_return = true"),
+    )
     op.drop_index("ix_trips_base_trip", table_name="trip_trips")
     op.drop_index("ix_trips_route_pair_datetime", table_name="trip_trips")
     op.drop_index("ix_trips_trailer_window", table_name="trip_trips")

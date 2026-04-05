@@ -12,6 +12,7 @@ from location_service.config import settings
 from location_service.errors import location_auth_invalid, location_auth_required, location_forbidden
 
 ROLE_ADMIN = "ADMIN"
+ROLE_MANAGER = "MANAGER"
 ROLE_SUPER_ADMIN = "SUPER_ADMIN"
 ROLE_SERVICE = "SERVICE"
 TRIP_SERVICE_NAME = "trip-service"
@@ -30,7 +31,9 @@ def _platform_auth_settings() -> AuthSettings:
     """Build shared auth settings for inbound token verification."""
     return AuthSettings(
         algorithm=settings.auth_jwt_algorithm,
-        shared_secret=settings.resolved_auth_jwt_secret if settings.auth_jwt_algorithm.upper().startswith("HS") else None,
+        shared_secret=(
+            settings.resolved_auth_jwt_secret if settings.auth_jwt_algorithm.upper().startswith("HS") else None
+        ),
         issuer=settings.auth_issuer or None,
         audience=settings.auth_audience or None,
         public_key=settings.auth_public_key or None,
@@ -73,7 +76,7 @@ def require_public_user_token(authorization: str | None) -> AuthContext:
     claims = _decode_claims(authorization)
     role = claims.role.strip()
     actor_id = claims.sub.strip()
-    if role not in {ROLE_ADMIN, ROLE_SUPER_ADMIN} or not actor_id:
+    if role not in {ROLE_ADMIN, ROLE_MANAGER, ROLE_SUPER_ADMIN} or not actor_id:
         raise location_forbidden("User token does not have an allowed admin role.")
     return AuthContext(actor_id=actor_id, role=role)
 

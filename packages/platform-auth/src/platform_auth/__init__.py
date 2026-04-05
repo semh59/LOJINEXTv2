@@ -9,8 +9,12 @@ from platform_auth.errors import (
     TokenMissingError,
 )
 from platform_auth.jwt_codec import issue_token, verify_token
-from platform_auth.principals import ServicePrincipal, UserPrincipal, principal_from_claims
-from platform_auth.roles import PlatformRole
+from platform_auth.principals import (
+    ServicePrincipal,
+    UserPrincipal,
+    principal_from_claims,
+)
+from platform_auth.roles import PlatformActorType, PlatformRole
 from platform_auth.service_tokens import ServiceTokenAcquisitionError, ServiceTokenCache
 from platform_auth.settings import AuthSettings
 from platform_auth.token_factory import ServiceTokenFactory
@@ -18,6 +22,7 @@ from platform_auth.token_factory import ServiceTokenFactory
 __all__ = [
     "AuthSettings",
     "PlatformAuthError",
+    "PlatformActorType",
     "PlatformRole",
     "ServicePrincipal",
     "ServiceTokenAcquisitionError",

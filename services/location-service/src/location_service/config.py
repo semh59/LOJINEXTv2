@@ -1,7 +1,6 @@
 """Application configuration via environment variables."""
 
 import os
-
 from typing import Literal
 
 from pydantic_settings import BaseSettings
@@ -46,21 +45,6 @@ class Settings(BaseSettings):
     enable_ors_validation: bool = True
 
     provider_timeout_ms: int = 4000
-    provider_retry_max: int = 3
-    provider_probe_ttl_seconds: int = 30
-    provider_probe_origin_lng: float = 28.9784
-    provider_probe_origin_lat: float = 41.0082
-    provider_probe_dest_lng: float = 28.9905
-    provider_probe_dest_lat: float = 41.0151
-    processing_poll_interval_seconds: float = 5.0
-    processing_claim_ttl_seconds: int = 300
-    worker_heartbeat_timeout_seconds: int = 60
-
-    segment_max_length_m: int = 200
-    elevation_sampling_max_spacing_m: int = 30
-    elevation_max_tiles: int = 2000
-
-    distance_delta_warning_pct: float = 5.0
     distance_delta_fail_pct: float = 15.0
     duration_delta_warning_pct: float = 10.0
     duration_delta_fail_pct: float = 20.0
@@ -73,6 +57,12 @@ class Settings(BaseSettings):
     monthly_refresh_cron: str = ""
     enable_bulk_refresh: bool = True
     run_stuck_sla_minutes: int = 30
+    outbox_poll_interval_seconds: int = 5
+    outbox_publish_batch_size: int = 50
+    outbox_retry_max: int = 5
+    kafka_topic: str = "location-events"
+    kafka_bootstrap_servers: str = "localhost:9092"
+    kafka_client_id: str = "location-service"
 
     @property
     def resolved_auth_jwt_secret(self) -> str:
@@ -116,16 +106,6 @@ def validate_prod_settings(current: Settings) -> None:
             errors.append("LOCATION_ORS_BASE_URL must be set when LOCATION_ENABLE_ORS_VALIDATION=true in prod.")
     if current.provider_timeout_ms <= 0:
         errors.append("LOCATION_PROVIDER_TIMEOUT_MS must be greater than zero.")
-    if current.provider_retry_max < 0:
-        errors.append("LOCATION_PROVIDER_RETRY_MAX cannot be negative.")
-    if current.provider_probe_ttl_seconds < 0:
-        errors.append("LOCATION_PROVIDER_PROBE_TTL_SECONDS cannot be negative.")
-    if current.processing_poll_interval_seconds <= 0:
-        errors.append("LOCATION_PROCESSING_POLL_INTERVAL_SECONDS must be greater than zero.")
-    if current.processing_claim_ttl_seconds <= 0:
-        errors.append("LOCATION_PROCESSING_CLAIM_TTL_SECONDS must be greater than zero.")
-    if current.worker_heartbeat_timeout_seconds <= 0:
-        errors.append("LOCATION_WORKER_HEARTBEAT_TIMEOUT_SECONDS must be greater than zero.")
 
     if errors:
         raise ValueError("Production settings invalid: " + " ".join(errors))

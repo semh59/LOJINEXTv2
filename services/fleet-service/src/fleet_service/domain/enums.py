@@ -7,6 +7,7 @@ class ActorType(StrEnum):
     """Actor types for audit fields."""
 
     ADMIN = "ADMIN"
+    MANAGER = "MANAGER"
     SUPER_ADMIN = "SUPER_ADMIN"
     SERVICE = "SERVICE"
     SYSTEM = "SYSTEM"
