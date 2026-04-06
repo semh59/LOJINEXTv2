@@ -25,7 +25,7 @@ from trip_service.auth import (
 )
 from trip_service.config import settings
 from trip_service.database import get_session
-from trip_service.dependencies import resolve_route_by_names
+from trip_service.dependencies import ensure_trip_references_valid, fetch_trip_context, resolve_route_by_names
 from trip_service.enums import (
     ActorType,
     DataQualityFlag,
@@ -98,6 +98,7 @@ from trip_service.schemas import (
 )
 from trip_service.timezones import local_datetime_to_utc
 from trip_service.trip_helpers import (
+    _LEGACY_DELETED_STATUSES,
     _check_idempotency_key,
     _classify_manual_status,
     _create_outbox_event,
@@ -110,20 +111,20 @@ from trip_service.trip_helpers import (
     apply_trip_context,
     assert_no_trip_overlap,
     build_delete_audit,
-    ensure_trip_references_valid,
-    fetch_trip_context,
+    is_deleted_trip_status,
+    normalize_trip_status,
     serialize_trip_admin,
     transition_trip,
     trip_to_resource,
     utc_now,
 )
 
-router = APIRouter(prefix="/api/v1/trips", tags=["trips"])
+router = APIRouter(tags=["trips"])
 
 _REFERENCE_ALLOWED_SERVICES = {"driver-service", "fleet-service"}
 _REFERENCE_EXCLUDED_STATUSES = (
     TripStatus.REJECTED.value,
-    TripStatus.CANCELLED.value,
+    *_LEGACY_DELETED_STATUSES,
 )
 
 
@@ -149,6 +150,11 @@ def _json_response(status_code: int, content: dict[str, Any], headers: dict[str,
 def _response_headers_for_trip(trip: TripTrip) -> dict[str, str]:
     """Build the standard response headers for a trip resource."""
     return {"ETag": make_etag(trip.id, trip.version)}
+
+
+def _resolve_idempotency_key(canonical_key: str | None, legacy_key: str | None) -> str | None:
+    """Prefer the canonical idempotency header while still accepting the legacy alias."""
+    return canonical_key or legacy_key
 
 
 def _require_admin(auth: AuthContext) -> AuthContext:
@@ -235,6 +241,13 @@ def _map_integrity_error(
 def _coerce_actor_type(role: str) -> str:
     """Normalize role strings for persistence/audit fields."""
     return str(role)
+
+
+def _apply_status_filter(stmt, status: TripStatus):  # noqa: ANN001
+    """Apply canonical status filters while still reading legacy deleted rows."""
+    if status == TripStatus.SOFT_DELETED:
+        return stmt.where(TripTrip.status.in_(_LEGACY_DELETED_STATUSES))
+    return stmt.where(TripTrip.status == status.value)
 
 
 def _reference_column_for_asset_type(asset_type: str):  # noqa: ANN001
@@ -834,10 +847,10 @@ async def excel_export_feed(
     stmt = (
         select(TripTrip)
         .options(selectinload(TripTrip.enrichment), selectinload(TripTrip.evidence))
-        .where(TripTrip.status != TripStatus.CANCELLED)
+        .where(TripTrip.status.notin_(_LEGACY_DELETED_STATUSES))
     )
     if status is not None:
-        stmt = stmt.where(TripTrip.status == status)
+        stmt = _apply_status_filter(stmt, status)
     if date_from or date_to:
         utc_from, utc_to = date_range_to_utc(date_from, date_to, timezone)
         if utc_from is not None:
@@ -869,7 +882,7 @@ async def excel_export_feed(
 
 
 @router.post(
-    "",
+    "/api/v1/trips",
     response_model=TripResource,
     status_code=201,
     summary="Create a new trip",
@@ -878,14 +891,16 @@ async def create_trip(
     body: ManualCreateRequest,
     auth: AuthContext = Depends(user_auth_dependency),
     session: AsyncSession = Depends(get_session),
-    idempotency_key: str = Header(None, alias="X-Idempotency-Key"),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    legacy_idempotency_key: str | None = Header(None, alias="X-Idempotency-Key"),
 ):
     """Create a manual trip using route-pair context instead of raw route ids."""
     auth = _require_admin(auth)
+    effective_idempotency_key = _resolve_idempotency_key(idempotency_key, legacy_idempotency_key)
     request_body = body.model_dump(exclude_none=True)
     request_hash = _merged_payload_hash(request_body)
     endpoint_fp = f"create_trip:{auth.actor_id}"
-    replay = await _check_idempotency_key(session, idempotency_key, endpoint_fp, request_hash)
+    replay = await _check_idempotency_key(session, effective_idempotency_key, endpoint_fp, request_hash)
     if replay is not None:
         return replay
 
@@ -977,10 +992,10 @@ async def create_trip(
         resource = trip_to_resource(trip)
         resource_dict = resource.model_dump(mode="json")
         headers = _response_headers_for_trip(trip)
-        if idempotency_key:
+        if effective_idempotency_key:
             await _save_idempotency_record(
                 session,
-                idempotency_key=idempotency_key,
+                idempotency_key=effective_idempotency_key,
                 endpoint_fingerprint=endpoint_fp,
                 request_hash=request_hash,
                 response_status=201,
@@ -1014,9 +1029,9 @@ async def list_trips(
     pagination = parse_pagination(page, per_page)
     stmt = select(TripTrip).options(selectinload(TripTrip.enrichment), selectinload(TripTrip.evidence))
     if status is not None:
-        stmt = stmt.where(TripTrip.status == status)
+        stmt = _apply_status_filter(stmt, status)
     else:
-        stmt = stmt.where(TripTrip.status != TripStatus.CANCELLED)
+        stmt = stmt.where(TripTrip.status.notin_(_LEGACY_DELETED_STATUSES))
     if source_type is not None:
         stmt = stmt.where(TripTrip.source_type == source_type)
     if driver_id is not None:
@@ -1093,11 +1108,9 @@ async def edit_trip(
     trip = await _get_trip_or_404(session, trip_id)
     if current_version != trip.version:
         raise trip_version_mismatch()
-    if trip.status not in (TripStatus.REQUESTED, TripStatus.ASSIGNED, TripStatus.IN_PROGRESS):
-        # We allow editing in IN_PROGRESS if necessary, but typically only metadata.
-        # COMPLETED and CANCELLED/REJECTED are terminal for standard edits.
-        if trip.status in (TripStatus.COMPLETED, TripStatus.CANCELLED, TripStatus.REJECTED):
-            raise invalid_status_transition(f"Cannot edit trip in {trip.status} state.")
+    normalized_status = normalize_trip_status(trip.status)
+    if normalized_status not in {TripStatus.PENDING_REVIEW.value, TripStatus.COMPLETED.value}:
+        raise invalid_status_transition(f"Cannot edit trip in {normalized_status} state.")
 
     old_snapshot = serialize_trip_admin(trip)
     update_data = body.model_dump(exclude_unset=True)
@@ -1240,7 +1253,7 @@ async def approve_trip(
     trip = await _get_trip_or_404(session, trip_id)
     if current_version != trip.version:
         raise trip_version_mismatch()
-    if trip.status != TripStatus.PENDING_REVIEW:
+    if normalize_trip_status(trip.status) != TripStatus.PENDING_REVIEW.value:
         raise invalid_status_transition("Only PENDING_REVIEW trips can be approved.")
     _ensure_complete_for_completion(trip)
     if trip.route_id is None or trip.planned_end_utc is None:
@@ -1300,7 +1313,7 @@ async def reject_trip(
     trip = await _get_trip_or_404(session, trip_id)
     if current_version != trip.version:
         raise trip_version_mismatch()
-    if trip.status != TripStatus.PENDING_REVIEW:
+    if normalize_trip_status(trip.status) != TripStatus.PENDING_REVIEW.value:
         raise invalid_status_transition("Only PENDING_REVIEW trips can be rejected.")
 
     now = utc_now()
@@ -1317,7 +1330,6 @@ async def reject_trip(
         )
     )
     await _create_outbox_event(session, trip, "trip.rejected.v1")
-    TRIP_CANCELLED_TOTAL.inc()
     await session.commit()
 
     trip = await _get_trip_or_404(session, trip.id)
@@ -1347,11 +1359,11 @@ async def create_empty_return(
     base_trip = await _get_trip_or_404(session, base_trip_id)
     if current_version != base_trip.version:
         raise trip_version_mismatch()
-    if base_trip.status != TripStatus.COMPLETED:
+    if normalize_trip_status(base_trip.status) != TripStatus.COMPLETED.value:
         raise invalid_base_for_empty_return("Base trip must be COMPLETED before an empty return can be created.")
     if base_trip.is_empty_return:
         raise invalid_base_for_empty_return("Base trip is itself an empty return.")
-    if base_trip.status in (TripStatus.CANCELLED, TripStatus.REJECTED):
+    if is_deleted_trip_status(base_trip.status) or normalize_trip_status(base_trip.status) == TripStatus.REJECTED.value:
         raise invalid_base_for_empty_return("Base trip is not active.")
     if base_trip.route_pair_id is None:
         raise invalid_base_for_empty_return("Base trip is missing route pair context.")
@@ -1470,12 +1482,12 @@ async def cancel_trip(
     session: AsyncSession = Depends(get_session),
     auth: AuthContext = Depends(user_auth_dependency),
 ) -> Any:
-    """Cancel a trip using the state machine."""
+    """Soft-delete a trip under the TASK-0033 contract."""
     auth = _require_admin(auth)
     current_version = require_trip_if_match(request, trip_id)
     trip = await _get_trip_or_404(session, trip_id)
 
-    if trip.status == TripStatus.CANCELLED:
+    if is_deleted_trip_status(trip.status):
         if current_version != trip.version:
             raise trip_version_mismatch()
         resource = trip_to_resource(trip)
@@ -1484,9 +1496,12 @@ async def cancel_trip(
     if current_version != trip.version:
         raise trip_version_mismatch()
 
-    transition_trip(trip, TripStatus.CANCELLED)
-
     now = utc_now()
+    trip.status = TripStatus.SOFT_DELETED.value
+    trip.soft_deleted_at_utc = now
+    trip.soft_deleted_by_actor_id = auth.actor_id
+    trip.version += 1
+    trip.updated_at_utc = now
     session.add(
         TripTripTimeline(
             id=_generate_id(),
@@ -1494,11 +1509,11 @@ async def cancel_trip(
             event_type="TRIP_CANCELLED",
             actor_type=_coerce_actor_type(auth.role),
             actor_id=auth.actor_id,
-            note="Trip cancelled.",
+            note="Trip soft deleted.",
             created_at_utc=now,
         )
     )
-    await _create_outbox_event(session, trip, "trip.cancelled.v1")
+    await _create_outbox_event(session, trip, "trip.soft_deleted.v1")
     TRIP_CANCELLED_TOTAL.inc()
     await session.commit()
 
@@ -1521,7 +1536,7 @@ async def hard_delete_trip(
     trip = await _get_trip_or_404(session, trip_id)
     if current_version != trip.version:
         raise trip_version_mismatch()
-    if trip.status not in (TripStatus.CANCELLED, TripStatus.REJECTED):
+    if not is_deleted_trip_status(trip.status):
         raise hard_delete_requires_soft_deleted()
     if trip.empty_return_children:
         raise has_empty_return_child()

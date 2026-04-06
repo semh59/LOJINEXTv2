@@ -2,17 +2,36 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import pytest
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+import trip_service.workers.enrichment_worker as enrichment_worker_module
+import trip_service.workers.outbox_relay as outbox_relay_module
 from trip_service.broker import MessageBroker, OutboxMessage
 from trip_service.config import settings
 from trip_service.enums import EnrichmentStatus, RouteStatus
 from trip_service.models import TripOutbox, TripTrip, TripTripEnrichment, TripTripEvidence
-from trip_service.workers.enrichment_worker import _claim_and_process_batch
-from trip_service.workers.outbox_relay import _outbox_next_attempt_at, _relay_batch
+from trip_service.workers.enrichment_worker import (
+    _claim_and_process_batch,
+    _compute_data_quality_flag,
+    _derive_final_enrichment_status,
+    _enrichment_next_retry_at,
+    _is_schema_not_ready,
+    _process_single_enrichment,
+    _resolve_route,
+    run_enrichment_worker,
+)
+from trip_service.workers.outbox_relay import (
+    _outbox_next_attempt_at,
+    _publish_single,
+    _relay_batch,
+    run_outbox_relay,
+)
 
 
 class FailingBroker(MessageBroker):
@@ -61,6 +80,29 @@ class SelectiveFailBroker(MessageBroker):
 
     async def check_health(self) -> None:
         return None
+
+
+def test_enrichment_helper_functions_cover_backoff_and_status_derivation(monkeypatch: pytest.MonkeyPatch) -> None:
+    fixed_now = datetime(2026, 4, 5, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(enrichment_worker_module, "_now_utc", lambda: fixed_now)
+    monkeypatch.setattr(enrichment_worker_module.random, "random", lambda: 0.5)
+
+    assert _enrichment_next_retry_at(0) == fixed_now + timedelta(seconds=60)
+    assert _enrichment_next_retry_at(99) == fixed_now + timedelta(seconds=21600)
+    assert _is_schema_not_ready(
+        DBAPIError("SELECT 1", {}, Exception("relation trip_trips does not exist"), False)
+    )
+    assert (
+        _is_schema_not_ready(DBAPIError("SELECT 1", {}, Exception("relation other_table does not exist"), False))
+        is False
+    )
+    assert _compute_data_quality_flag("ADMIN_MANUAL", None, route_resolved=False) == "HIGH"
+    assert _compute_data_quality_flag("TELEGRAM_TRIP_SLIP", 0.75, route_resolved=True) == "MEDIUM"
+    assert _compute_data_quality_flag("TELEGRAM_TRIP_SLIP", None, route_resolved=False) == "MEDIUM"
+    assert _derive_final_enrichment_status(RouteStatus.READY) == EnrichmentStatus.READY
+    assert _derive_final_enrichment_status(RouteStatus.SKIPPED) == EnrichmentStatus.SKIPPED
+    assert _derive_final_enrichment_status(RouteStatus.FAILED) == EnrichmentStatus.FAILED
+    assert _derive_final_enrichment_status(RouteStatus.PENDING) == EnrichmentStatus.PENDING
 
 
 @pytest.mark.asyncio
@@ -531,3 +573,388 @@ async def test_outbox_relay_commits_each_event_independently(test_session, db_en
     assert refreshed_second.publish_status == "FAILED"
     assert refreshed_second.last_error_code == f"publish failed for {second.event_id}"[:100]
     assert refreshed_second.claim_token is None
+
+
+@pytest.mark.asyncio
+async def test_enrichment_resolve_route_awaits_service_headers(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class StubWorkerClient:
+        async def post(self, url: str, *, json: dict[str, object], headers: dict[str, str]):
+            captured["url"] = url
+            captured["json"] = json
+            captured["headers"] = headers
+            return httpx.Response(200, json={"route_id": "route-123"}, request=httpx.Request("POST", url))
+
+    async def fake_get_worker_client() -> StubWorkerClient:
+        return StubWorkerClient()
+
+    async def fake_location_headers() -> dict[str, str]:
+        return {"Authorization": "Bearer worker-token"}
+
+    monkeypatch.setattr("trip_service.workers.enrichment_worker.get_worker_client", fake_get_worker_client)
+    monkeypatch.setattr("trip_service.workers.enrichment_worker._location_service_headers", fake_location_headers)
+
+    route_id, status = await _resolve_route("Istanbul", "Ankara")
+
+    assert route_id == "route-123"
+    assert status == RouteStatus.READY
+    assert captured["headers"] == {"Authorization": "Bearer worker-token"}
+
+
+@pytest.mark.asyncio
+async def test_enrichment_resolve_route_handles_business_invalid_and_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_location_headers() -> dict[str, str]:
+        return {"Authorization": "Bearer worker-token"}
+
+    class StubWorkerClient:
+        def __init__(self, response: httpx.Response | Exception) -> None:
+            self.response = response
+
+        async def post(self, url: str, *, json: dict[str, object], headers: dict[str, str]):
+            del url, json, headers
+            if isinstance(self.response, Exception):
+                raise self.response
+            return self.response
+
+    async def fake_worker_client_skip() -> StubWorkerClient:
+        return StubWorkerClient(
+            httpx.Response(
+                404,
+                json={"code": "LOCATION_ROUTE_RESOLUTION_NOT_FOUND"},
+                request=httpx.Request("POST", "http://location/internal/v1/routes/resolve"),
+            )
+        )
+
+    async def fake_worker_client_fail() -> StubWorkerClient:
+        return StubWorkerClient(
+            httpx.Response(
+                500,
+                json={"code": "BOOM"},
+                request=httpx.Request("POST", "http://location/internal/v1/routes/resolve"),
+            )
+        )
+
+    async def fake_worker_client_error() -> StubWorkerClient:
+        return StubWorkerClient(httpx.ConnectError("down"))
+
+    monkeypatch.setattr("trip_service.workers.enrichment_worker._location_service_headers", fake_location_headers)
+    monkeypatch.setattr("trip_service.workers.enrichment_worker.get_worker_client", fake_worker_client_skip)
+    assert await _resolve_route("Istanbul", "Ankara") == (None, RouteStatus.SKIPPED)
+
+    monkeypatch.setattr("trip_service.workers.enrichment_worker.get_worker_client", fake_worker_client_fail)
+    assert await _resolve_route("Istanbul", "Ankara") == (None, RouteStatus.FAILED)
+
+    monkeypatch.setattr("trip_service.workers.enrichment_worker.get_worker_client", fake_worker_client_error)
+    assert await _resolve_route("Istanbul", "Ankara") == (None, RouteStatus.FAILED)
+
+
+@pytest.mark.asyncio
+async def test_process_single_enrichment_marks_missing_evidence_failed(
+    test_session,
+    db_engine,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    monkeypatch.setattr("trip_service.workers.enrichment_worker.async_session_factory", session_factory)
+
+    now = datetime.now(UTC)
+    trip = TripTrip(
+        id="01JATENRICHMISSEVIDENCE001",
+        trip_no="TR-ENRICH-MISSING-EVIDENCE",
+        source_type="TELEGRAM_TRIP_SLIP",
+        source_slip_no="SLIP-ENRICH-MISSING",
+        source_reference_key="telegram-message-enrich-missing",
+        source_payload_hash="hash",
+        review_reason_code="SOURCE_IMPORT",
+        base_trip_id=None,
+        driver_id="driver-001",
+        vehicle_id="vehicle-001",
+        trailer_id=None,
+        route_pair_id="pair-001",
+        route_id=None,
+        origin_location_id="loc-istanbul",
+        origin_name_snapshot="Istanbul",
+        destination_location_id="loc-ankara",
+        destination_name_snapshot="Ankara",
+        trip_datetime_utc=now,
+        trip_timezone="Europe/Istanbul",
+        planned_duration_s=21600,
+        planned_end_utc=now + timedelta(hours=6),
+        tare_weight_kg=10000,
+        gross_weight_kg=25000,
+        net_weight_kg=15000,
+        is_empty_return=False,
+        status="PENDING_REVIEW",
+        version=1,
+        created_by_actor_type="SERVICE",
+        created_by_actor_id="worker-test",
+        created_at_utc=now,
+        updated_at_utc=now,
+    )
+    enrichment = TripTripEnrichment(
+        id="01JATENRICHMISSEVIDENCE002",
+        trip_id=trip.id,
+        enrichment_status=EnrichmentStatus.RUNNING,
+        route_status=RouteStatus.PENDING,
+        data_quality_flag="LOW",
+        enrichment_attempt_count=0,
+        next_retry_at_utc=None,
+        claim_token="claim-token",
+        claim_expires_at_utc=now + timedelta(minutes=5),
+        claimed_by_worker="worker-test",
+        created_at_utc=now,
+        updated_at_utc=now,
+    )
+    test_session.add_all([trip, enrichment])
+    await test_session.commit()
+
+    await _process_single_enrichment(trip.id, enrichment.id, "claim-token", "worker-test")
+
+    async with session_factory() as session:
+        refreshed = await session.get(TripTripEnrichment, enrichment.id)
+    assert refreshed is not None
+    assert refreshed.route_status == RouteStatus.FAILED
+    assert refreshed.enrichment_status == EnrichmentStatus.FAILED
+    assert refreshed.next_retry_at_utc is not None
+    assert refreshed.claim_token is None
+
+
+@pytest.mark.asyncio
+async def test_process_single_enrichment_leaves_ready_rows_without_retry(
+    test_session,
+    db_engine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    monkeypatch.setattr("trip_service.workers.enrichment_worker.async_session_factory", session_factory)
+
+    now = datetime.now(UTC)
+    trip = TripTrip(
+        id="01JATENRICHREADYROW000001",
+        trip_no="TR-ENRICH-READY",
+        source_type="ADMIN_MANUAL",
+        source_slip_no=None,
+        source_reference_key=None,
+        source_payload_hash="hash",
+        review_reason_code=None,
+        base_trip_id=None,
+        driver_id="driver-001",
+        vehicle_id="vehicle-001",
+        trailer_id=None,
+        route_pair_id="pair-001",
+        route_id="route-001",
+        origin_location_id="loc-istanbul",
+        origin_name_snapshot="Istanbul",
+        destination_location_id="loc-ankara",
+        destination_name_snapshot="Ankara",
+        trip_datetime_utc=now,
+        trip_timezone="Europe/Istanbul",
+        planned_duration_s=21600,
+        planned_end_utc=now + timedelta(hours=6),
+        tare_weight_kg=10000,
+        gross_weight_kg=25000,
+        net_weight_kg=15000,
+        is_empty_return=False,
+        status="PENDING_REVIEW",
+        version=1,
+        created_by_actor_type="MANAGER",
+        created_by_actor_id="manager-001",
+        created_at_utc=now,
+        updated_at_utc=now,
+    )
+    enrichment = TripTripEnrichment(
+        id="01JATENRICHREADYROW000002",
+        trip_id=trip.id,
+        enrichment_status=EnrichmentStatus.RUNNING,
+        route_status=RouteStatus.READY,
+        data_quality_flag="LOW",
+        enrichment_attempt_count=0,
+        next_retry_at_utc=now + timedelta(minutes=5),
+        claim_token="claim-token",
+        claim_expires_at_utc=now + timedelta(minutes=5),
+        claimed_by_worker="worker-test",
+        created_at_utc=now,
+        updated_at_utc=now,
+    )
+    test_session.add_all([trip, enrichment])
+    await test_session.commit()
+
+    await _process_single_enrichment(trip.id, enrichment.id, "claim-token", "worker-test")
+
+    async with session_factory() as session:
+        refreshed = await session.get(TripTripEnrichment, enrichment.id)
+    assert refreshed is not None
+    assert refreshed.enrichment_status == EnrichmentStatus.READY
+    assert refreshed.data_quality_flag == "HIGH"
+    assert refreshed.next_retry_at_utc is None
+
+
+@pytest.mark.asyncio
+async def test_process_single_enrichment_stops_retrying_at_failure_ceiling(
+    test_session,
+    db_engine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    monkeypatch.setattr("trip_service.workers.enrichment_worker.async_session_factory", session_factory)
+    monkeypatch.setattr(settings, "enrichment_max_attempts", 1)
+
+    now = datetime.now(UTC)
+    trip = TripTrip(
+        id="01JATENRICHFAILCEIL000001",
+        trip_no="TR-ENRICH-FAIL-CEIL",
+        source_type="TELEGRAM_TRIP_SLIP",
+        source_slip_no="SLIP-FAIL-CEIL",
+        source_reference_key="telegram-message-fail-ceil",
+        source_payload_hash="hash",
+        review_reason_code="SOURCE_IMPORT",
+        base_trip_id=None,
+        driver_id="driver-001",
+        vehicle_id="vehicle-001",
+        trailer_id=None,
+        route_pair_id="pair-001",
+        route_id=None,
+        origin_location_id="loc-istanbul",
+        origin_name_snapshot="Istanbul",
+        destination_location_id="loc-ankara",
+        destination_name_snapshot="Ankara",
+        trip_datetime_utc=now,
+        trip_timezone="Europe/Istanbul",
+        planned_duration_s=21600,
+        planned_end_utc=now + timedelta(hours=6),
+        tare_weight_kg=10000,
+        gross_weight_kg=25000,
+        net_weight_kg=15000,
+        is_empty_return=False,
+        status="PENDING_REVIEW",
+        version=1,
+        created_by_actor_type="SERVICE",
+        created_by_actor_id="worker-test",
+        created_at_utc=now,
+        updated_at_utc=now,
+    )
+    enrichment = TripTripEnrichment(
+        id="01JATENRICHFAILCEIL000002",
+        trip_id=trip.id,
+        enrichment_status=EnrichmentStatus.RUNNING,
+        route_status=RouteStatus.PENDING,
+        data_quality_flag="LOW",
+        enrichment_attempt_count=1,
+        next_retry_at_utc=None,
+        claim_token="claim-token",
+        claim_expires_at_utc=now + timedelta(minutes=5),
+        claimed_by_worker="worker-test",
+        created_at_utc=now,
+        updated_at_utc=now,
+    )
+    evidence = TripTripEvidence(
+        id="01JATENRICHFAILCEIL000003",
+        trip_id=trip.id,
+        evidence_source="TELEGRAM_TRIP_SLIP",
+        evidence_kind="OCR",
+        source_slip_no="SLIP-FAIL-CEIL",
+        origin_name_raw="Istanbul",
+        destination_name_raw="Ankara",
+        raw_payload_json="{}",
+        created_at_utc=now,
+    )
+    test_session.add_all([trip, enrichment, evidence])
+    await test_session.commit()
+
+    async def explode_route(origin_name: str, destination_name: str):
+        del origin_name, destination_name
+        raise RuntimeError("route exploded")
+
+    monkeypatch.setattr("trip_service.workers.enrichment_worker._resolve_route", explode_route)
+
+    await _process_single_enrichment(trip.id, enrichment.id, "claim-token", "worker-test")
+
+    async with session_factory() as session:
+        refreshed = await session.get(TripTripEnrichment, enrichment.id)
+    assert refreshed is not None
+    assert refreshed.enrichment_status == EnrichmentStatus.FAILED
+    assert refreshed.next_retry_at_utc is None
+    assert refreshed.last_enrichment_error_code == "route exploded"
+
+
+@pytest.mark.asyncio
+async def test_publish_single_returns_false_when_claim_is_lost(db_engine, monkeypatch: pytest.MonkeyPatch) -> None:
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    monkeypatch.setattr("trip_service.workers.outbox_relay.async_session_factory", session_factory)
+
+    result = await _publish_single(RecordingBroker(), "missing-event", "missing-claim")
+
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_claim_and_process_batch_returns_zero_when_no_rows(db_engine, monkeypatch: pytest.MonkeyPatch) -> None:
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    monkeypatch.setattr("trip_service.workers.enrichment_worker.async_session_factory", session_factory)
+
+    assert await _claim_and_process_batch("worker-empty") == 0
+
+
+@pytest.mark.asyncio
+async def test_run_enrichment_worker_warns_when_schema_is_not_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fail_claim(worker_id: str, batch_size: int = 10) -> int:
+        del worker_id, batch_size
+        raise DBAPIError("SELECT 1", {}, Exception("relation trip_trip_enrichment does not exist"), False)
+
+    async def stop_sleep(seconds: float) -> None:
+        del seconds
+        raise asyncio.CancelledError
+
+    warnings: list[str] = []
+
+    def fake_warning(message: str, *args) -> None:
+        warnings.append(message % args if args else message)
+
+    monkeypatch.setattr("trip_service.workers.enrichment_worker._claim_and_process_batch", fail_claim)
+    monkeypatch.setattr("trip_service.workers.enrichment_worker.asyncio.sleep", stop_sleep)
+    monkeypatch.setattr(enrichment_worker_module.logger, "warning", fake_warning)
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_enrichment_worker(worker_id="worker-test")
+
+    assert warnings == ["Worker worker-test: schema not migrated yet, skipping this interval"]
+
+
+@pytest.mark.asyncio
+async def test_run_outbox_relay_warns_when_schema_is_not_ready_and_closes_broker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    broker = RecordingBroker()
+    closed = {"value": False}
+
+    async def fake_close() -> None:
+        closed["value"] = True
+
+    async def fail_relay(received_broker: MessageBroker, worker_id: str, batch_size: int = 20) -> int:
+        del received_broker, worker_id, batch_size
+        raise DBAPIError("SELECT 1", {}, Exception("relation trip_outbox does not exist"), False)
+
+    async def stop_sleep(seconds: float) -> None:
+        del seconds
+        raise asyncio.CancelledError
+
+    warnings: list[str] = []
+
+    def fake_warning(message: str, *args) -> None:
+        warnings.append(message % args if args else message)
+
+    monkeypatch.setattr(broker, "close", fake_close)
+    monkeypatch.setattr("trip_service.workers.outbox_relay._relay_batch", fail_relay)
+    monkeypatch.setattr("trip_service.workers.outbox_relay.asyncio.sleep", stop_sleep)
+    monkeypatch.setattr(outbox_relay_module.logger, "warning", fake_warning)
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_outbox_relay(broker, worker_id="relay-test")
+
+    assert warnings == ["Relay relay-test: schema not migrated yet, skipping this interval"]
+    assert closed["value"] is True

@@ -1,5 +1,6 @@
 """Application configuration via environment variables."""
 
+import logging
 import os
 from typing import Literal
 
@@ -8,6 +9,8 @@ from pydantic_settings import BaseSettings
 DEFAULT_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/trip_service"
 DEFAULT_AUTH_JWT_SECRET = "trip-service-dev-secret-please-change-me-32b"
 DEFAULT_KAFKA_BOOTSTRAP = "localhost:9092"
+
+logger = logging.getLogger("trip_service.config")
 
 
 class Settings(BaseSettings):
@@ -79,6 +82,12 @@ settings = Settings()
 
 def validate_prod_settings(current: Settings) -> None:
     """Fail fast when production settings are insecure or missing."""
+    bridge_secret = os.getenv("PLATFORM_JWT_SECRET")
+    if bridge_secret:
+        if current.environment == "prod":
+            raise ValueError("Production settings invalid: PLATFORM_JWT_SECRET bridge must not be enabled in prod.")
+        logger.warning("PLATFORM_JWT_SECRET recovery bridge is enabled outside prod; remove it after migration.")
+
     if current.environment != "prod":
         return
 
@@ -88,6 +97,10 @@ def validate_prod_settings(current: Settings) -> None:
     ):
         errors.append("TRIP_AUTH_JWT_SECRET must be set to a non-default value in prod.")
     if current.auth_jwt_algorithm.upper().startswith("RS"):
+        if not current.auth_issuer:
+            errors.append("TRIP_AUTH_ISSUER must be set for RS* auth in prod.")
+        if not current.auth_audience:
+            errors.append("TRIP_AUTH_AUDIENCE must be set for RS* auth in prod.")
         if not current.auth_jwks_url and not current.auth_public_key:
             errors.append("TRIP_AUTH_JWKS_URL or TRIP_AUTH_PUBLIC_KEY must be set for RS* auth in prod.")
         if current.auth_private_key:

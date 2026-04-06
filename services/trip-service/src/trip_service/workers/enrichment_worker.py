@@ -157,7 +157,7 @@ async def _resolve_route(origin_name: str, destination_name: str) -> tuple[str |
                 "profile_code": "TIR",
                 "language_hint": "AUTO",
             },
-            headers=_location_service_headers(),
+            headers=await _location_service_headers(),
         )
         if resp.status_code == 200:
             data = resp.json()

@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 import jwt
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.exc import DBAPIError
 
 from tests.conftest import (
     ADMIN_HEADERS,
@@ -86,6 +87,33 @@ async def test_service_token_cannot_call_public_admin_endpoint(client: AsyncClie
 
 
 @pytest.mark.asyncio
+async def test_service_token_cannot_call_public_mutating_trip_endpoints(client: AsyncClient):
+    created = await client.post(
+        "/api/v1/trips",
+        json=make_manual_trip_payload(trip_no="TR-PUBLIC-MUTATE"),
+        headers=ADMIN_HEADERS,
+    )
+    trip_id = created.json()["id"]
+    etag = created.headers["etag"]
+
+    patch_response = await client.patch(
+        f"/api/v1/trips/{trip_id}",
+        json={"driver_id": "driver-002"},
+        headers={**TELEGRAM_SERVICE_HEADERS, "If-Match": etag},
+    )
+    approve_response = await client.post(
+        f"/api/v1/trips/{trip_id}/approve",
+        json={"note": "approve"},
+        headers={**TELEGRAM_SERVICE_HEADERS, "If-Match": etag},
+    )
+
+    assert patch_response.status_code == 403
+    assert approve_response.status_code == 403
+    assert patch_response.json()["code"] == "TRIP_FORBIDDEN"
+    assert approve_response.json()["code"] == "TRIP_FORBIDDEN"
+
+
+@pytest.mark.asyncio
 async def test_admin_cannot_hard_delete(client: AsyncClient):
     created = await client.post(
         "/api/v1/trips",
@@ -133,6 +161,12 @@ async def test_removed_legacy_hard_delete_path_returns_exact_404(client: AsyncCl
 
 
 @pytest.mark.asyncio
+async def test_removed_legacy_hard_delete_path_rejects_post_method(client: AsyncClient) -> None:
+    response = await client.post("/api/v1/trips/some-trip/hard", headers=SUPER_ADMIN_HEADERS)
+    assert response.status_code == 405
+
+
+@pytest.mark.asyncio
 async def test_driver_statement_range_over_31_days_returns_422(client: AsyncClient):
     response = await client.get(
         "/internal/v1/driver/trips",
@@ -169,6 +203,21 @@ async def test_internal_reference_endpoints_reject_admin_tokens(client: AsyncCli
     )
     assert response.status_code == 403
     assert response.json()["code"] == "TRIP_FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_admin_tokens_cannot_call_internal_service_mutation_endpoints(client: AsyncClient):
+    slip_response = await client.post(
+        "/internal/v1/trips/slips/ingest",
+        json=make_manual_trip_payload(trip_no="TR-NOT-SLIP"),
+        headers=ADMIN_HEADERS,
+    )
+    export_response = await client.get("/internal/v1/trips/excel/export-feed", headers=ADMIN_HEADERS)
+
+    assert slip_response.status_code == 403
+    assert export_response.status_code == 403
+    assert slip_response.json()["code"] == "TRIP_FORBIDDEN"
+    assert export_response.json()["code"] == "TRIP_FORBIDDEN"
 
 
 @pytest.mark.asyncio
@@ -231,6 +280,19 @@ async def test_metrics_endpoint_exposes_prometheus_payload(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_health_endpoints_are_served_at_root_paths(client: AsyncClient) -> None:
+    health_response = await client.get("/health")
+    ready_response = await client.get("/ready")
+    metrics_response = await client.get("/metrics")
+    prefixed_health = await client.get("/v1/health")
+
+    assert health_response.status_code == 200
+    assert ready_response.status_code == 200
+    assert metrics_response.status_code == 200
+    assert prefixed_health.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_readiness_requires_cleanup_worker_heartbeat(client: AsyncClient):
     stale_at = datetime.now(UTC) - timedelta(seconds=settings.worker_heartbeat_timeout_seconds + 5)
     await record_worker_heartbeat("cleanup-worker", recorded_at_utc=stale_at)
@@ -266,3 +328,70 @@ async def test_readiness_fails_when_outbound_auth_is_invalid(client: AsyncClient
     assert response.status_code == 503
     assert response.json()["status"] == "not_ready"
     assert response.json()["checks"]["auth_outbound"] == "fail"
+
+
+@pytest.mark.asyncio
+async def test_readiness_fails_when_broker_is_unavailable(client: AsyncClient) -> None:
+    class FailingBroker:
+        async def check_health(self) -> None:
+            raise RuntimeError("broker down")
+
+    client._transport.app.state.broker = FailingBroker()  # type: ignore[attr-defined]
+
+    response = await client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["broker"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_readiness_fails_when_database_probe_errors(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class BrokenSession:
+        async def __aenter__(self):
+            raise DBAPIError("SELECT 1", {}, Exception("relation trip_outbox does not exist"), False)
+
+        async def __aexit__(self, exc_type, exc, tb):
+            del exc_type, exc, tb
+            return False
+
+    monkeypatch.setattr("trip_service.routers.health.async_session_factory", lambda: BrokenSession())
+
+    response = await client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["database"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_readiness_fails_when_fleet_probe_is_unavailable(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fail_probe() -> bool:
+        return False
+
+    monkeypatch.setattr("trip_service.routers.health.probe_fleet_service", fail_probe)
+
+    response = await client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["fleet_service"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_readiness_fails_when_location_probe_is_unavailable(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fail_probe() -> bool:
+        return False
+
+    monkeypatch.setattr("trip_service.routers.health.probe_location_service", fail_probe)
+
+    response = await client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["location_service"] == "unavailable"

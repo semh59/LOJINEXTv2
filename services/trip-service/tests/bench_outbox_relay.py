@@ -2,13 +2,11 @@ import asyncio
 import time
 import uuid
 from datetime import UTC, datetime
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from trip_service.broker import MessageBroker, OutboxMessage
 from trip_service.database import async_session_factory
 from trip_service.models import TripOutbox
 from trip_service.workers.outbox_relay import _relay_batch
-from trip_service.broker import MessageBroker, OutboxMessage
 
 
 class MockBroker(MessageBroker):
@@ -59,7 +57,7 @@ async def run_benchmark(batch_size: int, total_rows: int):
     end_time = time.perf_counter()
     duration = end_time - start_time
     tps = processed / duration
-    print(f"Benchmark Results:")
+    print("Benchmark Results:")
     print(f"Total Rows: {processed}")
     print(f"Batch Size: {batch_size}")
     print(f"Duration: {duration:.2f}s")

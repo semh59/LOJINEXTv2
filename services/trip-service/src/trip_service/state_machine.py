@@ -12,34 +12,20 @@ class TripStateMachine(StateMachine[TripStatus]):
     Enforces valid transitions for Trip aggregates.
 
     Valid Transitions:
-    - REQUESTED -> CANCELLED
-    - REQUESTED -> REJECTED
-    - REQUESTED -> ASSIGNED
-    - ASSIGNED -> CANCELLED
-    - ASSIGNED -> IN_PROGRESS
-    - IN_PROGRESS -> COMPLETED
-    - IN_PROGRESS -> CANCELLED (Emergency cases)
+    - PENDING_REVIEW -> COMPLETED
+    - PENDING_REVIEW -> REJECTED
     """
 
     def __init__(self, current_state: TripStatus):
         super().__init__(
             current_state=current_state,
             valid_transitions={
-                TripStatus.REQUESTED: {
-                    TripStatus.CANCELLED,
-                    TripStatus.REJECTED,
-                    TripStatus.ASSIGNED,
-                },
-                TripStatus.ASSIGNED: {
-                    TripStatus.CANCELLED,
-                    TripStatus.IN_PROGRESS,
-                },
-                TripStatus.IN_PROGRESS: {
+                TripStatus.PENDING_REVIEW: {
                     TripStatus.COMPLETED,
-                    TripStatus.CANCELLED,
+                    TripStatus.REJECTED,
                 },
                 TripStatus.COMPLETED: set(),
-                TripStatus.CANCELLED: set(),
                 TripStatus.REJECTED: set(),
+                TripStatus.SOFT_DELETED: set(),
             },
         )

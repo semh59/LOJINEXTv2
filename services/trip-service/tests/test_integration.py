@@ -1,7 +1,7 @@
 """Trip Service integration tests."""
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -29,6 +29,7 @@ from trip_service.dependencies import (
     validate_trip_references,
 )
 from trip_service.errors import ProblemDetailError
+from trip_service.middleware import make_etag
 from trip_service.models import TripIdempotencyRecord, TripOutbox, TripTrip, TripTripDeleteAudit, TripTripEnrichment
 from trip_service.routers.trips import _merged_payload_hash
 
@@ -42,7 +43,7 @@ async def test_manual_create_uses_route_pair_and_snapshots_locations(client: Asy
     )
     body = response.json()
     assert response.status_code == 201
-    assert body["status"] == "ASSIGNED"
+    assert body["status"] == "COMPLETED"
     assert body["route_pair_id"] == "pair-001"
     assert body["route_id"] == "route-ist-ank"
     assert body["origin_name_snapshot"] == "Istanbul"
@@ -366,6 +367,30 @@ async def test_list_trips_hides_soft_deleted_by_default(client: AsyncClient) -> 
 
 
 @pytest.mark.asyncio
+async def test_legacy_cancelled_trip_serializes_and_filters_as_soft_deleted(client: AsyncClient, db_engine) -> None:
+    created = await client.post(
+        "/api/v1/trips",
+        json=make_manual_trip_payload(trip_no="TR-LEGACY-CANCELLED"),
+        headers=SUPER_ADMIN_HEADERS,
+    )
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with session_factory() as session:
+        trip = await session.get(TripTrip, created.json()["id"])
+        assert trip is not None
+        trip.status = "CANCELLED"
+        trip.soft_deleted_at_utc = datetime.now(UTC)
+        trip.soft_deleted_by_actor_id = "legacy-admin"
+        await session.commit()
+
+    detail = await client.get(f"/api/v1/trips/{created.json()['id']}", headers=ADMIN_HEADERS)
+    deleted_list = await client.get("/api/v1/trips", params={"status": "SOFT_DELETED"}, headers=ADMIN_HEADERS)
+
+    assert detail.status_code == 200
+    assert detail.json()["status"] == "SOFT_DELETED"
+    assert {item["id"] for item in deleted_list.json()["items"]} == {created.json()["id"]}
+
+
+@pytest.mark.asyncio
 async def test_cancel_soft_deleted_trip_requires_current_etag(client: AsyncClient) -> None:
     created = await client.post(
         "/api/v1/trips",
@@ -390,6 +415,31 @@ async def test_cancel_soft_deleted_trip_requires_current_etag(client: AsyncClien
     assert stale_retry.json()["code"] == "TRIP_VERSION_MISMATCH"
     assert current_retry.status_code == 200
     assert current_retry.headers["etag"] == cancelled.headers["etag"]
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_accepts_legacy_cancelled_trip_in_phase_a(client: AsyncClient, db_engine) -> None:
+    created = await client.post(
+        "/api/v1/trips",
+        json=make_manual_trip_payload(trip_no="TR-LEGACY-HARD-DELETE"),
+        headers=SUPER_ADMIN_HEADERS,
+    )
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with session_factory() as session:
+        trip = await session.get(TripTrip, created.json()["id"])
+        assert trip is not None
+        trip.status = "CANCELLED"
+        trip.soft_deleted_at_utc = datetime.now(UTC)
+        trip.soft_deleted_by_actor_id = "legacy-admin"
+        await session.commit()
+
+    deleted = await client.post(
+        f"/api/v1/trips/{created.json()['id']}/hard-delete",
+        json={"reason": "legacy soft delete cleanup"},
+        headers={**SUPER_ADMIN_HEADERS, "If-Match": created.headers["etag"]},
+    )
+
+    assert deleted.status_code == 204
 
 
 @pytest.mark.asyncio
@@ -790,3 +840,183 @@ async def test_validate_trip_references_sends_fleet_auth_and_accepts_compat_resp
     assert result.driver_valid is True
     assert result.vehicle_valid is True
     assert result.trailer_valid is None
+
+
+@pytest.mark.asyncio
+async def test_canonical_idempotency_header_takes_precedence_over_legacy_alias(client: AsyncClient) -> None:
+    payload = make_manual_trip_payload(trip_no="TR-IDEMP-PRECEDENCE")
+
+    first = await client.post(
+        "/api/v1/trips",
+        json=payload,
+        headers={**ADMIN_HEADERS, "Idempotency-Key": "canonical-key", "X-Idempotency-Key": "legacy-a"},
+    )
+    second = await client.post(
+        "/api/v1/trips",
+        json=payload,
+        headers={**ADMIN_HEADERS, "Idempotency-Key": "canonical-key", "X-Idempotency-Key": "legacy-b"},
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert second.json()["id"] == first.json()["id"]
+
+
+@pytest.mark.asyncio
+async def test_edit_trip_rejects_soft_deleted_and_legacy_cancelled_rows(
+    client: AsyncClient,
+    db_engine,
+) -> None:
+    created = await client.post(
+        "/api/v1/trips",
+        json=make_manual_trip_payload(trip_no="TR-EDIT-SOFT-DELETED"),
+        headers=ADMIN_HEADERS,
+    )
+    cancelled = await client.post(
+        f"/api/v1/trips/{created.json()['id']}/cancel",
+        headers={**ADMIN_HEADERS, "If-Match": created.headers["etag"]},
+    )
+    soft_deleted_response = await client.patch(
+        f"/api/v1/trips/{created.json()['id']}",
+        json={"driver_id": "driver-002"},
+        headers={**ADMIN_HEADERS, "If-Match": cancelled.headers["etag"]},
+    )
+    assert soft_deleted_response.status_code == 409
+    assert soft_deleted_response.json()["code"] == "TRIP_INVALID_STATUS_TRANSITION"
+
+    now = datetime.now(UTC)
+    legacy_trip = TripTrip(
+        id="01JATLEGACYCANCELLEDEDIT1",
+        trip_no="TR-LEGACY-CANCELLED-EDIT",
+        source_type="ADMIN_MANUAL",
+        source_slip_no=None,
+        source_reference_key=None,
+        source_payload_hash=None,
+        review_reason_code=None,
+        base_trip_id=None,
+        driver_id="driver-001",
+        vehicle_id="vehicle-001",
+        trailer_id=None,
+        route_pair_id="pair-001",
+        route_id="route-ist-ank",
+        origin_location_id="loc-istanbul",
+        origin_name_snapshot="Istanbul",
+        destination_location_id="loc-ankara",
+        destination_name_snapshot="Ankara",
+        trip_datetime_utc=now,
+        trip_timezone="Europe/Istanbul",
+        planned_duration_s=21600,
+        planned_end_utc=now + timedelta(hours=6),
+        tare_weight_kg=10000,
+        gross_weight_kg=25000,
+        net_weight_kg=15000,
+        is_empty_return=False,
+        status="CANCELLED",
+        version=3,
+        created_by_actor_type="MANAGER",
+        created_by_actor_id="manager-001",
+        created_at_utc=now,
+        updated_at_utc=now,
+        soft_deleted_at_utc=now,
+        soft_deleted_by_actor_id="manager-001",
+    )
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with session_factory() as session:
+        session.add(legacy_trip)
+        await session.commit()
+
+    legacy_response = await client.patch(
+        f"/api/v1/trips/{legacy_trip.id}",
+        json={"driver_id": "driver-002"},
+        headers={**ADMIN_HEADERS, "If-Match": make_etag(legacy_trip.id, legacy_trip.version)},
+    )
+
+    assert legacy_response.status_code == 409
+    assert legacy_response.json()["code"] == "TRIP_INVALID_STATUS_TRANSITION"
+
+
+@pytest.mark.asyncio
+async def test_get_trip_timeline_returns_events_oldest_first(client: AsyncClient) -> None:
+    created = await client.post(
+        "/api/v1/trips",
+        json=make_manual_trip_payload(trip_no="TR-TIMELINE-ORDER"),
+        headers=SUPER_ADMIN_HEADERS,
+    )
+    edited = await client.patch(
+        f"/api/v1/trips/{created.json()['id']}",
+        json={"note": "touch"},
+        headers={**SUPER_ADMIN_HEADERS, "If-Match": created.headers["etag"]},
+    )
+    cancelled = await client.post(
+        f"/api/v1/trips/{created.json()['id']}/cancel",
+        headers={**SUPER_ADMIN_HEADERS, "If-Match": edited.headers["etag"]},
+    )
+
+    response = await client.get(
+        f"/api/v1/trips/{created.json()['id']}/timeline",
+        headers=SUPER_ADMIN_HEADERS,
+    )
+
+    assert cancelled.status_code == 200
+    assert response.status_code == 200
+    event_types = [item["event_type"] for item in response.json()["items"]]
+    assert event_types == ["TRIP_CREATED", "TRIP_EDITED", "TRIP_CANCELLED"]
+
+
+@pytest.mark.asyncio
+async def test_retry_enrichment_rejects_running_and_terminal_states(client: AsyncClient, db_engine) -> None:
+    created = await client.post(
+        "/internal/v1/trips/slips/ingest",
+        json=make_slip_payload(source_slip_no="SLIP-RETRY-MATRIX"),
+        headers=TELEGRAM_SERVICE_HEADERS,
+    )
+    trip_id = created.json()["id"]
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+
+    async with session_factory() as session:
+        enrichment = (
+            await session.execute(select(TripTripEnrichment).where(TripTripEnrichment.trip_id == trip_id))
+        ).scalar_one()
+        enrichment.enrichment_status = "RUNNING"
+        enrichment.claim_expires_at_utc = datetime.now(UTC) + timedelta(minutes=5)
+        await session.commit()
+
+    running_response = await client.post(f"/api/v1/trips/{trip_id}/retry-enrichment", headers=ADMIN_HEADERS)
+    assert running_response.status_code == 409
+    assert running_response.json()["code"] == "TRIP_ENRICHMENT_ALREADY_RUNNING"
+
+    async with session_factory() as session:
+        enrichment = (
+            await session.execute(select(TripTripEnrichment).where(TripTripEnrichment.trip_id == trip_id))
+        ).scalar_one()
+        enrichment.enrichment_status = "READY"
+        enrichment.claim_expires_at_utc = None
+        await session.commit()
+
+    terminal_response = await client.post(f"/api/v1/trips/{trip_id}/retry-enrichment", headers=ADMIN_HEADERS)
+    assert terminal_response.status_code == 409
+    assert terminal_response.json()["code"] == "TRIP_ENRICHMENT_TERMINAL_STATE"
+
+
+@pytest.mark.asyncio
+async def test_retry_enrichment_rejects_when_trip_has_no_enrichment_row(client: AsyncClient, db_engine) -> None:
+    created = await client.post(
+        "/internal/v1/trips/slips/ingest",
+        json=make_slip_payload(source_slip_no="SLIP-RETRY-NO-ROW"),
+        headers=TELEGRAM_SERVICE_HEADERS,
+    )
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with session_factory() as session:
+        enrichment = (
+            await session.execute(select(TripTripEnrichment).where(TripTripEnrichment.trip_id == created.json()["id"]))
+        ).scalar_one()
+        await session.delete(enrichment)
+        await session.commit()
+
+    response = await client.post(
+        f"/api/v1/trips/{created.json()['id']}/retry-enrichment",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["code"] == "TRIP_INTERNAL_ERROR"

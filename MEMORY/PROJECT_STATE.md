@@ -10,7 +10,7 @@ Not aspirational. Not a roadmap. Current reality only.
 ## Next Task ID
 
 ```
-TASK-0046
+TASK-0047
 ```
 
 ---
@@ -22,6 +22,7 @@ TASK-0046
 | TASK-0034 | Trip/Location Full Prod Readiness    | ready_for_review | 2026-03-30 | Antigravity |
 | TASK-0035 | Audit Remediation Phase 1: Readiness | reading          | 2026-04-02 | Antigravity |
 | TASK-0045 | Recovery Phase 1: Repo Truth and Live Contract Repair | in_progress | 2026-04-05 | Codex |
+| TASK-0046 | Trip-Service Phase A Repair Handoff and Backfill Gate | in_progress | 2026-04-05 | Codex |
 
 ---
 
@@ -41,6 +42,7 @@ Status: recovery in progress
 | TASK-0034 | Trip/Location Full Production Readiness | ready_for_review | 2026-03-30   | Antigravity |
 | TASK-0035 | Audit Remediation Phase 1: Readiness    | reading          | 2026-04-02   | Antigravity |
 | TASK-0045 | Recovery Phase 1: Repo Truth and Live Contract Repair | in_progress | 2026-04-05 | Codex |
+| TASK-0046 | Trip-Service Phase A Repair Handoff and Backfill Gate | in_progress | 2026-04-05 | Codex |
 
 ---
 
@@ -62,6 +64,6 @@ Status: recovery in progress
 ## What Comes Next
 
 ```
-Task:   TASK-0045 Recovery Phase 1: Repo Truth and Live Contract Repair
-Why:    Repo memory diverged from the actual task ledger, and the live Trip/Fleet/Driver service boundaries are still not safe for real four-service runtime integration.
+Task:   TASK-0046 Trip-Service Phase A Repair Handoff and Backfill Gate
+Why:    The trip-service Phase A patch is landed and validated locally, but the real DB backfill gate is still blocked and must be completed before any Phase B strict cleanup is considered.
 ```

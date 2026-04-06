@@ -4,12 +4,10 @@ from platform_auth import PlatformActorType, PlatformRole
 
 
 class TripStatus(str, enum.Enum):
-    REQUESTED = "REQUESTED"
-    ASSIGNED = "ASSIGNED"
-    IN_PROGRESS = "IN_PROGRESS"
+    PENDING_REVIEW = "PENDING_REVIEW"
     COMPLETED = "COMPLETED"
-    CANCELLED = "CANCELLED"
     REJECTED = "REJECTED"
+    SOFT_DELETED = "SOFT_DELETED"
 
 
 class EnrichmentStatus(str, enum.Enum):

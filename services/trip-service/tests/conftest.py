@@ -220,6 +220,9 @@ async def client(db_engine, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[A
     async def allow_all_trip_references(**kwargs: Any) -> None:
         return None
 
+    async def healthy_dependency_probe() -> bool:
+        return True
+
     test_app = FastAPI(lifespan=noop_lifespan)
     test_app.add_middleware(RequestIdMiddleware)
     test_app.add_middleware(PrometheusMiddleware)
@@ -240,6 +243,8 @@ async def client(db_engine, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[A
     test_app.dependency_overrides[get_session] = override_get_session
     monkeypatch.setattr("trip_service.routers.health.async_session_factory", session_factory)
     monkeypatch.setattr("trip_service.worker_heartbeats.async_session_factory", session_factory)
+    monkeypatch.setattr("trip_service.routers.health.probe_fleet_service", healthy_dependency_probe)
+    monkeypatch.setattr("trip_service.routers.health.probe_location_service", healthy_dependency_probe)
     monkeypatch.setattr("trip_service.routers.trips.ensure_trip_references_valid", allow_all_trip_references)
     monkeypatch.setattr("trip_service.routers.trips.fetch_trip_context", stub_fetch_trip_context)
     monkeypatch.setattr("trip_service.routers.trips.resolve_route_by_names", stub_resolve_route_by_names)

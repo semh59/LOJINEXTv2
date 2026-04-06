@@ -10,9 +10,10 @@ from sqlalchemy import text
 from trip_service.auth import auth_outbound_status, auth_verify_status
 from trip_service.config import settings
 from trip_service.database import async_session_factory
+from trip_service.dependencies import probe_fleet_service, probe_location_service
 from trip_service.worker_heartbeats import get_worker_heartbeat_snapshot
 
-router = APIRouter(prefix="/v1", tags=["health"])
+router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
@@ -58,6 +59,12 @@ async def readiness(request: Request) -> JSONResponse:
 
     checks["auth_outbound"] = auth_outbound_status()
     overall = overall and checks["auth_outbound"] in {"ok", "cold"}
+
+    checks["fleet_service"] = "ok" if await probe_fleet_service() else "unavailable"
+    overall = overall and checks["fleet_service"] == "ok"
+
+    checks["location_service"] = "ok" if await probe_location_service() else "unavailable"
+    overall = overall and checks["location_service"] == "ok"
 
     enrichment_heartbeat = await get_worker_heartbeat_snapshot(
         "enrichment-worker",

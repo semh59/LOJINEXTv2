@@ -88,6 +88,7 @@ def test_alembic_upgrade_head_on_empty_postgres() -> None:
 
             assert tables == [
                 "alembic_version",
+                "trip_audit_log",
                 "trip_idempotency_records",
                 "trip_outbox",
                 "trip_trip_delete_audit",

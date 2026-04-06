@@ -164,7 +164,12 @@ async def validate_trip_references(
             f"Fleet Service validation returned unexpected status {response.status_code}."
         )
 
-    data = response.json()
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise trip_dependency_unavailable("Fleet Service validation returned malformed JSON.") from exc
+    if not isinstance(data, dict):
+        raise trip_dependency_unavailable("Fleet Service validation returned malformed payload.")
     return FleetValidationResult(
         driver_valid=_resolve_trip_compat_flag(
             data,
@@ -243,11 +248,22 @@ async def resolve_route_by_names(
             f"Location Service route resolution returned unexpected status {response.status_code}."
         )
 
-    data = response.json()
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise trip_dependency_unavailable("Location Service route resolution returned malformed JSON.") from exc
+    if not isinstance(data, dict):
+        raise trip_dependency_unavailable("Location Service route resolution returned malformed payload.")
+    try:
+        route_id = str(data["route_id"])
+        pair_id = str(data["pair_id"])
+        resolution = str(data["resolution"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise trip_dependency_unavailable("Location Service route resolution returned malformed payload.") from exc
     return LocationRouteResolution(
-        route_id=str(data["route_id"]),
-        pair_id=str(data["pair_id"]),
-        resolution=str(data["resolution"]),
+        route_id=route_id,
+        pair_id=pair_id,
+        resolution=resolution,
     )
 
 
@@ -275,19 +291,38 @@ async def fetch_trip_context(pair_id: str, *, field_name: str = "body.route_pair
             f"Location Service trip context returned unexpected status {response.status_code}."
         )
 
-    data = response.json()
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise trip_dependency_unavailable("Location Service trip context returned malformed JSON.") from exc
+    if not isinstance(data, dict):
+        raise trip_dependency_unavailable("Location Service trip context returned malformed payload.")
+    try:
+        pair_id_value = str(data["pair_id"])
+        origin_location_id = str(data["origin_location_id"])
+        origin_name = str(data["origin_name"])
+        destination_location_id = str(data["destination_location_id"])
+        destination_name = str(data["destination_name"])
+        forward_route_id = str(data["forward_route_id"])
+        forward_duration_s = int(data["forward_duration_s"])
+        reverse_route_id = str(data["reverse_route_id"])
+        reverse_duration_s = int(data["reverse_duration_s"])
+        profile_code = str(data["profile_code"])
+        pair_status = str(data["pair_status"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise trip_dependency_unavailable("Location Service trip context returned malformed payload.") from exc
     return LocationTripContext(
-        pair_id=str(data["pair_id"]),
-        origin_location_id=str(data["origin_location_id"]),
-        origin_name=str(data["origin_name"]),
-        destination_location_id=str(data["destination_location_id"]),
-        destination_name=str(data["destination_name"]),
-        forward_route_id=str(data["forward_route_id"]),
-        forward_duration_s=int(data["forward_duration_s"]),
-        reverse_route_id=str(data["reverse_route_id"]),
-        reverse_duration_s=int(data["reverse_duration_s"]),
-        profile_code=str(data["profile_code"]),
-        pair_status=str(data["pair_status"]),
+        pair_id=pair_id_value,
+        origin_location_id=origin_location_id,
+        origin_name=origin_name,
+        destination_location_id=destination_location_id,
+        destination_name=destination_name,
+        forward_route_id=forward_route_id,
+        forward_duration_s=forward_duration_s,
+        reverse_route_id=reverse_route_id,
+        reverse_duration_s=reverse_duration_s,
+        profile_code=profile_code,
+        pair_status=pair_status,
     )
 
 

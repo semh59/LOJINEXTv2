@@ -7,29 +7,42 @@ import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from fastapi.responses import JSONResponse
+from platform_auth import TokenClaims
 from sqlalchemy import and_, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from ulid import ULID
 
-from platform_auth import TokenClaims
-
-
+from trip_service.config import settings
 from trip_service.dependencies import LocationTripContext
-from trip_service.enums import TripStatus
+from trip_service.enums import ActorType, ReviewReasonCode, TripStatus
 from trip_service.errors import (
+    idempotency_in_flight,
+    idempotency_payload_mismatch,
+    trip_completion_requirements_missing,
     trip_driver_overlap,
+    trip_invalid_date_window,
     trip_not_found,
     trip_trailer_overlap,
     trip_vehicle_overlap,
 )
 from trip_service.models import (
+    TripAuditLogModel,
     TripIdempotencyRecord,
+    TripOutbox,
     TripTrip,
     TripTripDeleteAudit,
     TripTripEvidence,
 )
 from trip_service.schemas import EnrichmentSummary, EvidenceSummary, TripResource
 from trip_service.state_machine import TripStateMachine
+
+_LEGACY_DELETED_STATUSES = (TripStatus.SOFT_DELETED.value, "CANCELLED")
+_REFERENCE_EXCLUDED_STATUSES = (TripStatus.REJECTED.value, *_LEGACY_DELETED_STATUSES)
+_MANUAL_CREATE_WINDOW_MINUTES = 30
 
 
 def latest_evidence(trip: TripTrip) -> TripTripEvidence | None:
@@ -39,9 +52,21 @@ def latest_evidence(trip: TripTrip) -> TripTripEvidence | None:
     return sorted(trip.evidence, key=lambda e: e.created_at_utc, reverse=True)[0]
 
 
+def normalize_trip_status(status: str) -> str:
+    """Collapse legacy persisted statuses into the canonical API contract."""
+    status_value = status.value if isinstance(status, TripStatus) else str(status)
+    if status_value == "CANCELLED":
+        return TripStatus.SOFT_DELETED.value
+    return status_value
+
+
+def is_deleted_trip_status(status: str) -> bool:
+    """Return whether the raw or normalized status represents a soft-deleted trip."""
+    return normalize_trip_status(status) == TripStatus.SOFT_DELETED.value
+
+
 def trip_to_resource(trip: TripTrip) -> TripResource:
     """Map ORM model to the public trip resource contract."""
-    # Avoid lazy-loading if not already present
     enrichment_summary = None
     if "enrichment" in trip.__dict__ and trip.enrichment:
         enrichment_summary = EnrichmentSummary(
@@ -51,13 +76,13 @@ def trip_to_resource(trip: TripTrip) -> TripResource:
         )
 
     evidence_summary = None
-    ev = latest_evidence(trip)
-    if ev is not None:
+    evidence = latest_evidence(trip)
+    if evidence is not None:
         evidence_summary = EvidenceSummary(
-            normalized_truck_plate=ev.normalized_truck_plate,
-            normalized_trailer_plate=ev.normalized_trailer_plate,
-            origin_name_raw=ev.origin_name_raw,
-            destination_name_raw=ev.destination_name_raw,
+            normalized_truck_plate=evidence.normalized_truck_plate,
+            normalized_trailer_plate=evidence.normalized_trailer_plate,
+            origin_name_raw=evidence.origin_name_raw,
+            destination_name_raw=evidence.destination_name_raw,
         )
 
     return TripResource(
@@ -85,7 +110,7 @@ def trip_to_resource(trip: TripTrip) -> TripResource:
         gross_weight_kg=trip.gross_weight_kg,
         net_weight_kg=trip.net_weight_kg,
         is_empty_return=trip.is_empty_return,
-        status=trip.status,
+        status=normalize_trip_status(trip.status),
         version=trip.version,
         enrichment=enrichment_summary,
         evidence_summary=evidence_summary,
@@ -124,21 +149,15 @@ def trip_is_complete(trip: TripTrip) -> bool:
 
 
 def validate_trip_transition(trip: TripTrip, next_status: TripStatus) -> None:
-    """
-    Validate that the trip can transition to the given status.
-    Raises ValueError if invalid.
-    """
-    sm = TripStateMachine(trip.status)
-    sm.transition_to(next_status)
+    """Validate that the trip can transition to the given status."""
+    current_status = TripStatus(normalize_trip_status(trip.status))
+    TripStateMachine(current_status).transition_to(next_status)
 
 
 def transition_trip(trip: TripTrip, next_status: TripStatus) -> None:
-    """
-    Transition the trip to the next status using the state machine.
-    Updates the model status and version.
-    """
+    """Transition the trip to the next status using the state machine."""
     validate_trip_transition(trip, next_status)
-    trip.status = next_status
+    trip.status = next_status.value
     trip.version += 1
     trip.updated_at_utc = utc_now()
 
@@ -201,7 +220,7 @@ async def _find_overlap(
     column = getattr(TripTrip, field_name)
     conditions = [
         column == field_value,
-        TripTrip.status.not_in((TripStatus.CANCELLED, TripStatus.REJECTED)),
+        TripTrip.status.not_in(_REFERENCE_EXCLUDED_STATUSES),
         TripTrip.planned_end_utc.is_not(None),
         TripTrip.trip_datetime_utc < planned_end_utc,
         TripTrip.planned_end_utc > trip_start_utc,
@@ -292,12 +311,9 @@ async def _write_audit(
     request_id: str | None = None,
 ) -> None:
     """Write a high-fidelity audit log entry for a trip mutation."""
-    from trip_service.models import TripAuditLogModel  # Avoid circular import
-
-    audit_id = str(ULID())
     session.add(
         TripAuditLogModel(
-            audit_id=audit_id,
+            audit_id=str(ULID()),
             trip_id=trip_id,
             action_type=action_type,
             old_snapshot_json=json.dumps(old_snapshot, default=str) if old_snapshot else None,
@@ -312,33 +328,63 @@ async def _write_audit(
     )
 
 
-def _write_outbox(
-    *,
-    trip_id: str,
-    event_name: str,
-    payload: dict[str, Any],
-) -> Any:
-    """Create an outbox event for reliable delivery via the outbox relay."""
-    from trip_service.models import TripOutbox  # Avoid circular import
-
+def _build_outbox_row(*, trip_id: str, aggregate_version: int, event_name: str, payload: dict[str, Any]) -> TripOutbox:
+    """Create an in-memory outbox row ready to be added to the current transaction."""
+    now = utc_now()
     return TripOutbox(
         event_id=str(ULID()),
         aggregate_type="TRIP",
         aggregate_id=trip_id,
-        aggregate_version=payload.get("version", 1),
+        aggregate_version=aggregate_version,
         event_name=event_name,
         schema_version=1,
         payload_json=json.dumps(payload, default=str),
         partition_key=trip_id,
         publish_status="PENDING",
         attempt_count=0,
-        next_attempt_at_utc=utc_now(),
+        next_attempt_at_utc=now,
         last_error_code=None,
         claim_token=None,
         claim_expires_at_utc=None,
         claimed_by_worker=None,
-        created_at_utc=utc_now(),
+        created_at_utc=now,
+        published_at_utc=None,
     )
+
+
+async def _create_outbox_event(
+    session: AsyncSession,
+    trip: TripTrip,
+    event_name: str,
+    payload: dict[str, Any] | None = None,
+) -> TripOutbox:
+    """Add an outbox row to the current session for the given trip aggregate."""
+    row = _build_outbox_row(
+        trip_id=trip.id,
+        aggregate_version=trip.version,
+        event_name=event_name,
+        payload=payload or _event_payload(trip),
+    )
+    session.add(row)
+    return row
+
+
+async def _write_outbox(
+    session: AsyncSession,
+    *,
+    trip_id: str,
+    event_name: str,
+    payload: dict[str, Any],
+) -> TripOutbox:
+    """Add a generic outbox event to the current transaction."""
+    row = _build_outbox_row(
+        trip_id=trip_id,
+        aggregate_version=int(payload.get("version", 1)),
+        event_name=event_name,
+        payload=payload,
+    )
+    session.add(row)
+    return row
 
 
 def serialize_trip_snapshot(trip: TripTrip) -> dict[str, Any]:
@@ -424,26 +470,53 @@ async def _check_idempotency_key(
     idempotency_key: str | None,
     endpoint_fingerprint: str,
     request_hash: str,
-) -> dict[str, Any] | None:
-    """Check if an idempotency key has already been used for this endpoint."""
+) -> JSONResponse | None:
+    """Replay a stored idempotent response when the same key is reused."""
     if not idempotency_key:
         return None
 
-    stmt = select(TripIdempotencyRecord).where(
-        and_(
-            TripIdempotencyRecord.idempotency_key == idempotency_key,
-            TripIdempotencyRecord.endpoint_fingerprint == endpoint_fingerprint,
+    now = utc_now()
+    claim_stmt = (
+        pg_insert(TripIdempotencyRecord)
+        .values(
+            idempotency_key=idempotency_key,
+            endpoint_fingerprint=endpoint_fingerprint,
+            request_hash=request_hash,
+            response_status=0,
+            response_headers_json={},
+            response_body_json="{}",
+            created_at_utc=now,
+            expires_at_utc=now + timedelta(hours=settings.idempotency_retention_hours),
         )
+        .on_conflict_do_nothing(index_elements=["idempotency_key", "endpoint_fingerprint"])
     )
-    result = await session.execute(stmt)
-    record = result.scalar_one_or_none()
+    claim_result = await session.execute(claim_stmt)
+    if claim_result.rowcount == 1:
+        return None
 
-    if record:
-        # Simple hash check to ensure payload hasn't changed for the same key
-        if record.request_hash != request_hash:
-            raise ValueError("Idempotency key already used with a different request payload.")
-        return json.loads(record.response_body_json)
-    return None
+    try:
+        record = (
+            await session.execute(
+                select(TripIdempotencyRecord)
+                .where(
+                    TripIdempotencyRecord.idempotency_key == idempotency_key,
+                    TripIdempotencyRecord.endpoint_fingerprint == endpoint_fingerprint,
+                )
+                .with_for_update(nowait=True)
+            )
+        ).scalar_one()
+    except (IntegrityError, OperationalError, DBAPIError):
+        raise idempotency_in_flight()
+
+    if record.request_hash != request_hash:
+        raise idempotency_payload_mismatch()
+    if record.response_status == 0:
+        raise idempotency_in_flight()
+
+    response = JSONResponse(status_code=record.response_status, content=json.loads(record.response_body_json))
+    for key, value in record.response_headers_json.items():
+        response.headers[key] = value
+    return response
 
 
 async def _save_idempotency_response(
@@ -463,6 +536,7 @@ async def _save_idempotency_response(
             endpoint_fingerprint=endpoint_fingerprint,
             request_hash=payload_hash,
             response_status=status_code,
+            response_headers_json={},
             response_body_json=json.dumps(response_body),
             created_at_utc=utc_now(),
             expires_at_utc=utc_now() + timedelta(hours=24),
@@ -480,13 +554,15 @@ async def _get_trip_or_404(session: AsyncSession, trip_id: str) -> TripTrip:
     stmt = (
         select(TripTrip)
         .where(TripTrip.id == trip_id)
-        .outerjoin(TripTrip.enrichment)
-        .outerjoin(TripTrip.evidence)
-        .outerjoin(TripTrip.timeline)
+        .options(
+            selectinload(TripTrip.enrichment),
+            selectinload(TripTrip.evidence),
+            selectinload(TripTrip.timeline),
+            selectinload(TripTrip.empty_return_children),
+        )
     )
-    result = await session.execute(stmt)
-    trip = result.unique().scalar_one_or_none()
-    if not trip:
+    trip = (await session.execute(stmt)).unique().scalar_one_or_none()
+    if trip is None:
         raise trip_not_found(f"Trip {trip_id} not found.")
     return trip
 
@@ -496,36 +572,34 @@ def _event_payload(trip: TripTrip) -> dict[str, Any]:
     return {
         "trip_id": trip.id,
         "trip_no": trip.trip_no,
-        "status": trip.status,
+        "status": normalize_trip_status(trip.status),
         "version": trip.version,
-        "updated_at_utc": (
-            trip.updated_at_utc.isoformat()
-            if hasattr(trip, "updated_at_utc") and trip.updated_at_utc
-            else utc_now().isoformat()
-        ),
+        "updated_at_utc": trip.updated_at_utc.isoformat() if trip.updated_at_utc else utc_now().isoformat(),
     }
 
 
 async def _classify_manual_status(auth: Any, trip_datetime_utc: datetime) -> tuple[TripStatus, str | None]:
     """Determine initial status and review reason for a manually created trip."""
-    try:
-        from trip_service.enums import ActorType, ReviewReasonCode
+    now = utc_now()
+    if auth.role == ActorType.SUPER_ADMIN.value:
+        if trip_datetime_utc > now:
+            return TripStatus.PENDING_REVIEW, ReviewReasonCode.FUTURE_MANUAL
+        return TripStatus.COMPLETED, None
 
-        if auth.role in {ActorType.MANAGER.value, ActorType.SUPER_ADMIN.value}:
-            return TripStatus.ASSIGNED, None
-        return TripStatus.PENDING_REVIEW, ReviewReasonCode.MANUAL_ENTRY
-    except Exception as e:
-        import traceback
-
-        print(f"DEBUG_STACKTRACER: {traceback.format_exc()}")
-        raise e
+    grace_start = now - timedelta(minutes=_MANUAL_CREATE_WINDOW_MINUTES)
+    if trip_datetime_utc < grace_start or trip_datetime_utc > now:
+        raise trip_invalid_date_window(
+            "ADMIN may only create manual trips in the last 30 minutes and may not create future trips."
+        )
+    return TripStatus.COMPLETED, None
 
 
 def _ensure_complete_for_completion(trip: TripTrip) -> None:
-    """Raise ValueError if the trip is not complete enough for a final transition."""
-    errors = trip_complete_errors(trip)
-    if errors:
-        raise ValueError(f"Trip is incomplete: {errors}")
+    """Raise a contract error if the trip is not complete enough for a final transition."""
+    if trip_is_complete(trip):
+        return
+    missing = ", ".join(error["field"] for error in trip_complete_errors(trip))
+    raise trip_completion_requirements_missing(f"Trip is missing required fields: {missing}.")
 
 
 def _merged_payload_hash(payload: dict[str, Any]) -> str:

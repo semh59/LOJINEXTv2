@@ -58,3 +58,38 @@ def test_validate_prod_requires_broker_type():
     settings.broker_type = None
     with pytest.raises(ValueError, match="TRIP_BROKER_TYPE"):
         validate_prod_settings(settings)
+
+
+def test_validate_prod_rejects_platform_jwt_bridge(monkeypatch: pytest.MonkeyPatch):
+    settings = _base_prod_settings()
+    monkeypatch.setenv("PLATFORM_JWT_SECRET", "bridge-secret")
+    with pytest.raises(ValueError, match="PLATFORM_JWT_SECRET"):
+        validate_prod_settings(settings)
+
+
+def test_validate_prod_rejects_rs256_without_issuer_and_audience() -> None:
+    settings = _base_prod_settings()
+    settings.auth_jwt_algorithm = "RS256"
+    settings.auth_jwt_secret = ""
+    settings.auth_public_key = "public-key"
+    settings.auth_service_token_url = "https://identity.example.com/oauth/token"
+    settings.auth_service_client_secret = "client-secret"
+    settings.auth_issuer = ""
+    settings.auth_audience = ""
+
+    with pytest.raises(ValueError, match="TRIP_AUTH_ISSUER"):
+        validate_prod_settings(settings)
+
+
+def test_validate_prod_rejects_rs256_without_outbound_credentials() -> None:
+    settings = _base_prod_settings()
+    settings.auth_jwt_algorithm = "RS256"
+    settings.auth_jwt_secret = ""
+    settings.auth_public_key = "public-key"
+    settings.auth_issuer = "https://identity.example.com/"
+    settings.auth_audience = "lojinext-platform"
+    settings.auth_service_token_url = ""
+    settings.auth_service_client_secret = ""
+
+    with pytest.raises(ValueError, match="TRIP_AUTH_SERVICE_TOKEN_URL"):
+        validate_prod_settings(settings)
