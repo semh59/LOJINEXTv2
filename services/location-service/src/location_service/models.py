@@ -1,4 +1,3 @@
-import uuid
 from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional
 
@@ -12,10 +11,11 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    Text,
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from ulid import ULID
 
@@ -47,7 +47,7 @@ class Base(DeclarativeBase):
 class LocationPoint(Base):
     __tablename__ = "location_points"
 
-    location_id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    location_id: Mapped[str] = mapped_column(String(26), primary_key=True, default=lambda: str(ULID()))
     code: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
     name_tr: Mapped[str] = mapped_column(String(255), nullable=False)
     name_en: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -74,7 +74,7 @@ class LocationPoint(Base):
 class RoutePair(Base):
     __tablename__ = "route_pairs"
 
-    route_pair_id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    route_pair_id: Mapped[str] = mapped_column(String(26), primary_key=True, default=lambda: str(ULID()))
     pair_code: Mapped[str] = mapped_column(String(29), unique=True, nullable=False)  # Format RP_<ULID>
     origin_location_id: Mapped[str] = mapped_column(ForeignKey("location_points.location_id"), nullable=False)
     destination_location_id: Mapped[str] = mapped_column(ForeignKey("location_points.location_id"), nullable=False)
@@ -123,7 +123,7 @@ class RoutePair(Base):
 class Route(Base):
     __tablename__ = "routes"
 
-    route_id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    route_id: Mapped[str] = mapped_column(String(26), primary_key=True, default=lambda: str(ULID()))
     route_pair_id: Mapped[str] = mapped_column(ForeignKey("route_pairs.route_pair_id"), nullable=False)
     route_code: Mapped[str] = mapped_column(String(31), unique=True, nullable=False)
     direction: Mapped[DirectionCode] = mapped_column(String(20), nullable=False)
@@ -247,7 +247,7 @@ class RouteSegment(Base):
 class ProcessingRun(Base):
     __tablename__ = "processing_runs"
 
-    processing_run_id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    processing_run_id: Mapped[str] = mapped_column(String(26), primary_key=True, default=lambda: str(ULID()))
     route_pair_id: Mapped[str] = mapped_column(ForeignKey("route_pairs.route_pair_id"), nullable=False)
     run_status: Mapped[RunStatus] = mapped_column(String(50), nullable=False)
     trigger_type: Mapped[TriggerType] = mapped_column(String(50), nullable=False)
@@ -292,7 +292,7 @@ class ProcessingRun(Base):
 class RouteUsageRef(Base):
     __tablename__ = "route_usage_refs"
 
-    route_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    route_id: Mapped[str] = mapped_column(String(26), primary_key=True)
     version_no: Mapped[int] = mapped_column(Integer, primary_key=True)
     consumer_service: Mapped[str] = mapped_column(String(100), primary_key=True)
     consumer_entity_type: Mapped[str] = mapped_column(String(100), primary_key=True)
@@ -314,7 +314,7 @@ class RouteUsageRef(Base):
 class BulkRefreshJob(Base):
     __tablename__ = "bulk_refresh_jobs"
 
-    bulk_refresh_job_id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    bulk_refresh_job_id: Mapped[str] = mapped_column(String(26), primary_key=True, default=lambda: str(ULID()))
     job_status: Mapped[BulkRefreshStatus] = mapped_column(String(50), nullable=False)
     trigger_type: Mapped[TriggerType] = mapped_column(String(50), nullable=False)
     selection_scope_json: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
@@ -344,7 +344,7 @@ class BulkRefreshJob(Base):
 class BulkRefreshJobItem(Base):
     __tablename__ = "bulk_refresh_job_items"
 
-    item_id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    item_id: Mapped[str] = mapped_column(String(26), primary_key=True, default=lambda: str(ULID()))
     bulk_refresh_job_id: Mapped[str] = mapped_column(
         ForeignKey("bulk_refresh_jobs.bulk_refresh_job_id", ondelete="CASCADE"), nullable=False
     )
@@ -389,6 +389,7 @@ class WorkerHeartbeat(Base):
     __tablename__ = "worker_heartbeats"
 
     worker_name: Mapped[str] = mapped_column(String(100), primary_key=True)
+    recorded_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_utcnow, nullable=False)
 
 
 class LocationOutboxModel(Base):
@@ -400,6 +401,7 @@ class LocationOutboxModel(Base):
     event_name: Mapped[str] = mapped_column(String(64), nullable=False)
     event_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     payload_json: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    partition_key: Mapped[str] = mapped_column(String(64), nullable=False)
     publish_status: Mapped[str] = mapped_column(String(16), nullable=False, default="PENDING")
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -420,5 +422,6 @@ class LocationAuditLogModel(Base):
     actor_role: Mapped[str] = mapped_column(String(32), nullable=False)
     old_snapshot_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     new_snapshot_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     request_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

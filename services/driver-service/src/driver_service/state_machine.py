@@ -22,6 +22,6 @@ class DriverStateMachine(StateMachine[DriverStatus]):
                 },
                 DriverStatus.INACTIVE: {DriverStatus.ACTIVE, DriverStatus.CANCELLED},
                 DriverStatus.SUSPENDED: {DriverStatus.ACTIVE, DriverStatus.CANCELLED},
-                DriverStatus.CANCELLED: set(),  # Terminal state
+                DriverStatus.CANCELLED: {DriverStatus.ACTIVE},  # Reversible soft-delete
             },
         )

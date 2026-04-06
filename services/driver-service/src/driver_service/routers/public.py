@@ -171,7 +171,7 @@ async def create_driver(
         license_class=body.license_class.strip(),
         employment_start_date=body.employment_start_date,
         employment_end_date=None,
-        status=DriverStatus.IN_REVIEW,
+        status=DriverStatus.ACTIVE,
         inactive_reason=None,
         note=body.note,
         row_version=1,
@@ -182,42 +182,46 @@ async def create_driver(
     )
     session.add(driver)
 
-    new_snapshot = serialize_driver_admin(driver)
-
-    # Audit for CREATE
-    await _write_audit(
-        session,
-        driver_id,
-        AuditActionType.CREATE,
-        auth.actor_id,
-        auth.role,
-        new_snapshot=new_snapshot,
-        request_id=request_id,
-    )
-    await _write_outbox(
-        session,
-        driver_id,
-        "driver.created.v1",
-        {
-            "driver_id": driver_id,
-            "company_driver_code": driver.company_driver_code,
-            "phone_e164": driver.phone_e164,
-            "telegram_user_id": driver.telegram_user_id,
-            "license_class": driver.license_class,
-            "status": driver.status,
-            "row_version": driver.row_version,
-            "created_at_utc": now.isoformat(),
-        },
-    )
-
     try:
-        await session.commit()
-        from driver_service.observability import DRIVERS_CREATED_TOTAL
+        await session.flush()
+        new_snapshot = serialize_driver_admin(driver)
 
-        DRIVERS_CREATED_TOTAL.inc()
+        # Audit for CREATE
+        await _write_audit(
+            session,
+            driver_id,
+            AuditActionType.CREATE,
+            auth.actor_id,
+            auth.role,
+            new_snapshot=new_snapshot,
+            request_id=request_id,
+        )
+        await _write_outbox(
+            session,
+            driver_id,
+            "driver.created.v1",
+            {
+                "driver_id": driver_id,
+                "company_driver_code": driver.company_driver_code,
+                "phone_e164": driver.phone_e164,
+                "telegram_user_id": driver.telegram_user_id,
+                "license_class": driver.license_class,
+                "status": driver.status,
+                "row_version": driver.row_version,
+                "created_at_utc": now.isoformat(),
+            },
+        )
+        await session.commit()
+        from driver_service.observability import DRIVERS_CREATED_TOTAL, get_standard_labels
+
+        labels = get_standard_labels()
+        DRIVERS_CREATED_TOTAL.labels(**labels).inc()
     except IntegrityError as exc:
         await session.rollback()
         _handle_integrity_error(exc)
+    except Exception as exc:
+        await session.rollback()
+        raise exc
 
     await session.refresh(driver)
     response.headers["ETag"] = etag_from_row_version(driver.row_version)

@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from uuid import uuid4
-
 import pytest
 from httpx import AsyncClient
+from ulid import ULID
 
 from location_service.domain.normalization import normalize_en, normalize_tr
 from location_service.enums import PairStatus, ProcessingStatus
@@ -26,7 +25,15 @@ def _point(*, code: str, name_tr: str, name_en: str, latitude: float, longitude:
 
 
 def _pair_code() -> str:
-    return f"RP_{uuid4().hex[:26].upper()}"
+    return f"RP_{str(ULID())}"
+
+
+def _ulid() -> str:
+    return str(ULID())
+
+
+def _route_code(prefix: str) -> str:
+    return f"{prefix}-{_ulid()[:16]}"
 
 
 def _route_version(
@@ -65,7 +72,7 @@ async def _create_active_pair(
     test_session, *, origin: LocationPoint, destination: LocationPoint, profile_code: str = "TIR"
 ) -> tuple[RoutePair, Route, Route]:
     pair = RoutePair(
-        route_pair_id=uuid4(),
+        route_pair_id=_ulid(),
         pair_code=_pair_code(),
         origin_location_id=origin.location_id,
         destination_location_id=destination.location_id,
@@ -76,16 +83,16 @@ async def _create_active_pair(
     await test_session.flush()
 
     forward_route = Route(
-        route_id=uuid4(),
+        route_id=_ulid(),
         route_pair_id=pair.route_pair_id,
-        route_code=f"ROUTE-FWD-{uuid4().hex[:8].upper()}",
+        route_code=_route_code("ROUTE-FWD"),
         direction="FORWARD",
         created_by="test",
     )
     reverse_route = Route(
-        route_id=uuid4(),
+        route_id=_ulid(),
         route_pair_id=pair.route_pair_id,
-        route_code=f"ROUTE-REV-{uuid4().hex[:8].upper()}",
+        route_code=_route_code("ROUTE-REV"),
         direction="REVERSE",
         created_by="test",
     )
@@ -102,10 +109,10 @@ async def _create_active_pair(
 @pytest.mark.asyncio
 async def test_internal_resolve_returns_forward_active_route(internal_client: AsyncClient, test_session) -> None:
     origin = _point(
-        code=f"ORG_{uuid4().hex[:8].upper()}", name_tr="Ankara", name_en="Ankara", latitude=39.93, longitude=32.85
+        code=f"ORG_{_ulid()[:8]}", name_tr="Ankara", name_en="Ankara", latitude=39.93, longitude=32.85
     )
     destination = _point(
-        code=f"DST_{uuid4().hex[:8].upper()}", name_tr="Bursa", name_en="Bursa", latitude=40.19, longitude=29.07
+        code=f"DST_{_ulid()[:8]}", name_tr="Bursa", name_en="Bursa", latitude=40.19, longitude=29.07
     )
     test_session.add_all([origin, destination])
     await test_session.flush()
@@ -131,10 +138,10 @@ async def test_internal_resolve_returns_forward_active_route(internal_client: As
 @pytest.mark.asyncio
 async def test_internal_resolve_requires_active_version_pointer(internal_client: AsyncClient, test_session) -> None:
     origin = _point(
-        code=f"ORG_{uuid4().hex[:8].upper()}", name_tr="Izmit", name_en="Izmit", latitude=40.77, longitude=29.94
+        code=f"ORG_{_ulid()[:8]}", name_tr="Izmit", name_en="Izmit", latitude=40.77, longitude=29.94
     )
     destination = _point(
-        code=f"DST_{uuid4().hex[:8].upper()}", name_tr="Adana", name_en="Adana", latitude=37.0, longitude=35.32
+        code=f"DST_{_ulid()[:8]}", name_tr="Adana", name_en="Adana", latitude=37.0, longitude=35.32
     )
     test_session.add_all([origin, destination])
     await test_session.flush()
@@ -161,16 +168,16 @@ async def test_internal_resolve_returns_ambiguous_for_multiple_active_candidates
     internal_client: AsyncClient, test_session
 ) -> None:
     tr_origin = _point(
-        code=f"TR_ORG_{uuid4().hex[:8].upper()}", name_tr="Ankara", name_en="Alpha", latitude=39.93, longitude=32.85
+        code=f"TR_ORG_{_ulid()[:8]}", name_tr="Ankara", name_en="Alpha", latitude=39.93, longitude=32.85
     )
     tr_destination = _point(
-        code=f"TR_DST_{uuid4().hex[:8].upper()}", name_tr="Bursa", name_en="Beta", latitude=40.19, longitude=29.07
+        code=f"TR_DST_{_ulid()[:8]}", name_tr="Bursa", name_en="Beta", latitude=40.19, longitude=29.07
     )
     en_origin = _point(
-        code=f"EN_ORG_{uuid4().hex[:8].upper()}", name_tr="Gamma", name_en="Ankara", latitude=38.42, longitude=27.14
+        code=f"EN_ORG_{_ulid()[:8]}", name_tr="Gamma", name_en="Ankara", latitude=38.42, longitude=27.14
     )
     en_destination = _point(
-        code=f"EN_DST_{uuid4().hex[:8].upper()}", name_tr="Delta", name_en="Bursa", latitude=37.87, longitude=32.48
+        code=f"EN_DST_{_ulid()[:8]}", name_tr="Delta", name_en="Bursa", latitude=37.87, longitude=32.48
     )
     test_session.add_all([tr_origin, tr_destination, en_origin, en_destination])
     await test_session.flush()
@@ -203,10 +210,10 @@ async def test_internal_resolve_returns_ambiguous_for_multiple_active_candidates
 @pytest.mark.asyncio
 async def test_trip_context_returns_forward_and_reverse_durations(internal_client: AsyncClient, test_session) -> None:
     origin = _point(
-        code=f"ORG_{uuid4().hex[:8].upper()}", name_tr="Istanbul", name_en="Istanbul", latitude=41.01, longitude=28.97
+        code=f"ORG_{_ulid()[:8]}", name_tr="Istanbul", name_en="Istanbul", latitude=41.01, longitude=28.97
     )
     destination = _point(
-        code=f"DST_{uuid4().hex[:8].upper()}", name_tr="Izmir", name_en="Izmir", latitude=38.42, longitude=27.14
+        code=f"DST_{_ulid()[:8]}", name_tr="Izmir", name_en="Izmir", latitude=38.42, longitude=27.14
     )
     test_session.add_all([origin, destination])
     await test_session.flush()
@@ -231,7 +238,7 @@ async def test_trip_context_returns_forward_and_reverse_durations(internal_clien
 
 @pytest.mark.asyncio
 async def test_trip_context_missing_pair_returns_not_found(internal_client: AsyncClient) -> None:
-    response = await internal_client.get(f"/internal/v1/route-pairs/{uuid4()}/trip-context")
+    response = await internal_client.get(f"/internal/v1/route-pairs/{_ulid()}/trip-context")
     assert response.status_code == 404
     assert response.json()["code"] == "LOCATION_ROUTE_PAIR_NOT_FOUND"
 
@@ -239,10 +246,10 @@ async def test_trip_context_missing_pair_returns_not_found(internal_client: Asyn
 @pytest.mark.asyncio
 async def test_trip_context_inactive_pair_returns_conflict(internal_client: AsyncClient, test_session) -> None:
     origin = _point(
-        code=f"ORG_{uuid4().hex[:8].upper()}", name_tr="Konya", name_en="Konya", latitude=37.87, longitude=32.48
+        code=f"ORG_{_ulid()[:8]}", name_tr="Konya", name_en="Konya", latitude=37.87, longitude=32.48
     )
     destination = _point(
-        code=f"DST_{uuid4().hex[:8].upper()}",
+        code=f"DST_{_ulid()[:8]}",
         name_tr="Bursa Draft",
         name_en="Bursa Draft",
         latitude=40.19,
@@ -252,7 +259,7 @@ async def test_trip_context_inactive_pair_returns_conflict(internal_client: Asyn
     await test_session.flush()
 
     pair = RoutePair(
-        route_pair_id=uuid4(),
+        route_pair_id=_ulid(),
         pair_code=_pair_code(),
         origin_location_id=origin.location_id,
         destination_location_id=destination.location_id,
@@ -273,14 +280,14 @@ async def test_trip_context_soft_deleted_pair_returns_soft_deleted_problem(
     test_session,
 ) -> None:
     origin = _point(
-        code=f"ORG_{uuid4().hex[:8].upper()}",
+        code=f"ORG_{_ulid()[:8]}",
         name_tr="Deleted Origin",
         name_en="Deleted Origin",
         latitude=36.0,
         longitude=30.0,
     )
     destination = _point(
-        code=f"DST_{uuid4().hex[:8].upper()}",
+        code=f"DST_{_ulid()[:8]}",
         name_tr="Deleted Destination",
         name_en="Deleted Destination",
         latitude=36.5,
@@ -290,7 +297,7 @@ async def test_trip_context_soft_deleted_pair_returns_soft_deleted_problem(
     await test_session.flush()
 
     pair = RoutePair(
-        route_pair_id=uuid4(),
+        route_pair_id=_ulid(),
         pair_code=_pair_code(),
         origin_location_id=origin.location_id,
         destination_location_id=destination.location_id,

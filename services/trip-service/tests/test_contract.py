@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import time
 from datetime import UTC, datetime, timedelta
 
-import jwt
 import pytest
 from httpx import AsyncClient
+from platform_auth_testing import sign_test_token
 from sqlalchemy.exc import DBAPIError
 
 from tests.conftest import (
@@ -15,6 +14,7 @@ from tests.conftest import (
     EXCEL_SERVICE_HEADERS,
     SUPER_ADMIN_HEADERS,
     TELEGRAM_SERVICE_HEADERS,
+    TEST_JWKS_BUNDLE,
     make_manual_trip_payload,
 )
 from trip_service.config import settings
@@ -23,12 +23,7 @@ from trip_service.worker_heartbeats import record_worker_heartbeat
 
 def _internal_service_headers(service_name: str) -> dict[str, str]:
     """Build internal service headers for trip-service contract tests."""
-    now = int(time.time())
-    token = jwt.encode(
-        {"sub": service_name, "role": "SERVICE", "service": service_name, "iat": now, "exp": now + 300},
-        settings.resolved_auth_jwt_secret,
-        algorithm=settings.auth_jwt_algorithm,
-    )
+    token = sign_test_token(TEST_JWKS_BUNDLE, sub=service_name, role="SERVICE", service=service_name)
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -281,8 +276,15 @@ async def test_metrics_endpoint_exposes_prometheus_payload(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_health_endpoints_are_served_at_root_paths(client: AsyncClient) -> None:
+    # Ensure fresh heartbeats so /ready returns 200
+    await record_worker_heartbeat("enrichment-worker")
+    await record_worker_heartbeat("outbox-relay")
+    await record_worker_heartbeat("cleanup-worker")
+
     health_response = await client.get("/health")
     ready_response = await client.get("/ready")
+    if ready_response.status_code != 200:
+        print(f"DEBUG READY RESPONSE: {ready_response.json()}")
     metrics_response = await client.get("/metrics")
     prefixed_health = await client.get("/v1/health")
 
@@ -308,20 +310,26 @@ async def test_readiness_requires_cleanup_worker_heartbeat(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_readiness_allows_cold_outbound_auth(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr("trip_service.routers.health.auth_outbound_status", lambda: "cold")
+async def test_readiness_requires_live_outbound_auth(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    async def cold_outbound() -> str:
+        return "fail"
+
+    monkeypatch.setattr("trip_service.routers.health.auth_outbound_status", cold_outbound)
 
     response = await client.get("/ready")
 
-    assert response.status_code == 200
-    assert response.json()["status"] == "ready"
-    assert response.json()["checks"]["auth_outbound"] == "cold"
+    assert response.status_code == 503
+    assert response.json()["status"] == "not_ready"
+    assert response.json()["checks"]["auth_outbound"] == "fail"
     assert response.json()["checks"]["broker"] == "ok"
 
 
 @pytest.mark.asyncio
 async def test_readiness_fails_when_outbound_auth_is_invalid(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr("trip_service.routers.health.auth_outbound_status", lambda: "fail")
+    async def broken_outbound() -> str:
+        return "fail"
+
+    monkeypatch.setattr("trip_service.routers.health.auth_outbound_status", broken_outbound)
 
     response = await client.get("/ready")
 

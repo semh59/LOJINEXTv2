@@ -1,0 +1,29 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: "identity-api"
+    static_configs:
+      - targets: ["identity-api:8105"]
+    metrics_path: /metrics
+
+  - job_name: "trip-api"
+    static_configs:
+      - targets: ["trip-api:8101"]
+    metrics_path: /metrics
+
+  - job_name: "location-api"
+    static_configs:
+      - targets: ["location-api:8103"]
+    metrics_path: /metrics
+
+  - job_name: "driver-api"
+    static_configs:
+      - targets: ["driver-api:8104"]
+    metrics_path: /metrics
+
+  - job_name: "fleet-api"
+    static_configs:
+      - targets: ["fleet-api:8102"]
+    metrics_path: /metrics

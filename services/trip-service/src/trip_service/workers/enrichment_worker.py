@@ -34,7 +34,12 @@ from trip_service.enums import (
 )
 from trip_service.http_clients import get_worker_client
 from trip_service.models import TripTrip, TripTripEnrichment, TripTripEvidence
-from trip_service.observability import ENRICHMENT_CLAIMED_TOTAL, ENRICHMENT_COMPLETED_TOTAL, ENRICHMENT_FAILED_TOTAL
+from trip_service.observability import (
+    ENRICHMENT_CLAIMED_TOTAL,
+    ENRICHMENT_COMPLETED_TOTAL,
+    ENRICHMENT_FAILED_TOTAL,
+    get_standard_labels,
+)
 from trip_service.worker_heartbeats import record_worker_heartbeat
 
 logger = logging.getLogger("trip_service.enrichment_worker")
@@ -242,7 +247,9 @@ async def _claim_and_process_batch(worker_id: str, batch_size: int = 10) -> int:
 
         claim_token = str(uuid.uuid4())
         claim_ttl = timedelta(seconds=settings.enrichment_claim_ttl_seconds)
-        ENRICHMENT_CLAIMED_TOTAL.inc(len(enrichment_rows))
+
+        labels = get_standard_labels()
+        ENRICHMENT_CLAIMED_TOTAL.labels(**labels).inc(len(enrichment_rows))
 
         # Step 3: Atomically claim rows
         for enrichment in enrichment_rows:
@@ -272,119 +279,129 @@ async def _process_single_enrichment(
 
     Handles route resolution → final status derivation.
     """
-    async with async_session_factory() as session:
-        # Reload enrichment row with trip
-        stmt = select(TripTripEnrichment).where(
-            TripTripEnrichment.id == enrichment_id,
-            TripTripEnrichment.claim_token == claim_token,
-        )
-        result = await session.execute(stmt)
-        enrichment = result.scalar_one_or_none()
+    from trip_service.observability import correlation_id
 
-        if enrichment is None:
-            logger.warning("Enrichment %s: claim lost (token mismatch), skipping", enrichment_id)
-            return
-
-        # Load trip for context
-        trip_result = await session.execute(select(TripTrip).where(TripTrip.id == trip_id))
-        trip = trip_result.scalar_one_or_none()
-        if trip is None:
-            logger.warning("Enrichment %s: trip %s not found, skipping", enrichment_id, trip_id)
-            return
-
-        # Load evidence for ocr_confidence (for data_quality_flag recomputation)
-        ev_result = await session.execute(
-            select(TripTripEvidence)
-            .where(TripTripEvidence.trip_id == trip_id)
-            .order_by(TripTripEvidence.created_at_utc.desc())
-            .limit(1)
-        )
-        evidence = ev_result.scalar_one_or_none()
-        ocr_confidence = evidence.ocr_confidence if evidence else None
-
-        now = _now_utc()
-        route_resolved = False
-
-        try:
-            # --- Route resolution ---
-            if enrichment.route_status == RouteStatus.PENDING:
-                if evidence and evidence.origin_name_raw and evidence.destination_name_raw:
-                    route_id, route_status = await _resolve_route(
-                        evidence.origin_name_raw,
-                        evidence.destination_name_raw,
-                    )
-                    enrichment.route_status = route_status
-                    if route_id:
-                        trip.route_id = route_id
-                        route_resolved = True
-                else:
-                    # No evidence for route resolution
-                    enrichment.route_status = RouteStatus.FAILED
-            elif enrichment.route_status == RouteStatus.READY:
-                route_resolved = True
-
-            # --- Derive final enrichment status (V8 Section 13.8) ---
-            enrichment.enrichment_status = _derive_final_enrichment_status(enrichment.route_status)
-
-            # --- Recompute data_quality_flag (V8 Section 6.3) ---
-            enrichment.data_quality_flag = _compute_data_quality_flag(
-                trip.source_type,
-                ocr_confidence,
-                route_resolved=route_resolved,
+    token = correlation_id.set(enrichment_id)
+    try:
+        async with async_session_factory() as session:
+            # Reload enrichment row with trip
+            stmt = select(TripTripEnrichment).where(
+                TripTripEnrichment.id == enrichment_id,
+                TripTripEnrichment.claim_token == claim_token,
             )
+            result = await session.execute(stmt)
+            enrichment = result.scalar_one_or_none()
 
-            # --- Step 5: Clear claim fields on finish ---
-            enrichment.claim_token = None
-            enrichment.claim_expires_at_utc = None
-            enrichment.claimed_by_worker = None
-            enrichment.last_enrichment_error_code = None
-            enrichment.updated_at_utc = now
+            if enrichment is None:
+                logger.warning("Enrichment %s: claim lost (token mismatch), skipping", enrichment_id)
+                return
 
-            # If still need retries (PENDING or FAILED with attempts left)
-            # BUG-07 fix: compute retry time BEFORE incrementing attempt_count so
-            # attempt 0 → index 0 → 60s (V8 Section 13.7: first retry = 1 minute).
-            if enrichment.enrichment_status in (EnrichmentStatus.PENDING, EnrichmentStatus.FAILED):
+            # Load trip for context
+            trip_result = await session.execute(select(TripTrip).where(TripTrip.id == trip_id))
+            trip = trip_result.scalar_one_or_none()
+            if trip is None:
+                logger.warning("Enrichment %s: trip %s not found, skipping", enrichment_id, trip_id)
+                return
+
+            # Load evidence for ocr_confidence (for data_quality_flag recomputation)
+            ev_result = await session.execute(
+                select(TripTripEvidence)
+                .where(TripTripEvidence.trip_id == trip_id)
+                .order_by(TripTripEvidence.created_at_utc.desc())
+                .limit(1)
+            )
+            evidence = ev_result.scalar_one_or_none()
+            ocr_confidence = evidence.ocr_confidence if evidence else None
+
+            now = _now_utc()
+            route_resolved = False
+
+            try:
+                # --- Route resolution ---
+                if enrichment.route_status == RouteStatus.PENDING:
+                    if evidence and evidence.origin_name_raw and evidence.destination_name_raw:
+                        route_id, route_status = await _resolve_route(
+                            evidence.origin_name_raw,
+                            evidence.destination_name_raw,
+                        )
+                        enrichment.route_status = route_status
+                        if route_id:
+                            trip.route_id = route_id
+                            route_resolved = True
+                    else:
+                        # No evidence for route resolution
+                        enrichment.route_status = RouteStatus.FAILED
+                elif enrichment.route_status == RouteStatus.READY:
+                    route_resolved = True
+
+                # --- Derive final enrichment status (V8 Section 13.8) ---
+                enrichment.enrichment_status = _derive_final_enrichment_status(enrichment.route_status)
+
+                # --- Recompute data_quality_flag (V8 Section 6.3) ---
+                enrichment.data_quality_flag = _compute_data_quality_flag(
+                    trip.source_type,
+                    ocr_confidence,
+                    route_resolved=route_resolved,
+                )
+
+                # --- Step 5: Clear claim fields on finish ---
+                enrichment.claim_token = None
+                enrichment.claim_expires_at_utc = None
+                enrichment.claimed_by_worker = None
+                enrichment.last_enrichment_error_code = None
+                enrichment.updated_at_utc = now
+
+                labels = get_standard_labels()
+
+                # If still need retries (PENDING or FAILED with attempts left)
+                # BUG-07 fix: compute retry time BEFORE incrementing attempt_count so
+                # attempt 0 → index 0 → 60s (V8 Section 13.7: first retry = 1 minute).
+                if enrichment.enrichment_status in (EnrichmentStatus.PENDING, EnrichmentStatus.FAILED):
+                    if enrichment.enrichment_attempt_count < settings.enrichment_max_attempts:
+                        enrichment.next_retry_at_utc = _enrichment_next_retry_at(enrichment.enrichment_attempt_count)
+                    else:
+                        # Max attempts reached → FAILED
+                        enrichment.enrichment_status = EnrichmentStatus.FAILED
+                        enrichment.next_retry_at_utc = None
+                        ENRICHMENT_FAILED_TOTAL.labels(**labels).inc()
+                else:
+                    enrichment.next_retry_at_utc = None
+                enrichment.enrichment_attempt_count += 1
+
+                await session.commit()
+                ENRICHMENT_COMPLETED_TOTAL.labels(result=enrichment.enrichment_status, **labels).inc()
+
+                logger.info(
+                    "Enrichment %s: completed — route=%s enrichment=%s quality=%s",
+                    enrichment_id,
+                    enrichment.route_status,
+                    enrichment.enrichment_status,
+                    enrichment.data_quality_flag,
+                )
+
+            except Exception as e:
+                logger.error("Enrichment %s: processing error: %s", enrichment_id, e)
+                # On error: clear claim, mark FAILED, schedule retry
+                enrichment.enrichment_status = EnrichmentStatus.FAILED
+                enrichment.claim_token = None
+                enrichment.claim_expires_at_utc = None
+                enrichment.claimed_by_worker = None
+                enrichment.last_enrichment_error_code = str(e)[:100]
+                enrichment.updated_at_utc = now
+
+                labels = get_standard_labels()
+
+                # BUG-07 fix: compute retry using current count (before increment)
                 if enrichment.enrichment_attempt_count < settings.enrichment_max_attempts:
                     enrichment.next_retry_at_utc = _enrichment_next_retry_at(enrichment.enrichment_attempt_count)
                 else:
-                    # Max attempts reached → FAILED
-                    enrichment.enrichment_status = EnrichmentStatus.FAILED
                     enrichment.next_retry_at_utc = None
-                    ENRICHMENT_FAILED_TOTAL.inc()
-            else:
-                enrichment.next_retry_at_utc = None
-            enrichment.enrichment_attempt_count += 1
+                    ENRICHMENT_FAILED_TOTAL.labels(**labels).inc()
+                enrichment.enrichment_attempt_count += 1
 
-            await session.commit()
-            ENRICHMENT_COMPLETED_TOTAL.labels(result=enrichment.enrichment_status).inc()
-
-            logger.info(
-                "Enrichment %s: completed — route=%s enrichment=%s quality=%s",
-                enrichment_id,
-                enrichment.route_status,
-                enrichment.enrichment_status,
-                enrichment.data_quality_flag,
-            )
-
-        except Exception as e:
-            logger.error("Enrichment %s: processing error: %s", enrichment_id, e)
-            # On error: clear claim, mark FAILED, schedule retry
-            enrichment.enrichment_status = EnrichmentStatus.FAILED
-            enrichment.claim_token = None
-            enrichment.claim_expires_at_utc = None
-            enrichment.claimed_by_worker = None
-            enrichment.last_enrichment_error_code = str(e)[:100]
-            enrichment.updated_at_utc = now
-
-            # BUG-07 fix: compute retry using current count (before increment)
-            if enrichment.enrichment_attempt_count < settings.enrichment_max_attempts:
-                enrichment.next_retry_at_utc = _enrichment_next_retry_at(enrichment.enrichment_attempt_count)
-            else:
-                enrichment.next_retry_at_utc = None
-                ENRICHMENT_FAILED_TOTAL.inc()
-            enrichment.enrichment_attempt_count += 1
-
-            await session.commit()
+                await session.commit()
+    finally:
+        correlation_id.reset(token)
 
 
 # ---------------------------------------------------------------------------

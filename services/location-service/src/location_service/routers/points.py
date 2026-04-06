@@ -11,16 +11,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
-from location_service.audit_helpers import (
-    _write_audit,
-    _write_outbox,
-    serialize_point,
-)
-from location_service.auth import user_auth_dependency, AuthContext
+from location_service.audit_helpers import _write_audit, _write_outbox, serialize_point
+from location_service.auth import AuthContext, user_auth_dependency
 from location_service.database import get_db
 from location_service.domain.normalization import normalize_en, normalize_tr
 from location_service.enums import PairStatus
 from location_service.errors import (
+    ProblemDetailError,
     point_code_conflict,
     point_coordinate_conflict,
     point_immutable_field_modification,
@@ -42,7 +39,7 @@ from location_service.schemas import (
     PointUpdate,
 )
 
-router = APIRouter(prefix="/points", tags=["points"])
+router = APIRouter(prefix="/v1/points", tags=["points"])
 
 
 _CODE_PATTERN = re.compile(r"^[A-Z0-9_]{2,32}$")
@@ -115,7 +112,7 @@ def _constraint_name(exc: IntegrityError) -> str | None:
     return None
 
 
-def _point_problem_from_integrity(exc: IntegrityError, *, code: str | None = None):
+def _point_problem_from_integrity(exc: IntegrityError, *, code: str | None = None) -> ProblemDetailError | None:
     constraint = _constraint_name(exc)
     if constraint in _COORDINATE_CONSTRAINTS:
         return point_coordinate_conflict()
@@ -201,8 +198,8 @@ async def create_point(
         target_type="POINT",
         target_id=str(point.location_id),
         action_type="CREATE",
-        actor_id=auth.actor_id if "auth" in locals() else "SYSTEM",
-        actor_role=auth.actor_type if "auth" in locals() else "ADMIN",
+        actor_id=auth.actor_id,
+        actor_role=auth.actor_type,
         new_snapshot=new_snapshot,
     )
     await _write_outbox(
@@ -226,7 +223,7 @@ async def create_point(
 
     await session.refresh(point)
     set_etag(response, point.row_version)
-    return point
+    return PointResponse.model_validate(point)
 
 
 @router.get("/{location_id}", response_model=PointResponse)
@@ -242,7 +239,7 @@ async def get_point(
     if point is None:
         raise point_not_found(str(location_id))
     set_etag(response, point.row_version)
-    return point
+    return PointResponse.model_validate(point)
 
 
 @router.get("", response_model=PointListResponse)
@@ -392,8 +389,8 @@ async def update_point(
             target_type="POINT",
             target_id=str(point.location_id),
             action_type="UPDATE",
-            actor_id=auth.actor_id if "auth" in locals() else "SYSTEM",
-            actor_role=auth.actor_type if "auth" in locals() else "ADMIN",
+            actor_id=auth.actor_id,
+            actor_role=auth.actor_type,
             old_snapshot=old_snapshot,
             new_snapshot=new_snapshot,
             request_id=request.headers.get("X-Request-ID"),
@@ -419,4 +416,4 @@ async def update_point(
 
     await session.refresh(point)
     set_etag(response, point.row_version)
-    return point
+    return PointResponse.model_validate(point)

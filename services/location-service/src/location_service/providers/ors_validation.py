@@ -9,6 +9,7 @@ import httpx
 from pydantic import BaseModel
 
 from location_service.config import settings
+from location_service.observability import correlation_id
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,8 @@ class ORSValidationClient:
             "Accept": "application/json, application/geo+json",
             "Content-Type": "application/json",
         }
+        if c_id := correlation_id.get():
+            headers["X-Correlation-ID"] = c_id
 
         max_retries = max(self.max_retries, 0)
         async with httpx.AsyncClient(timeout=self.timeout) as client:

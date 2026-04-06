@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from uuid import UUID
+from typing import Literal
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import and_, or_, select
@@ -23,6 +23,7 @@ from location_service.schemas import (
     InternalRouteResolveRequest,
     InternalRouteResolveResponse,
     InternalTripContextResponse,
+    ProfileCode,
 )
 
 router = APIRouter(tags=["internal-routes"])
@@ -34,7 +35,7 @@ async def _find_point_ids_by_normalized_name(
     normalized_origin: str,
     normalized_destination: str,
     use_english_names: bool,
-) -> tuple[UUID | None, UUID | None]:
+) -> tuple[str | None, str | None]:
     """Resolve origin/destination point IDs by exact normalized names."""
     name_column = LocationPoint.normalized_name_en if use_english_names else LocationPoint.normalized_name_tr
 
@@ -56,10 +57,10 @@ async def _find_point_ids_by_normalized_name(
 async def _collect_active_route_candidates(
     session: AsyncSession,
     *,
-    origin_location_id: UUID,
-    destination_location_id: UUID,
+    origin_location_id: str,
+    destination_location_id: str,
     profile_code: str,
-    resolution: str,
+    resolution: Literal["EXACT_TR", "EXACT_EN"],
 ) -> list[InternalRouteResolveResponse]:
     """Collect all matching ACTIVE route-version candidates for a pair resolution attempt."""
     pairs = (
@@ -128,7 +129,7 @@ async def resolve_route(
     if payload.language_hint in {"AUTO", "EN"}:
         attempts.append((normalize_en(payload.origin_name), normalize_en(payload.destination_name), True))
 
-    unique_candidates: dict[tuple[UUID, UUID], InternalRouteResolveResponse] = {}
+    unique_candidates: dict[tuple[str, str], InternalRouteResolveResponse] = {}
     for normalized_origin, normalized_destination, use_english_names in attempts:
         origin_id, destination_id = await _find_point_ids_by_normalized_name(
             session,
@@ -139,7 +140,7 @@ async def resolve_route(
         if origin_id is None or destination_id is None:
             continue
 
-        resolution = "EXACT_EN" if use_english_names else "EXACT_TR"
+        resolution: Literal["EXACT_TR", "EXACT_EN"] = "EXACT_EN" if use_english_names else "EXACT_TR"
         candidates = await _collect_active_route_candidates(
             session,
             origin_location_id=origin_id,
@@ -158,7 +159,7 @@ async def resolve_route(
 
 
 @router.get("/internal/v1/route-pairs/{pair_id}/trip-context", response_model=InternalTripContextResponse)
-async def get_trip_context(pair_id: UUID, session: AsyncSession = Depends(get_db)) -> InternalTripContextResponse:
+async def get_trip_context(pair_id: str, session: AsyncSession = Depends(get_db)) -> InternalTripContextResponse:
     """Return forward and reverse trip context for an active route pair."""
     pair = await session.get(RoutePair, pair_id)
     if pair is None:
@@ -211,6 +212,6 @@ async def get_trip_context(pair_id: UUID, session: AsyncSession = Depends(get_db
         forward_duration_s=forward_version.total_duration_s,
         reverse_route_id=pair.reverse_route_id,
         reverse_duration_s=reverse_version.total_duration_s,
-        profile_code=pair.profile_code,
+        profile_code=ProfileCode(pair.profile_code),
         pair_status=pair.pair_status,
     )

@@ -1,12 +1,10 @@
 """Application configuration via environment variables."""
 
-import os
 from typing import Literal
 
 from pydantic_settings import BaseSettings
 
 DEFAULT_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/location_service"
-DEFAULT_AUTH_JWT_SECRET = "location-service-dev-secret-please-change-me-32b"
 DEFAULT_MAPBOX_DIRECTIONS_BASE_URL = "https://api.mapbox.com/directions/v5"
 DEFAULT_MAPBOX_RASTER_BASE_URL = "https://api.mapbox.com/v4"
 DEFAULT_ORS_BASE_URL = "https://api.openrouteservice.org/v2/directions/driving-hgv"
@@ -16,6 +14,7 @@ class Settings(BaseSettings):
     """Location Service configuration loaded from environment variables."""
 
     service_name: str = "location-service"
+    service_version: str = "0.1.0"
     service_port: int = 8103
     environment: Literal["dev", "test", "prod"] = "dev"
 
@@ -24,10 +23,9 @@ class Settings(BaseSettings):
     api_version: str = "v1"
     profile_default: str = "TIR"
 
-    auth_jwt_secret: str = DEFAULT_AUTH_JWT_SECRET
-    auth_jwt_algorithm: str = "HS256"
-    auth_issuer: str = ""
-    auth_audience: str = ""
+    auth_jwt_algorithm: str = "RS256"
+    auth_issuer: str = "lojinext-platform"
+    auth_audience: str = "lojinext-platform"
     auth_public_key: str = ""
     auth_private_key: str = ""
     auth_jwks_url: str = ""
@@ -45,7 +43,14 @@ class Settings(BaseSettings):
     enable_ors_validation: bool = True
 
     provider_timeout_ms: int = 4000
+    provider_retry_max: int = 3
+    provider_probe_ttl_seconds: int = 30
+    provider_probe_origin_lng: float = 28.9784
+    provider_probe_origin_lat: float = 41.0082
+    provider_probe_dest_lng: float = 28.9905
+    provider_probe_dest_lat: float = 41.0151
     distance_delta_fail_pct: float = 15.0
+    distance_delta_warning_pct: float = 5.0
     duration_delta_warning_pct: float = 10.0
     duration_delta_fail_pct: float = 20.0
     endpoint_parity_tolerance_m: float = 25.0
@@ -57,17 +62,17 @@ class Settings(BaseSettings):
     monthly_refresh_cron: str = ""
     enable_bulk_refresh: bool = True
     run_stuck_sla_minutes: int = 30
+    processing_poll_interval_seconds: int = 5
+    processing_claim_ttl_seconds: int = 300
+    processing_max_attempts: int = 5
+    worker_heartbeat_timeout_seconds: int = 60
     outbox_poll_interval_seconds: int = 5
     outbox_publish_batch_size: int = 50
     outbox_retry_max: int = 5
     kafka_topic: str = "location-events"
     kafka_bootstrap_servers: str = "localhost:9092"
     kafka_client_id: str = "location-service"
-
-    @property
-    def resolved_auth_jwt_secret(self) -> str:
-        """Return the recovery-time shared secret if set, otherwise the local auth secret."""
-        return os.getenv("PLATFORM_JWT_SECRET") or self.auth_jwt_secret
+    ignore_provider_health: bool = False
 
     @property
     def provider_timeout_seconds(self) -> float:
@@ -86,15 +91,18 @@ def validate_prod_settings(current: Settings) -> None:
         return
 
     errors: list[str] = []
-    if current.auth_jwt_algorithm.upper().startswith("HS") and (
-        not current.resolved_auth_jwt_secret or current.resolved_auth_jwt_secret == DEFAULT_AUTH_JWT_SECRET
-    ):
-        errors.append("LOCATION_AUTH_JWT_SECRET must be set to a non-default value in prod.")
-    if current.auth_jwt_algorithm.upper().startswith("RS"):
-        if not current.auth_jwks_url and not current.auth_public_key:
-            errors.append("LOCATION_AUTH_JWKS_URL or LOCATION_AUTH_PUBLIC_KEY must be set for RS* auth in prod.")
-        if current.auth_private_key:
-            errors.append("LOCATION_AUTH_PRIVATE_KEY must not be set in prod; signing belongs to identity-service.")
+    if current.auth_jwt_algorithm.upper() != "RS256":
+        errors.append("LOCATION_AUTH_JWT_ALGORITHM must be RS256 in prod.")
+    if not current.auth_issuer:
+        errors.append("LOCATION_AUTH_ISSUER must be set for RS256 auth in prod.")
+    if not current.auth_audience:
+        errors.append("LOCATION_AUTH_AUDIENCE must be set for RS256 auth in prod.")
+    if not current.auth_jwks_url:
+        errors.append("LOCATION_AUTH_JWKS_URL must be set for RS256 auth in prod.")
+    if current.auth_public_key:
+        errors.append("LOCATION_AUTH_PUBLIC_KEY must not be set in prod; verification must use JWKS.")
+    if current.auth_private_key:
+        errors.append("LOCATION_AUTH_PRIVATE_KEY must not be set in prod; signing belongs to identity-service.")
     if not current.database_url or current.database_url == DEFAULT_DATABASE_URL:
         errors.append("LOCATION_DATABASE_URL must be set to a non-default value in prod.")
     if not current.mapbox_api_key:

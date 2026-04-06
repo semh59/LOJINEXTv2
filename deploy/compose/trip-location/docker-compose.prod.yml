@@ -8,6 +8,7 @@ x-identity-common: &identity-common
   environment:
     IDENTITY_ENVIRONMENT: prod
     IDENTITY_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-lojinext}:${POSTGRES_PASSWORD}@postgres:5432/${IDENTITY_DB_NAME:-identity_service}
+    IDENTITY_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
     IDENTITY_AUTH_JWT_ALGORITHM: RS256
     IDENTITY_AUTH_ISSUER: ${AUTH_ISSUER:-lojinext-platform}
     IDENTITY_AUTH_AUDIENCE: ${AUTH_AUDIENCE:-lojinext-platform}
@@ -23,6 +24,8 @@ x-identity-common: &identity-common
     IDENTITY_SERVICE_CLIENT_SECRET__FLEET_SERVICE: ${FLEET_SERVICE_CLIENT_SECRET:?FLEET_SERVICE_CLIENT_SECRET is required}
   depends_on:
     postgres:
+      condition: service_healthy
+    redpanda:
       condition: service_healthy
   restart: unless-stopped
   networks:
@@ -200,6 +203,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+
+  identity-outbox:
+    <<: *identity-common
+    command: ["identity-outbox-worker"]
 
   trip-api:
     <<: *trip-common

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from trip_service.config import settings
+from trip_service.observability import correlation_id
 
 try:
     from confluent_kafka.admin import AdminClient
@@ -76,8 +77,10 @@ class LogBroker(MessageBroker):
 
     async def publish(self, message: OutboxMessage) -> None:
         """Log the message as published."""
+        c_id = correlation_id.get() or "no-correlation-id"
         logger.info(
-            "BROKER PUBLISH: event_id=%s event=%s partition=%s aggregate=%s/%s",
+            "BROKER PUBLISH: correlation_id=%s event_id=%s event=%s partition=%s aggregate=%s/%s",
+            c_id,
             message.event_id,
             message.event_name,
             message.partition_key,
@@ -122,10 +125,16 @@ class KafkaBroker(MessageBroker):
 
     async def publish(self, message: OutboxMessage) -> None:
         """Publish a JSON payload to the configured Kafka topic."""
+        headers = []
+        c_id = correlation_id.get()
+        if c_id:
+            headers.append(("X-Correlation-ID", c_id.encode("utf-8")))
+
         delivery_future = await self._producer.produce(
             self._topic,
             key=message.partition_key.encode("utf-8"),
             value=message.payload.encode("utf-8"),
+            headers=headers,
         )
         await delivery_future
 

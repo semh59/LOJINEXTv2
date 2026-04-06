@@ -8,6 +8,7 @@ import httpx
 import jwt
 import pytest
 from httpx import AsyncClient
+from platform_auth_testing import sign_test_token
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -16,6 +17,7 @@ from tests.conftest import (
     EXCEL_SERVICE_HEADERS,
     SUPER_ADMIN_HEADERS,
     TELEGRAM_SERVICE_HEADERS,
+    TEST_JWKS_BUNDLE,
     make_excel_payload,
     make_fallback_payload,
     make_manual_trip_payload,
@@ -818,8 +820,17 @@ async def test_validate_trip_references_sends_fleet_auth_and_accepts_compat_resp
     async def fake_get_dependency_client() -> StubClient:
         return StubClient()
 
+    async def fake_issue_internal_service_token(*, audience: str | None = None) -> str:
+        return sign_test_token(
+            TEST_JWKS_BUNDLE,
+            sub=settings.service_name,
+            role="SERVICE",
+            service=settings.service_name,
+            aud=audience or settings.auth_audience,
+        )
+
     monkeypatch.setattr("trip_service.dependencies.get_dependency_client", fake_get_dependency_client)
-    monkeypatch.setenv("PLATFORM_JWT_SECRET", "trip-fleet-shared-secret")
+    monkeypatch.setattr("trip_service.dependencies.issue_internal_service_token", fake_issue_internal_service_token)
 
     result = await validate_trip_references(driver_id="driver-001", vehicle_id="vehicle-001", trailer_id=None)
 
@@ -827,15 +838,16 @@ async def test_validate_trip_references_sends_fleet_auth_and_accepts_compat_resp
     scheme, _, token = auth_header.partition(" ")
     payload = jwt.decode(
         token,
-        "trip-fleet-shared-secret",
-        algorithms=[settings.auth_jwt_algorithm],
-        audience="lojinext-platform",
+        TEST_JWKS_BUNDLE.public_key_pem,
+        algorithms=["RS256"],
+        audience="fleet-service",
+        issuer=settings.auth_issuer,
     )
 
     assert scheme == "Bearer"
     assert payload["role"] == "SERVICE"
     assert payload["service"] == "trip-service"
-    assert payload["aud"] == "lojinext-platform"
+    assert payload["aud"] == "fleet-service"
     assert captured["json"] == {"driver_id": "driver-001", "vehicle_id": "vehicle-001", "trailer_id": None}
     assert result.driver_valid is True
     assert result.vehicle_valid is True

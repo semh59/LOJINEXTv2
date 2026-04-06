@@ -17,8 +17,8 @@ SRC_ROOT = SERVICE_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from trip_service.database import async_session_factory
-from trip_service.models import TripTrip
+from trip_service.database import async_session_factory  # noqa: E402
+from trip_service.models import TripTrip  # noqa: E402
 
 BLOCKING_STATUSES = ("REQUESTED", "IN_PROGRESS")
 LEGACY_DELETED_STATUS = "CANCELLED"
@@ -82,9 +82,7 @@ async def run_backfill(*, apply: bool, session_factory=async_session_factory) ->
         if apply and not blocking_rows:
             if cancelled_rows:
                 result = await session.execute(
-                    update(TripTrip)
-                    .where(TripTrip.status == LEGACY_DELETED_STATUS)
-                    .values(status="SOFT_DELETED")
+                    update(TripTrip).where(TripTrip.status == LEGACY_DELETED_STATUS).values(status="SOFT_DELETED")
                 )
                 applied_counts[LEGACY_DELETED_STATUS] = int(result.rowcount or 0)
             if convertible_assigned:

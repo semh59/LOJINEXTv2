@@ -20,6 +20,7 @@ async def test_health_endpoint(raw_client: AsyncClient) -> None:
     response = await raw_client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+    assert (await raw_client.get("/api/v1/location/v1/health")).status_code == 404
 
 
 @pytest.mark.asyncio
@@ -34,6 +35,7 @@ async def test_ready_endpoint(raw_client: AsyncClient) -> None:
     assert data["checks"]["auth_verify"] == "ok"
     assert data["checks"]["provider_probe_age_s"] == 0
     assert data["checks"]["processing_worker"] == "ok"
+    assert (await raw_client.get("/api/v1/location/v1/ready")).status_code == 404
 
 
 @pytest.mark.asyncio
@@ -121,7 +123,10 @@ async def test_provider_probe_result_uses_ttl_cache(monkeypatch: pytest.MonkeyPa
 
 def test_docs_are_disabled_in_prod(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "environment", "prod")
-    monkeypatch.setattr(settings, "auth_jwt_secret", "prod-secret-12345678901234567890")
+    monkeypatch.setattr(settings, "auth_jwt_algorithm", "RS256")
+    monkeypatch.setattr(settings, "auth_issuer", "lojinext-platform")
+    monkeypatch.setattr(settings, "auth_audience", "lojinext-platform")
+    monkeypatch.setattr(settings, "auth_jwks_url", "http://identity-api:8105/.well-known/jwks.json")
     monkeypatch.setattr(settings, "database_url", "postgresql+asyncpg://user:pass@db.example.com:5432/location")
     monkeypatch.setattr(settings, "mapbox_api_key", "mapbox-key")
     monkeypatch.setattr(settings, "enable_ors_validation", False)
@@ -149,3 +154,29 @@ async def test_unhandled_exception_returns_problem_json() -> None:
     assert response.status_code == 500
     assert response.headers["content-type"].startswith("application/problem+json")
     assert response.json()["code"] == "LOCATION_INTERNAL_ERROR"
+
+
+@pytest.mark.asyncio
+async def test_ready_returns_503_when_jwks_is_unreachable(
+    raw_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("location_service.routers.health.auth_verify_status", lambda: "fail")
+
+    response = await raw_client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["auth_verify"] == "fail"
+
+
+@pytest.mark.asyncio
+async def test_ready_returns_503_when_jwks_is_malformed(
+    raw_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("location_service.routers.health.auth_verify_status", lambda: "fail")
+
+    response = await raw_client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["auth_verify"] == "fail"

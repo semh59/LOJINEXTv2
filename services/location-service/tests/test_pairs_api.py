@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-from uuid import UUID, uuid4
-
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from ulid import ULID
 
 from location_service.enums import DirectionCode, PairStatus, ProcessingStatus
 from location_service.models import Route, RoutePair, RouteVersion
+
+
+def _route_code(prefix: str) -> str:
+    return f"{prefix}-{str(ULID())[:16]}"
 
 
 async def _create_point(
@@ -53,7 +56,7 @@ async def _create_pair(
 
 
 async def _load_pair(test_session: AsyncSession, pair_id: str) -> RoutePair:
-    pair = (await test_session.execute(select(RoutePair).where(RoutePair.route_pair_id == UUID(pair_id)))).scalar_one()
+    pair = (await test_session.execute(select(RoutePair).where(RoutePair.route_pair_id == pair_id))).scalar_one()
     return pair
 
 
@@ -61,16 +64,16 @@ async def _seed_pending_draft(test_session: AsyncSession, pair_id: str) -> Route
     pair = await _load_pair(test_session, pair_id)
 
     forward_route = Route(
-        route_id=uuid4(),
+        route_id=str(ULID()),
         route_pair_id=pair.route_pair_id,
-        route_code=f"ROUTE-FWD-{uuid4().hex[:8].upper()}",
+        route_code=_route_code("ROUTE-FWD"),
         direction=DirectionCode.FORWARD,
         created_by="test",
     )
     reverse_route = Route(
-        route_id=uuid4(),
+        route_id=str(ULID()),
         route_pair_id=pair.route_pair_id,
-        route_code=f"ROUTE-REV-{uuid4().hex[:8].upper()}",
+        route_code=_route_code("ROUTE-REV"),
         direction=DirectionCode.REVERSE,
         created_by="test",
     )
@@ -473,6 +476,6 @@ async def test_discard_pair_returns_pair_response_and_etag(client: AsyncClient, 
 
 @pytest.mark.asyncio
 async def test_activate_endpoint_returns_removed_tombstone(client: AsyncClient) -> None:
-    response = await client.post(f"/v1/pairs/{uuid4()}/activate")
+    response = await client.post(f"/v1/pairs/{str(ULID())}/activate")
     assert response.status_code == 404
     assert response.json()["code"] == "LOCATION_ENDPOINT_REMOVED"

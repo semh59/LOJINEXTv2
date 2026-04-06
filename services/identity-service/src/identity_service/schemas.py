@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+HumanGroupName = Literal["SUPER_ADMIN", "MANAGER", "OPERATOR"]
 
 
 class LoginRequest(BaseModel):
@@ -60,14 +63,14 @@ class AdminCreateUserRequest(BaseModel):
     username: str = Field(min_length=1, max_length=64)
     email: EmailStr
     password: str = Field(min_length=8, max_length=512)
-    groups: list[str] = Field(default_factory=list)
+    groups: list[HumanGroupName] = Field(default_factory=list)
     is_active: bool = True
 
 
 class AdminUpdateUserRequest(BaseModel):
     email: EmailStr | None = None
     password: str | None = Field(default=None, min_length=8, max_length=512)
-    groups: list[str] | None = None
+    groups: list[HumanGroupName] | None = None
     is_active: bool | None = None
 
 

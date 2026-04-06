@@ -41,7 +41,8 @@ async def read_worker_heartbeat(worker_name: str) -> datetime | None:
     async with async_session_factory() as session:
         stmt = select(WorkerHeartbeat.recorded_at_utc).where(WorkerHeartbeat.worker_name == worker_name)
         result = await session.execute(stmt)
-        return result.scalar_one_or_none()
+        recorded_at = result.scalar_one_or_none()
+        return recorded_at
 
 
 async def get_worker_heartbeat_snapshot(worker_name: str, stale_after_seconds: int) -> HeartbeatSnapshot:

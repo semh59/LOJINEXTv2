@@ -10,6 +10,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import DBAPIError, ProgrammingError
@@ -22,6 +23,7 @@ from location_service.observability import (
     PROCESSING_RUN_DURATION,
     PROCESSING_RUN_FAILURES,
     PROCESSING_RUNS_TOTAL,
+    get_standard_labels,
 )
 from location_service.processing.pipeline import _process_route_pair, mark_processing_run_failed
 from location_service.worker_heartbeats import record_worker_heartbeat
@@ -35,8 +37,8 @@ WORKER_NAME = "processing-worker"
 class ClaimedProcessingRun:
     """A processing run claimed for worker-side execution."""
 
-    run_id: uuid.UUID
-    pair_id: uuid.UUID
+    run_id: str
+    pair_id: str
     trigger_type: str
     claim_token: str
 
@@ -49,7 +51,7 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-def _claim_expired_or_stale(now: datetime):
+def _claim_expired_or_stale(now: datetime) -> Any:
     reclaim_cutoff = now - timedelta(minutes=settings.run_stuck_sla_minutes)
     return and_(
         ProcessingRun.run_status == RunStatus.RUNNING,
@@ -126,39 +128,49 @@ async def claim_next_processing_run(worker_name: str | None = None) -> ClaimedPr
 
 async def process_claimed_run(claimed_run: ClaimedProcessingRun) -> None:
     """Execute a claimed processing run and persist terminal state."""
-    PROCESSING_RUNS_TOTAL.labels(trigger_type=claimed_run.trigger_type).inc()
-    started_at = time.perf_counter()
-    status = "succeeded"
+    from location_service.observability import correlation_id
 
+    # Group all logs for this run under its own correlation ID
+    token = correlation_id.set(claimed_run.run_id)
     try:
-        await _process_route_pair(
-            claimed_run.run_id,
-            claimed_run.pair_id,
-            claim_token=claimed_run.claim_token,
-        )
-    except Exception as exc:
-        status = "failed"
-        PROCESSING_RUN_FAILURES.labels(
-            trigger_type=claimed_run.trigger_type,
-            failure_reason=type(exc).__name__,
-        ).inc()
-        await mark_processing_run_failed(
-            claimed_run.run_id,
-            str(exc),
-            claim_token=claimed_run.claim_token,
-        )
-        logger.error(
-            "Processing failed for pair %s run %s: %s",
-            claimed_run.pair_id,
-            claimed_run.run_id,
-            exc,
-            exc_info=True,
-        )
+        labels = get_standard_labels()
+        PROCESSING_RUNS_TOTAL.labels(trigger_type=claimed_run.trigger_type, **labels).inc()
+        started_at = time.perf_counter()
+        status = "succeeded"
+
+        try:
+            await _process_route_pair(
+                claimed_run.run_id,
+                claimed_run.pair_id,
+                claim_token=claimed_run.claim_token,
+            )
+        except Exception as exc:
+            status = "failed"
+            PROCESSING_RUN_FAILURES.labels(
+                trigger_type=claimed_run.trigger_type,
+                failure_reason=type(exc).__name__,
+                **labels,
+            ).inc()
+            await mark_processing_run_failed(
+                claimed_run.run_id,
+                str(exc),
+                claim_token=claimed_run.claim_token,
+            )
+            logger.error(
+                "Processing failed for pair %s run %s: %s",
+                claimed_run.pair_id,
+                claimed_run.run_id,
+                exc,
+                exc_info=True,
+            )
+        finally:
+            PROCESSING_RUN_DURATION.labels(
+                trigger_type=claimed_run.trigger_type,
+                status=status,
+                **labels,
+            ).observe(time.perf_counter() - started_at)
     finally:
-        PROCESSING_RUN_DURATION.labels(
-            trigger_type=claimed_run.trigger_type,
-            status=status,
-        ).observe(time.perf_counter() - started_at)
+        correlation_id.reset(token)
 
 
 async def run_processing_worker(

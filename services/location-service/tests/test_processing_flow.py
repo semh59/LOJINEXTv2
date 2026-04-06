@@ -261,6 +261,7 @@ async def test_approval_flow_promotion_increments_row_version() -> None:
     ]
 
     mock_session = AsyncMock()
+    mock_session.add = MagicMock()
     mock_session.__aenter__.return_value = mock_session
     mock_session.__aexit__.return_value = None
     mock_session.get.return_value = mock_pair
@@ -302,6 +303,7 @@ async def test_discard_flow_clears_pending_and_increments_row_version() -> None:
     ]
 
     mock_session = AsyncMock()
+    mock_session.add = MagicMock()
     mock_session.__aenter__.return_value = mock_session
     mock_session.__aexit__.return_value = None
     mock_session.get.return_value = mock_pair

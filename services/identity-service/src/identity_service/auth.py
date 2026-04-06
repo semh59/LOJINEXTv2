@@ -8,7 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from identity_service.database import get_session
 from identity_service.models import IdentityUserModel
-from identity_service.token_service import build_user_profile, decode_access_token
+from identity_service.token_service import (
+    InvalidUserRoleAssignmentsError,
+    build_user_profile,
+    decode_access_token,
+)
 
 
 async def current_user(
@@ -29,7 +33,10 @@ async def current_user(
     user = await session.get(IdentityUserModel, claims.sub)
     if user is None or not user.is_active:
         raise HTTPException(status_code=401, detail="User is inactive or missing.")
-    return await build_user_profile(session, user)
+    try:
+        return await build_user_profile(session, user)
+    except InvalidUserRoleAssignmentsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 async def require_super_admin(

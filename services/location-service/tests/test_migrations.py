@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -12,6 +11,7 @@ from alembic.config import Config
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 from testcontainers.postgres import PostgresContainer
+from ulid import ULID
 
 from alembic import command
 from location_service.config import settings
@@ -78,8 +78,8 @@ def test_alembic_live_pair_uniqueness_migration_blocks_duplicate_drafts() -> Non
             alembic_cfg.set_main_option("sqlalchemy.url", database_url)
             command.upgrade(alembic_cfg, "0d5f12e97db6")
 
-            origin_id = uuid.uuid4()
-            destination_id = uuid.uuid4()
+            origin_id = str(ULID())
+            destination_id = str(ULID())
 
             async def _seed_duplicates() -> None:
                 engine = create_async_engine(database_url)
@@ -146,8 +146,8 @@ def test_alembic_live_pair_uniqueness_migration_blocks_duplicate_drafts() -> Non
                                 """
                             ),
                             {
-                                "pair_id_1": uuid.uuid4(),
-                                "pair_id_2": uuid.uuid4(),
+                                "pair_id_1": str(ULID()),
+                                "pair_id_2": str(ULID()),
                                 "origin_id": origin_id,
                                 "destination_id": destination_id,
                                 "now": now,

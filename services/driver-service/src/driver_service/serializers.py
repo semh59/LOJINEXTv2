@@ -6,7 +6,7 @@ from typing import Any
 
 from driver_service.enums import ActorRole
 from driver_service.models import DriverModel
-from driver_service.normalization import mask_phone_for_manager
+from driver_service.normalization import derive_lifecycle_state, mask_phone_for_manager
 
 
 def serialize_driver_admin(driver: DriverModel, *, mask_pii: bool = False) -> dict[str, Any]:
@@ -27,6 +27,10 @@ def serialize_driver_admin(driver: DriverModel, *, mask_pii: bool = False) -> di
         "employment_start_date": driver.employment_start_date.isoformat() if driver.employment_start_date else None,
         "employment_end_date": driver.employment_end_date.isoformat() if driver.employment_end_date else None,
         "status": driver.status,
+        "inactive_reason": driver.inactive_reason,
+        "soft_delete_reason": driver.inactive_reason,
+        "soft_deleted_at_utc": driver.soft_deleted_at_utc.isoformat() if driver.soft_deleted_at_utc else None,
+        "lifecycle_state": derive_lifecycle_state(driver.status, driver.soft_deleted_at_utc),
         "is_assignable": driver.is_assignable,
         "note": driver.note,
         "row_version": driver.row_version,
@@ -47,6 +51,10 @@ def serialize_driver_manager(driver: DriverModel) -> dict[str, Any]:
         "employment_start_date": driver.employment_start_date.isoformat() if driver.employment_start_date else None,
         "employment_end_date": driver.employment_end_date.isoformat() if driver.employment_end_date else None,
         "status": driver.status,
+        "inactive_reason": driver.inactive_reason,
+        "soft_delete_reason": driver.inactive_reason,
+        "soft_deleted_at_utc": driver.soft_deleted_at_utc.isoformat() if driver.soft_deleted_at_utc else None,
+        "lifecycle_state": derive_lifecycle_state(driver.status, driver.soft_deleted_at_utc),
         "is_assignable": driver.is_assignable,
         "row_version": driver.row_version,
         "updated_at_utc": driver.updated_at_utc.isoformat() if driver.updated_at_utc else None,
@@ -54,7 +62,7 @@ def serialize_driver_manager(driver: DriverModel) -> dict[str, Any]:
 
 
 def serialize_driver_internal(driver: DriverModel) -> dict[str, Any]:
-    """Driver resource for INTERNAL_SERVICE — minimal fields."""
+    """Driver resource for SERVICE callers — minimal fields."""
     return {
         "driver_id": driver.driver_id,
         "company_driver_code": driver.company_driver_code,
@@ -62,6 +70,10 @@ def serialize_driver_internal(driver: DriverModel) -> dict[str, Any]:
         "telegram_user_id": driver.telegram_user_id,
         "license_class": driver.license_class,
         "status": driver.status,
+        "inactive_reason": driver.inactive_reason,
+        "soft_delete_reason": driver.inactive_reason,
+        "soft_deleted_at_utc": driver.soft_deleted_at_utc.isoformat() if driver.soft_deleted_at_utc else None,
+        "lifecycle_state": derive_lifecycle_state(driver.status, driver.soft_deleted_at_utc),
         "is_assignable": driver.is_assignable,
     }
 

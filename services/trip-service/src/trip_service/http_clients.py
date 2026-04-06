@@ -7,14 +7,25 @@ import asyncio
 import httpx
 
 from trip_service.config import settings
+from trip_service.observability import correlation_id
 
 _dependency_client: httpx.AsyncClient | None = None
 _worker_client: httpx.AsyncClient | None = None
 _client_lock = asyncio.Lock()
 
 
+def _inject_correlation_id(request: httpx.Request) -> None:
+    """Inject X-Correlation-ID header from ContextVar if present."""
+    c_id = correlation_id.get()
+    if c_id:
+        request.headers["X-Correlation-ID"] = c_id
+
+
 def _build_client() -> httpx.AsyncClient:
-    return httpx.AsyncClient(timeout=settings.dependency_timeout_seconds)
+    return httpx.AsyncClient(
+        timeout=settings.dependency_timeout_seconds,
+        event_hooks={"request": [_inject_correlation_id]},
+    )
 
 
 async def get_dependency_client() -> httpx.AsyncClient:

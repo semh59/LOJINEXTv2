@@ -40,8 +40,7 @@ from trip_service.models import (
 from trip_service.schemas import EnrichmentSummary, EvidenceSummary, TripResource
 from trip_service.state_machine import TripStateMachine
 
-_LEGACY_DELETED_STATUSES = (TripStatus.SOFT_DELETED.value, "CANCELLED")
-_REFERENCE_EXCLUDED_STATUSES = (TripStatus.REJECTED.value, *_LEGACY_DELETED_STATUSES)
+_REFERENCE_EXCLUDED_STATUSES = (TripStatus.REJECTED.value, TripStatus.SOFT_DELETED.value)
 _MANUAL_CREATE_WINDOW_MINUTES = 30
 
 
@@ -52,12 +51,9 @@ def latest_evidence(trip: TripTrip) -> TripTripEvidence | None:
     return sorted(trip.evidence, key=lambda e: e.created_at_utc, reverse=True)[0]
 
 
-def normalize_trip_status(status: str) -> str:
-    """Collapse legacy persisted statuses into the canonical API contract."""
-    status_value = status.value if isinstance(status, TripStatus) else str(status)
-    if status_value == "CANCELLED":
-        return TripStatus.SOFT_DELETED.value
-    return status_value
+def normalize_trip_status(status: str | TripStatus) -> str:
+    """Return the canonical string value for a trip status."""
+    return status.value if isinstance(status, TripStatus) else str(status)
 
 
 def is_deleted_trip_status(status: str) -> bool:

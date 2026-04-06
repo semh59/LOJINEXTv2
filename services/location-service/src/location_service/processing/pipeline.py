@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import logging
-import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID
 
 from sqlalchemy import select
+from ulid import ULID
 
 from location_service.config import settings
 from location_service.database import async_session_factory
@@ -49,12 +48,12 @@ logger = logging.getLogger(__name__)
 
 
 async def trigger_processing(
-    pair_id: UUID,
+    pair_id: str,
     trigger_type: TriggerType | str = TriggerType.INITIAL_CALCULATE,
-    run_id: UUID | None = None,
-) -> UUID:
+    run_id: str | None = None,
+) -> str:
     """Create a ProcessingRun row and leave execution to the dedicated worker."""
-    run_uuid = run_id or uuid.uuid4()
+    run_uuid = run_id or str(ULID())
 
     async with async_session_factory() as session:
         run = ProcessingRun(
@@ -77,7 +76,7 @@ def _clear_claim(run: ProcessingRun) -> None:
 
 
 async def mark_processing_run_failed(
-    run_id: UUID,
+    run_id: str,
     error_message: str,
     *,
     claim_token: str | None = None,
@@ -272,7 +271,7 @@ def _generate_segments(
 
         grade_val = calculate_grade(elev1, elev2, dist)
         grade_klass = assign_grade_class(grade_val)
-        speed_band = assign_speed_band(actual_speed_kph)
+        speed_band = assign_speed_band(round(actual_speed_kph) if actual_speed_kph > 0 else None)
         speed_limit_state = SpeedLimitState.KNOWN if speed_limit is not None else SpeedLimitState.UNKNOWN
         metadata = metadata_by_index[i] if i < len(metadata_by_index) else _DEFAULT_SEGMENT_METADATA
 
@@ -304,8 +303,8 @@ def _generate_segments(
 
 
 async def _load_processing_context(
-    run_id: UUID,
-    pair_id: UUID,
+    run_id: str,
+    pair_id: str,
     *,
     claim_token: str | None = None,
 ) -> tuple[LocationPoint, LocationPoint, RoutePair] | None:
@@ -346,7 +345,7 @@ async def _load_processing_context(
     return origin, dest, pair
 
 
-async def _process_route_pair(run_id: UUID, pair_id: UUID, *, claim_token: str | None = None) -> None:
+async def _process_route_pair(run_id: str, pair_id: str, *, claim_token: str | None = None) -> None:
     """Calculate both route directions, enrich them, and persist draft versions."""
     mapbox_client = MapboxDirectionsClient()
     terrain_client = MapboxTerrainClient()
@@ -400,9 +399,10 @@ async def _process_route_pair(run_id: UUID, pair_id: UUID, *, claim_token: str |
         )
 
     async with async_session_factory() as session:
-        pair = await session.get(RoutePair, pair_id)
-        if pair is None:
+        pair_row = await session.get(RoutePair, pair_id)
+        if pair_row is None:
             return
+        pair = pair_row
 
         pending_versions: dict[DirectionCode, int] = {}
         pair_changed = False
@@ -420,7 +420,7 @@ async def _process_route_pair(run_id: UUID, pair_id: UUID, *, claim_token: str |
 
             if route is None:
                 route = Route(
-                    route_id=uuid.uuid4(),
+                    route_id=str(ULID()),
                     route_pair_id=pair_id,
                     route_code=generate_route_code(pair.pair_code, dir_code),
                     direction=dir_code,

@@ -138,19 +138,22 @@ async def test_ready_allows_cold_outbound_auth(
     client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Readiness stays green when outbound auth is cold but correctly configured."""
+    """Readiness fails when outbound auth cannot mint a token."""
     async with driver_database.async_session_factory() as session:
         await record_worker_heartbeat(session, "outbox_relay", status="RUNNING")
         await record_worker_heartbeat(session, "import_worker", status="RUNNING")
         await session.commit()
 
-    monkeypatch.setattr("driver_service.routers.auth_outbound_status", lambda: "cold")
+    async def cold_outbound() -> str:
+        return "fail"
+
+    monkeypatch.setattr("driver_service.routers.auth_outbound_status", cold_outbound)
 
     response = await client.get("/ready")
 
-    assert response.status_code == 200
-    assert response.json()["status"] == "ready"
-    assert response.json()["checks"]["auth_outbound"] == "cold"
+    assert response.status_code == 503
+    assert response.json()["status"] == "not_ready"
+    assert response.json()["checks"]["auth_outbound"] == "fail"
 
 
 @pytest.mark.asyncio
@@ -164,10 +167,24 @@ async def test_ready_fails_when_outbound_auth_is_invalid(
         await record_worker_heartbeat(session, "import_worker", status="RUNNING")
         await session.commit()
 
-    monkeypatch.setattr("driver_service.routers.auth_outbound_status", lambda: "fail")
+    async def broken_outbound() -> str:
+        return "fail"
+
+    monkeypatch.setattr("driver_service.routers.auth_outbound_status", broken_outbound)
 
     response = await client.get("/ready")
 
     assert response.status_code == 503
     assert response.json()["status"] == "not_ready"
     assert response.json()["checks"]["auth_outbound"] == "fail"
+
+
+@pytest.mark.asyncio
+async def test_health_endpoints_are_served_at_root_paths(client: AsyncClient) -> None:
+    health = await client.get("/health")
+    ready = await client.get("/ready")
+    versioned = await client.get("/v1/health")
+
+    assert health.status_code == 200
+    assert ready.status_code in {200, 503}
+    assert versioned.status_code == 404

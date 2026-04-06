@@ -1,31 +1,65 @@
-"""Pytest fixtures and configuration for Driver Service tests.
+"""Pytest fixtures and configuration for Driver Service tests."""
 
-Provides TestContainers-backed PostgreSQL database and FastAPI TestClient.
-"""
+from __future__ import annotations
 
-import asyncio
-from typing import AsyncGenerator
+# AGGRESSIVE GLOBAL AUTH PATCH: MUST RUN BEFORE ANY OTHER IMPORTS
+import platform_auth.service_tokens
+from platform_auth_testing import build_test_jwks_bundle, sign_test_token
 
-import pytest
-import sqlalchemy
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from testcontainers.postgres import PostgresContainer
+_GLOBAL_JWKS_BUNDLE = build_test_jwks_bundle()
 
-from driver_service.auth import (
-    AuthContext,
-    admin_auth_dependency,
-    admin_or_internal_auth_dependency,
-    admin_or_manager_auth_dependency,
-    internal_service_auth_dependency,
-)
-from driver_service.database import get_session
-from driver_service.main import app
-from driver_service.models import Base
 
-# ---------------------------------------------------------------------------
-# TestContainers Setup
-# ---------------------------------------------------------------------------
+async def _global_mock_get_token(*args, **kwargs):
+    # Signature: (self, *, service_name, audience, token_url, client_id, client_secret)
+    aud = kwargs.get("audience") or (args[2] if len(args) > 2 else "unknown")
+    return sign_test_token(
+        _GLOBAL_JWKS_BUNDLE,
+        sub="test-service",
+        role="SERVICE",
+        service="test-service",
+        aud=aud,
+    )
+
+
+# Overwrite the class method directly at the very beginning
+platform_auth.service_tokens.ServiceTokenCache.get_token = _global_mock_get_token
+
+import asyncio  # noqa: E402
+from collections.abc import AsyncGenerator  # noqa: E402
+
+import pytest  # noqa: E402
+import sqlalchemy  # noqa: E402
+from httpx import ASGITransport, AsyncClient  # noqa: E402
+from platform_auth_testing import install_jwks_urlopen_mock  # noqa: E402
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine  # noqa: E402
+from testcontainers.postgres import PostgresContainer  # noqa: E402
+
+from driver_service.config import settings  # noqa: E402
+from driver_service.database import get_session  # noqa: E402
+from driver_service.main import app  # noqa: E402
+from driver_service.models import Base  # noqa: E402
+
+TEST_JWKS_BUNDLE = build_test_jwks_bundle()
+settings.environment = "test"
+settings.auth_jwt_algorithm = "RS256"
+settings.auth_issuer = TEST_JWKS_BUNDLE.issuer
+settings.auth_audience = TEST_JWKS_BUNDLE.audience
+settings.auth_jwks_url = TEST_JWKS_BUNDLE.jwks_url
+settings.auth_service_audience = "lojinext-platform"
+settings.auth_service_token_url = "http://identity.test/auth/v1/token/service"
+settings.auth_service_client_id = settings.service_name
+settings.auth_service_client_secret = "driver-client-secret"
+
+
+def _headers(*, sub: str, role: str, service: str | None = None) -> dict[str, str]:
+    token = sign_test_token(TEST_JWKS_BUNDLE, sub=sub, role=role, service=service)
+    return {"Authorization": f"Bearer {token}"}
+
+
+ADMIN_HEADERS = _headers(sub="test-admin-id", role="ADMIN")
+MANAGER_HEADERS = _headers(sub="test-manager-id", role="MANAGER")
+INTERNAL_HEADERS = _headers(sub="fleet-service", role="SERVICE", service="fleet-service")
+FORBIDDEN_INTERNAL_HEADERS = _headers(sub="rogue-service", role="SERVICE", service="rogue-service")
 
 
 @pytest.fixture(scope="session")
@@ -39,7 +73,6 @@ def postgres_container() -> PostgresContainer:
 def database_url(postgres_container: PostgresContainer) -> str:
     """Get the SQLAlchemy async URL for the test container."""
     url = postgres_container.get_connection_url()
-    # Replace psycopg2 mapping with asyncpg
     return url.replace("postgresql+psycopg2://", "postgresql+asyncpg://")
 
 
@@ -57,19 +90,15 @@ async def engine(database_url: str):
     engine = create_async_engine(database_url, echo=False)
 
     async with engine.begin() as conn:
-        # Enable pg_trgm for fuzzy search tests
         await conn.execute(sqlalchemy.text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
-        # Create all tables directly (skipping alembic for unit/integration speed)
         await conn.run_sync(Base.metadata.create_all)
 
-    # Patch global factories for background tasks
-    from sqlalchemy.ext.asyncio import async_sessionmaker
+    test_factory = async_sessionmaker(bind=engine, expire_on_commit=False)
 
     import driver_service.database
     import driver_service.routers
     import driver_service.routers.import_jobs
 
-    test_factory = async_sessionmaker(bind=engine, expire_on_commit=False)
     driver_service.database.async_session_factory = test_factory
     driver_service.routers.async_session_factory = test_factory
     driver_service.routers.import_jobs.async_session_factory = test_factory
@@ -96,51 +125,16 @@ async def db_session(engine) -> AsyncGenerator[AsyncSession, None]:
     await connection.close()
 
 
-# ---------------------------------------------------------------------------
-# FastAPI Test Client and Auth Mocks
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(scope="function")
-async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
-    """Provide httpx AsyncClient tailored for the FastAPI app with auth mocks."""
+async def client(db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[AsyncClient, None]:
+    """Provide httpx AsyncClient backed by real RS256 auth and test DB session."""
 
     def override_get_session() -> AsyncSession:
         return db_session
 
-    def override_admin_auth() -> AuthContext:
-        return AuthContext(actor_id="test-admin-id", role="ADMIN")
-
-    def override_manager_auth() -> AuthContext:
-        return AuthContext(actor_id="test-manager-id", role="MANAGER")
-
-    def override_internal_auth() -> AuthContext:
-        return AuthContext(actor_id="test-internal-id", role="INTERNAL_SERVICE")
-
     app.dependency_overrides[get_session] = override_get_session
-
-    # We map specific headers to roles as a simple way to test role auth in integration tests.
-    # But since Depends resolves before the endpoint body, we can just override the dependencies
-    # to look at the request headers and return appropriate mock context.
-
-    from fastapi import Request
-
-    async def mock_auth_dep(request: Request):
-        auth_header = request.headers.get("Authorization", "")
-        if "admin" in auth_header.lower():
-            return AuthContext(actor_id="test-admin-id", role="ADMIN")
-        elif "manager" in auth_header.lower():
-            return AuthContext(actor_id="test-manager-id", role="MANAGER")
-        elif "internal" in auth_header.lower():
-            return AuthContext(actor_id="test-internal-id", role="INTERNAL_SERVICE")
-        from fastapi import HTTPException
-
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-    app.dependency_overrides[admin_auth_dependency] = mock_auth_dep
-    app.dependency_overrides[admin_or_manager_auth_dependency] = mock_auth_dep
-    app.dependency_overrides[internal_service_auth_dependency] = mock_auth_dep
-    app.dependency_overrides[admin_or_internal_auth_dependency] = mock_auth_dep
+    app.dependency_overrides[get_session] = override_get_session
+    install_jwks_urlopen_mock(monkeypatch, TEST_JWKS_BUNDLE, jwks_url=settings.auth_jwks_url)
 
     class HealthyBroker:
         async def check_health(self) -> bool:
@@ -164,17 +158,21 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
         delattr(app.state, "broker")
 
 
-# Authentication Headers
 @pytest.fixture
 def auth_admin() -> dict[str, str]:
-    return {"Authorization": "Bearer admin-token-mock"}
+    return ADMIN_HEADERS
 
 
 @pytest.fixture
 def auth_manager() -> dict[str, str]:
-    return {"Authorization": "Bearer manager-token-mock"}
+    return MANAGER_HEADERS
 
 
 @pytest.fixture
 def auth_internal() -> dict[str, str]:
-    return {"Authorization": "Bearer internal-token-mock"}
+    return INTERNAL_HEADERS
+
+
+@pytest.fixture
+def forbidden_internal() -> dict[str, str]:
+    return FORBIDDEN_INTERNAL_HEADERS

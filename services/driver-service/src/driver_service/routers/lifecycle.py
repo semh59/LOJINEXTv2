@@ -250,6 +250,7 @@ async def reactivate_driver(
 
     driver.status = DriverStatus.ACTIVE
     driver.inactive_reason = None
+    driver.soft_deleted_at_utc = None
     driver.row_version += 1
     driver.updated_at_utc = now
     driver.updated_by_actor_id = auth.actor_id
@@ -334,6 +335,7 @@ async def soft_delete_driver(
 
     driver.status = DriverStatus.CANCELLED
     driver.inactive_reason = body.reason
+    driver.soft_deleted_at_utc = now
     driver.row_version += 1
     driver.updated_at_utc = now
     driver.updated_by_actor_id = auth.actor_id

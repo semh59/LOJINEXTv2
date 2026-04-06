@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from uuid import UUID
+from typing import cast
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/v1/routes", tags=["routes"])
 async def _get_route_version_row(
     session: AsyncSession,
     *,
-    route_id: UUID,
+    route_id: str,
     version_no: int,
 ) -> tuple[RouteVersion, Route, RoutePair]:
     row = (
@@ -32,12 +32,12 @@ async def _get_route_version_row(
     ).one_or_none()
     if row is None:
         raise route_version_not_found()
-    return row
+    return cast(tuple[RouteVersion, Route, RoutePair], row)
 
 
 @router.get("/{route_id}/versions/{version_no}", response_model=RouteVersionDetailResponse)
 async def get_route_version_detail(
-    route_id: UUID,
+    route_id: str,
     version_no: int,
     session: AsyncSession = Depends(get_db),
 ) -> RouteVersionDetailResponse:
@@ -77,7 +77,7 @@ async def get_route_version_detail(
 
 @router.get("/{route_id}/versions/{version_no}/geometry", response_model=RouteGeometryResponse)
 async def get_route_version_geometry(
-    route_id: UUID,
+    route_id: str,
     version_no: int,
     session: AsyncSession = Depends(get_db),
 ) -> RouteGeometryResponse:

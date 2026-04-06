@@ -14,6 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
+from fleet_service.auth import AuthContext
 from fleet_service.constraint_error_mapper import map_integrity_error
 from fleet_service.domain.enums import (
     AggregateType,
@@ -69,7 +70,6 @@ from fleet_service.schemas.responses import (
     TrailerSpecResponse,
 )
 from fleet_service.timestamps import to_utc_naive, utc_now_naive
-from platform_auth import AuthContext
 
 logger = logging.getLogger("fleet_service.trailer_service")
 

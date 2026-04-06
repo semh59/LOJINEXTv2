@@ -14,7 +14,7 @@ from driver_service.broker import EventBroker
 from driver_service.config import settings
 from driver_service.database import async_session_factory
 from driver_service.models import DriverOutboxModel
-from driver_service.observability import OUTBOX_EVENTS_PUBLISHED, OUTBOX_PUBLISH_FAILURES
+from driver_service.observability import OUTBOX_EVENTS_PUBLISHED, OUTBOX_PUBLISH_FAILURES, get_standard_labels
 from driver_service.worker_heartbeats import record_worker_heartbeat
 
 logger = logging.getLogger("driver_service.outbox_relay")
@@ -66,50 +66,58 @@ async def _process_batch(session: AsyncSession, broker: EventBroker) -> int:
 
     published_count = 0
     for row in rows:
+        from driver_service.observability import correlation_id
+
+        token = correlation_id.set(row.outbox_id)
         try:
-            payload = json.loads(row.payload_json)
+            try:
+                payload = json.loads(row.payload_json)
 
-            # V2.1 Requirement: Use partition_key if available, fallback to driver_id
-            partition_key = row.partition_key or row.driver_id or "unknown"
+                # V2.1 Requirement: Use partition_key if available, fallback to driver_id
+                partition_key = row.partition_key or row.driver_id or "unknown"
 
-            await broker.publish(
-                topic=settings.kafka_topic,
-                key=partition_key,
-                payload={
-                    "event_name": row.event_name,
-                    "event_version": row.event_version,
-                    "aggregate_id": row.driver_id,
-                    "aggregate_type": "DRIVER",
-                    "data": payload,
-                    "published_at_utc": now.isoformat(),
-                },
-            )
-            row.publish_status = "PUBLISHED"
-            row.published_at_utc = now
-            OUTBOX_EVENTS_PUBLISHED.labels(event_name=row.event_name).inc()
-            published_count += 1
+                await broker.publish(
+                    topic=settings.kafka_topic,
+                    key=partition_key,
+                    payload={
+                        "event_name": row.event_name,
+                        "event_version": row.event_version,
+                        "aggregate_id": row.driver_id,
+                        "aggregate_type": "DRIVER",
+                        "data": payload,
+                        "published_at_utc": now.isoformat(),
+                    },
+                )
+                row.publish_status = "PUBLISHED"
+                row.published_at_utc = now
+                labels = get_standard_labels()
+                OUTBOX_EVENTS_PUBLISHED.labels(event_name=row.event_name, **labels).inc()
+                published_count += 1
 
-            # Commit immediately after successful publish
-            await session.commit()
+                # Commit immediately after successful publish
+                await session.commit()
 
-        except Exception as exc:
-            # Rollback the specific row change, then update status and commit AGAIN
-            await session.rollback()
+            except Exception as exc:
+                # Rollback the specific row change, then update status and commit AGAIN
+                await session.rollback()
 
-            OUTBOX_PUBLISH_FAILURES.labels(event_name=row.event_name).inc()
-            row.retry_count += 1
-            row.last_error = str(exc)[:500]
-            if row.retry_count >= settings.outbox_retry_max:
-                row.publish_status = "DEAD_LETTER"
-                logger.error("Outbox row %s moved to DEAD_LETTER after %d retries", row.outbox_id, row.retry_count)
-            else:
-                row.publish_status = "FAILED"
-                backoff = min(2**row.retry_count, 300)
-                row.next_attempt_at_utc = datetime.fromtimestamp(now.timestamp() + backoff, tz=timezone.utc)
+                labels = get_standard_labels()
+                OUTBOX_PUBLISH_FAILURES.labels(event_name=row.event_name, **labels).inc()
+                row.retry_count += 1
+                row.last_error = str(exc)[:500]
+                if row.retry_count >= settings.outbox_retry_max:
+                    row.publish_status = "DEAD_LETTER"
+                    logger.error("Outbox row %s moved to DEAD_LETTER after %d retries", row.outbox_id, row.retry_count)
+                else:
+                    row.publish_status = "FAILED"
+                    backoff = min(2**row.retry_count, 300)
+                    row.next_attempt_at_utc = datetime.fromtimestamp(now.timestamp() + backoff, tz=timezone.utc)
 
-            # Re-add to session because rollback might have detached it
-            session.add(row)
-            await session.commit()
+                # Re-add to session because rollback might have detached it
+                session.add(row)
+                await session.commit()
+        finally:
+            correlation_id.reset(token)
 
     if published_count:
         logger.info("Outbox relay: published %d / %d rows", published_count, len(rows))

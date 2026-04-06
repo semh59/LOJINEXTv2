@@ -1,0 +1,59 @@
+# LOJINEXTv2 — Servis Manifestosu
+# Bu dosya tek kaynak. Yeni servis eklemek = yeni bir blok eklemek.
+# Repair agent şablonu bu dosyayı okur; şablona dokunulmaz.
+
+services:
+  trip-service:
+    port: 8101
+    owner_domain: trip lifecycle
+    stack: { language: python, version: "3.12", framework: fastapi, orm: sqlalchemy2_async }
+    internal_dependencies:
+      - { service: fleet-service, path: /internal/v1/trip-references/validate }
+      - { service: location-service, path: /internal/v1/routes/resolve }
+    kafka_topics_produced:
+      - trip.created.v1
+      - trip.status_changed.v1
+    notes: "ADR-001: trip doğrudan driver-service'e gitmez; fleet facade üzerinden geçer."
+
+  fleet-service:
+    port: 8102
+    owner_domain: vehicle / trailer
+    stack: { language: python, version: "3.12", framework: fastapi, orm: sqlalchemy2_async }
+    internal_dependencies:
+      - { service: driver-service, path: /internal/v1/drivers/{id} }
+    kafka_topics_produced:
+      - fleet.vehicle_assigned.v1
+    notes: "Fleet, driver validation'ı kendi içinde yapar; trip-service fleet'e sorar."
+
+  location-service:
+    port: 8103
+    owner_domain: route / location
+    stack: { language: python, version: "3.12", framework: fastapi, orm: sqlalchemy2_async }
+    internal_dependencies: []
+    kafka_topics_produced:
+      - location.route_updated.v1
+    notes: "Import/export endpoint'leri kaldırıldı (410 Gone). Processing worker ayrı loop."
+
+  driver-service:
+    port: 8104
+    owner_domain: driver master data
+    stack: { language: python, version: "3.12", framework: fastapi, orm: sqlalchemy2_async }
+    internal_dependencies: []
+    kafka_topics_produced:
+      - driver.created.v1
+      - driver.telegram_changed.v1
+    notes: "Driver kimlik ve istihdam durumu owner'ı. Trip snapshot alır, doğrudan erişmez."
+
+  identity-service:
+    port: 8105
+    owner_domain: auth / user
+    stack: { language: python, version: "3.12", framework: fastapi, orm: sqlalchemy2_async }
+    internal_dependencies: []
+    kafka_topics_produced:
+      - identity.user_created.v1
+    notes: "RS256 / JWKS sahibi. PLATFORM_JWT_SECRET bridge yalnızca geçiş dönemi için."
+
+# Yeni servis eklemek:
+# 1. Buraya yeni blok ekle (port, owner_domain, stack, deps, topics, notes)
+# 2. Şablona dokunma.
+# 3. Repair agent otomatik olarak bu kaydı okur.

@@ -2,15 +2,12 @@ from __future__ import annotations
 
 import os
 import asyncio
-from pathlib import Path
 
 import httpx
 import pytest
+from sqlalchemy import text
+from testcontainers.postgres import PostgresContainer
 
-DB_PATH = Path(__file__).resolve().parent / "identity_test.db"
-
-if os.getenv("IDENTITY_TEST_BACKEND", "").strip().lower() != "postgres":
-    os.environ["IDENTITY_DATABASE_URL"] = f"sqlite+aiosqlite:///{DB_PATH.as_posix()}"
 os.environ["IDENTITY_ENVIRONMENT"] = "test"
 os.environ["IDENTITY_BOOTSTRAP_SUPERADMIN_USERNAME"] = "bootstrap-admin"
 os.environ["IDENTITY_BOOTSTRAP_SUPERADMIN_EMAIL"] = "bootstrap@example.com"
@@ -26,10 +23,25 @@ os.environ["IDENTITY_KEY_ENCRYPTION_KEY_VERSION"] = os.getenv(
     "IDENTITY_KEY_ENCRYPTION_KEY_VERSION", "test-v1"
 )
 
-from identity_service.database import async_session_factory, engine  # noqa: E402
+# ---- Start PostgresContainer early to inject its URL ----
+_pg = PostgresContainer("postgres:16-alpine")
+_pg.start()
+_pg_url = (
+    _pg.get_connection_url()
+    .replace("postgresql+psycopg2://", "postgresql+asyncpg://")
+    .replace("postgresql://", "postgresql+asyncpg://")
+)
+os.environ["IDENTITY_DATABASE_URL"] = _pg_url
+
+# Now import the service modules
+from identity_service.database import engine, async_session_factory  # noqa: E402
 from identity_service.main import app  # noqa: E402
 from identity_service.models import Base  # noqa: E402
 from identity_service.token_service import seed_bootstrap_state  # noqa: E402
+
+
+def pytest_sessionfinish(session, exitstatus):
+    _pg.stop()
 
 
 @pytest.fixture(scope="session")
@@ -41,15 +53,19 @@ def event_loop():
 
 @pytest.fixture(autouse=True)
 async def reset_db() -> None:
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.drop_all)
-        await connection.run_sync(Base.metadata.create_all)
+    # Reset db per test
+    async with engine.begin() as conn:
+        await conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
+        await conn.execute(text("CREATE SCHEMA public"))
+        await conn.run_sync(Base.metadata.create_all)
+
     async with async_session_factory() as session:
         await seed_bootstrap_state(session)
         await session.commit()
     yield
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.drop_all)
+    # No need to drop fully if we recreate next test, but good practice
+    async with engine.begin() as conn:
+        await conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
 
 
 @pytest.fixture

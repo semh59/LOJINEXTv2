@@ -1,0 +1,358 @@
+name: lojinext-parity
+
+x-deploy-common: &deploy-common
+  deploy:
+    resources:
+      limits:
+        memory: 512M
+    restart_policy:
+      condition: on-failure
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-identity-common: &identity-common
+  <<: *deploy-common
+  build:
+    context: ../../..
+    dockerfile: services/identity-service/Dockerfile
+  env_file: .env
+  environment:
+    IDENTITY_ENVIRONMENT: prod
+    IDENTITY_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-lojinext}:${POSTGRES_PASSWORD}@postgres:5432/${IDENTITY_DB_NAME:-identity_service}
+    IDENTITY_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    IDENTITY_AUTH_JWT_ALGORITHM: RS256
+    IDENTITY_AUTH_ISSUER: ${AUTH_ISSUER:-lojinext-platform}
+    IDENTITY_AUTH_AUDIENCE: ${AUTH_AUDIENCE:-lojinext-platform}
+    IDENTITY_AUTH_STRICT_AUDIENCE_CHECK: ${IDENTITY_AUTH_STRICT_AUDIENCE_CHECK:-false}
+    IDENTITY_KEY_ENCRYPTION_KEY_B64: ${IDENTITY_KEY_ENCRYPTION_KEY_B64:?IDENTITY_KEY_ENCRYPTION_KEY_B64 is required}
+    IDENTITY_KEY_ENCRYPTION_KEY_VERSION: ${IDENTITY_KEY_ENCRYPTION_KEY_VERSION:?IDENTITY_KEY_ENCRYPTION_KEY_VERSION is required}
+    IDENTITY_BOOTSTRAP_SUPERADMIN_USERNAME: ${IDENTITY_BOOTSTRAP_SUPERADMIN_USERNAME:-superadmin}
+    IDENTITY_BOOTSTRAP_SUPERADMIN_EMAIL: ${IDENTITY_BOOTSTRAP_SUPERADMIN_EMAIL:-superadmin@example.com}
+    IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD: ${IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD:?IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD is required}
+    IDENTITY_SERVICE_CLIENTS: trip-service,location-service,driver-service,fleet-service
+    IDENTITY_SERVICE_CLIENT_SECRET__TRIP_SERVICE: ${TRIP_SERVICE_CLIENT_SECRET:?TRIP_SERVICE_CLIENT_SECRET is required}
+    IDENTITY_SERVICE_CLIENT_SECRET__LOCATION_SERVICE: ${LOCATION_SERVICE_CLIENT_SECRET:?LOCATION_SERVICE_CLIENT_SECRET is required}
+    IDENTITY_SERVICE_CLIENT_SECRET__DRIVER_SERVICE: ${DRIVER_SERVICE_CLIENT_SECRET:?DRIVER_SERVICE_CLIENT_SECRET is required}
+    IDENTITY_SERVICE_CLIENT_SECRET__FLEET_SERVICE: ${FLEET_SERVICE_CLIENT_SECRET:?FLEET_SERVICE_CLIENT_SECRET is required}
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redpanda:
+      condition: service_healthy
+  restart: unless-stopped
+  networks:
+    - backend
+
+x-trip-common: &trip-common
+  <<: *deploy-common
+  build:
+    context: ../../..
+    dockerfile: services/trip-service/Dockerfile
+  env_file: .env
+  environment:
+    TRIP_ENVIRONMENT: prod
+    TRIP_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-lojinext}:${POSTGRES_PASSWORD}@postgres:5432/${TRIP_DB_NAME:-trip_service}
+    TRIP_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    TRIP_LOCATION_SERVICE_URL: http://location-api:8103
+    TRIP_FLEET_SERVICE_URL: http://fleet-api:8102
+    TRIP_AUTH_JWT_ALGORITHM: RS256
+    TRIP_AUTH_ISSUER: ${AUTH_ISSUER:-lojinext-platform}
+    TRIP_AUTH_AUDIENCE: ${AUTH_AUDIENCE:-lojinext-platform}
+    TRIP_AUTH_JWKS_URL: http://identity-api:8105/.well-known/jwks.json
+    TRIP_AUTH_SERVICE_TOKEN_URL: http://identity-api:8105/auth/v1/token/service
+    TRIP_AUTH_SERVICE_CLIENT_ID: trip-service
+    TRIP_AUTH_SERVICE_CLIENT_SECRET: ${TRIP_SERVICE_CLIENT_SECRET:?TRIP_SERVICE_CLIENT_SECRET is required}
+    TRIP_ALLOW_PLAINTEXT_IN_PROD: ${TRIP_ALLOW_PLAINTEXT_IN_PROD:-false}
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redpanda:
+      condition: service_healthy
+    identity-api:
+      condition: service_healthy
+  restart: unless-stopped
+  networks:
+    - backend
+
+x-location-common: &location-common
+  <<: *deploy-common
+  build:
+    context: ../../..
+    dockerfile: services/location-service/Dockerfile
+  env_file: .env
+  environment:
+    LOCATION_ENVIRONMENT: prod
+    LOCATION_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-lojinext}:${POSTGRES_PASSWORD}@postgres:5432/${LOCATION_DB_NAME:-location_service}
+    LOCATION_AUTH_JWT_ALGORITHM: RS256
+    LOCATION_AUTH_ISSUER: ${AUTH_ISSUER:-lojinext-platform}
+    LOCATION_AUTH_AUDIENCE: ${AUTH_AUDIENCE:-lojinext-platform}
+    LOCATION_AUTH_JWKS_URL: http://identity-api:8105/.well-known/jwks.json
+    LOCATION_IGNORE_PROVIDER_HEALTH: ${LOCATION_IGNORE_PROVIDER_HEALTH:-false}
+  depends_on:
+    postgres:
+      condition: service_healthy
+    identity-api:
+      condition: service_healthy
+  restart: unless-stopped
+  networks:
+    - backend
+
+x-driver-common: &driver-common
+  <<: *deploy-common
+  build:
+    context: ../../..
+    dockerfile: services/driver-service/Dockerfile
+  env_file: .env
+  environment:
+    DRIVER_ENVIRONMENT: prod
+    DRIVER_BROKER_TYPE: kafka
+    DRIVER_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-lojinext}:${POSTGRES_PASSWORD}@postgres:5432/${DRIVER_DB_NAME:-driver_service}
+    DRIVER_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    DRIVER_TRIP_SERVICE_BASE_URL: http://trip-api:8101
+    DRIVER_AUTH_JWT_ALGORITHM: RS256
+    DRIVER_AUTH_ISSUER: ${AUTH_ISSUER:-lojinext-platform}
+    DRIVER_AUTH_AUDIENCE: ${AUTH_AUDIENCE:-lojinext-platform}
+    DRIVER_AUTH_JWKS_URL: http://identity-api:8105/.well-known/jwks.json
+    DRIVER_AUTH_SERVICE_TOKEN_URL: http://identity-api:8105/auth/v1/token/service
+    DRIVER_AUTH_SERVICE_CLIENT_ID: driver-service
+    DRIVER_AUTH_SERVICE_CLIENT_SECRET: ${DRIVER_SERVICE_CLIENT_SECRET:?DRIVER_SERVICE_CLIENT_SECRET is required}
+    DRIVER_ALLOW_PLAINTEXT_IN_PROD: ${DRIVER_ALLOW_PLAINTEXT_IN_PROD:-false}
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redpanda:
+      condition: service_healthy
+    identity-api:
+      condition: service_healthy
+  restart: unless-stopped
+  networks:
+    - backend
+
+x-fleet-common: &fleet-common
+  <<: *deploy-common
+  build:
+    context: ../../..
+    dockerfile: services/fleet-service/Dockerfile
+  env_file: .env
+  environment:
+    FLEET_ENVIRONMENT: prod
+    FLEET_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-lojinext}:${POSTGRES_PASSWORD}@postgres:5432/${FLEET_DB_NAME:-fleet_service}
+    FLEET_BROKER_TYPE: kafka
+    FLEET_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    FLEET_DRIVER_SERVICE_BASE_URL: http://driver-api:8104
+    FLEET_TRIP_SERVICE_BASE_URL: http://trip-api:8101
+    FLEET_AUTH_JWT_ALGORITHM: RS256
+    FLEET_AUTH_ISSUER: ${AUTH_ISSUER:-lojinext-platform}
+    FLEET_AUTH_AUDIENCE: ${AUTH_AUDIENCE:-lojinext-platform}
+    FLEET_AUTH_JWKS_URL: http://identity-api:8105/.well-known/jwks.json
+    FLEET_AUTH_SERVICE_TOKEN_URL: http://identity-api:8105/auth/v1/token/service
+    FLEET_AUTH_SERVICE_CLIENT_ID: fleet-service
+    FLEET_AUTH_SERVICE_CLIENT_SECRET: ${FLEET_SERVICE_CLIENT_SECRET:?FLEET_SERVICE_CLIENT_SECRET is required}
+    FLEET_ALLOW_PLAINTEXT_IN_PROD: ${FLEET_ALLOW_PLAINTEXT_IN_PROD:-false}
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redpanda:
+      condition: service_healthy
+    identity-api:
+      condition: service_healthy
+  restart: unless-stopped
+  networks:
+    - backend
+
+services:
+  postgres:
+    <<: *deploy-common
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lojinext}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${TRIP_DB_NAME:-trip_service}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lojinext}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - backend
+
+  redpanda:
+    <<: *deploy-common
+    image: docker.redpanda.com/redpandadata/redpanda:v24.1.7
+    command:
+      - redpanda
+      - start
+      - --smp
+      - "1"
+      - --memory
+      - 256M
+      - --overprovisioned
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://localhost:19092
+      - --mode
+      - dev-container
+    ports:
+      - "${REDPANDA_EXTERNAL_PORT:-19092}:19092"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9644/v1/status/ready || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+    restart: unless-stopped
+    networks:
+      - backend
+
+  identity-api:
+    <<: *identity-common
+    command: ["identity-api"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8105/ready')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  identity-outbox:
+    <<: *identity-common
+    command: ["identity-outbox-worker"]
+
+  trip-api:
+    <<: *trip-common
+    command: ["trip-api"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8101/ready')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  trip-enrichment:
+    <<: *trip-common
+    command: ["trip-enrichment-worker"]
+
+  trip-outbox:
+    <<: *trip-common
+    command: ["trip-outbox-worker"]
+
+  trip-cleanup:
+    <<: *trip-common
+    command: ["trip-cleanup-worker"]
+
+  location-api:
+    <<: *location-common
+    command: ["location-api"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8103/ready')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  location-processing:
+    <<: *location-common
+    command: ["location-processing-worker"]
+
+  driver-api:
+    <<: *driver-common
+    command: ["driver-api"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8104/ready')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  driver-worker:
+    <<: *driver-common
+    command: ["driver-worker"]
+
+  fleet-api:
+    <<: *fleet-common
+    command: ["fleet-api"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8102/ready')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  fleet-worker:
+    <<: *fleet-common
+    command: ["fleet-worker"]
+
+  nginx:
+    <<: *deploy-common
+    image: nginx:1.27-alpine
+    volumes:
+      - ./nginx/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+    environment:
+      IDENTITY_API_UPSTREAM: identity-api:8105
+      TRIP_API_UPSTREAM: trip-api:8101
+      LOCATION_API_UPSTREAM: location-api:8103
+      DRIVER_API_UPSTREAM: driver-api:8104
+      FLEET_API_UPSTREAM: fleet-api:8102
+    ports:
+      - "${NGINX_PORT:-80}:80"
+    depends_on:
+      identity-api:
+        condition: service_healthy
+      trip-api:
+        condition: service_healthy
+      location-api:
+        condition: service_healthy
+      driver-api:
+        condition: service_healthy
+      fleet-api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - backend
+
+  prometheus:
+    <<: *deploy-common
+    image: prom/prometheus:v2.53.0
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    restart: unless-stopped
+    networks:
+      - backend
+
+  grafana:
+    <<: *deploy-common
+    image: grafana/grafana-oss:11.1.0
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - backend
+
+volumes:
+  pg_data:
+  redpanda_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  backend:
+    driver: bridge

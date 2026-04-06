@@ -6,7 +6,7 @@ import asyncio
 import logging
 
 from driver_service.broker import create_broker
-from driver_service.config import settings
+from driver_service.config import settings, validate_prod_settings
 from driver_service.database import engine
 from driver_service.observability import setup_structured_logging
 from driver_service.workers import start_all_workers
@@ -16,6 +16,7 @@ logger = logging.getLogger("driver_service.entrypoints.worker")
 
 async def worker_main() -> None:
     setup_structured_logging(logging.INFO)
+    validate_prod_settings(settings)
     logger.info("Driver Service worker starting (env=%s)", settings.environment)
 
     broker = create_broker(settings.resolved_broker_type)

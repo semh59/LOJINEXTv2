@@ -48,6 +48,19 @@ async def test_vehicle_spec_versioning_flow(client: AsyncClient):
         "gvwr_kg": 18000,
     }
 
+    # 3. Create new spec version (Version 2)
+    # effective_from_utc in the past relative to 'now' to test temporal query later
+    v2_effective = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)).isoformat()
+
+    new_spec_payload = {
+        "change_reason": "Engine upgrade",
+        "effective_from_utc": v2_effective,
+        "fuel_type": "DIESEL",
+        "powertrain_type": "ICE",
+        "engine_power_kw": 350.5,
+        "gvwr_kg": 18000,
+    }
+
     resp = await client.post(
         f"/api/v1/vehicles/{vehicle_id}/spec-versions",
         json=new_spec_payload,
@@ -55,13 +68,12 @@ async def test_vehicle_spec_versioning_flow(client: AsyncClient):
     )
     assert resp.status_code == 201
     v2_spec_etag = resp.headers["ETag"]
-    assert "sv1" in v2_spec_etag
+    assert "sv2" in v2_spec_etag
 
     # 4. Verify version 2 is current
     resp = await client.get(f"/api/v1/vehicles/{vehicle_id}/spec/current", headers=ADMIN_HEADERS)
     assert resp.json()["version_no"] == 2
     assert float(resp.json()["engine_power_kw"]) == 350.5
-
     # 5. AS-OF query (Check Version 1 state)
     # We query for 'now', which is before Version 2 becomes effective
     past_ts = datetime.datetime.now(datetime.timezone.utc).isoformat()

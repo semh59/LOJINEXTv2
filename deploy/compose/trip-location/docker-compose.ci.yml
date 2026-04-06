@@ -67,6 +67,11 @@ services:
       LOCATION_API_URL: http://location-api:8103
       DRIVER_API_URL: http://driver-api:8104
       FLEET_API_URL: http://fleet-api:8102
+      TRIP_SERVICE_CLIENT_SECRET: ${TRIP_SERVICE_CLIENT_SECRET}
+      LOCATION_SERVICE_CLIENT_SECRET: ${LOCATION_SERVICE_CLIENT_SECRET}
+      DRIVER_SERVICE_CLIENT_SECRET: ${DRIVER_SERVICE_CLIENT_SECRET}
+      FLEET_SERVICE_CLIENT_SECRET: ${FLEET_SERVICE_CLIENT_SECRET}
+      AUTH_AUDIENCE: ${AUTH_AUDIENCE:-lojinext-platform}
     depends_on:
       identity-api:
         condition: service_healthy

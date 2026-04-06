@@ -11,12 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 from ulid import ULID
 
-from location_service.audit_helpers import (
-    _write_audit,
-    _write_outbox,
-    serialize_pair_audit,
-)
-from location_service.auth import user_auth_dependency, AuthContext
+from location_service.audit_helpers import _write_audit, _write_outbox, serialize_pair_audit
+from location_service.auth import AuthContext, user_auth_dependency
 from location_service.database import get_db
 from location_service.domain.codes import generate_pair_code
 from location_service.domain.normalization import normalize_en, normalize_tr
@@ -46,7 +42,7 @@ from location_service.schemas import (
     ProfileCode,
 )
 
-router = APIRouter(prefix="/pairs", tags=["pairs"])
+router = APIRouter(prefix="/v1/pairs", tags=["pairs"])
 
 
 _ALLOWED_SORTS = {
@@ -124,7 +120,8 @@ async def _get_pair_detail(session: AsyncSession, pair_id: str) -> tuple[RoutePa
     ).one_or_none()
     if row is None:
         raise route_pair_not_found(str(pair_id))
-    return row
+    pair, origin, destination = row
+    return pair, origin, destination
 
 
 def serialize_pair_response(pair: RoutePair, origin: LocationPoint, destination: LocationPoint) -> PairResponse:
@@ -135,7 +132,7 @@ def serialize_pair_response(pair: RoutePair, origin: LocationPoint, destination:
         status=pair.pair_status,
         origin_location_id=pair.origin_location_id,
         destination_location_id=pair.destination_location_id,
-        profile_code=pair.profile_code,
+        profile_code=ProfileCode(pair.profile_code),
         origin_code=origin.code,
         origin_name_tr=origin.name_tr,
         origin_name_en=origin.name_en,
@@ -152,6 +149,9 @@ def serialize_pair_response(pair: RoutePair, origin: LocationPoint, destination:
         created_at_utc=pair.created_at_utc,
         updated_at_utc=pair.updated_at_utc,
     )
+
+
+serialize_pair = serialize_pair_response
 
 
 @router.post("", response_model=PairResponse, status_code=201)
@@ -194,31 +194,31 @@ async def create_pair(
         destination_location_id=destination.location_id,
         profile_code=payload.profile_code,
     )
-    session.add(pair)
-    await session.flush()
-
-    # High-fidelity audit & outbox
-    new_snapshot = serialize_pair_audit(pair)
-    await _write_audit(
-        session,
-        target_type="PAIR",
-        target_id=str(pair.route_pair_id),
-        action_type="CREATE",
-        actor_id=auth.actor_id,
-        actor_role=auth.actor_type,
-        new_snapshot=new_snapshot,
-    )
-    await _write_outbox(
-        session,
-        event_name="location.pair.created.v1",
-        payload={
-            "pair_id": str(pair.route_pair_id),
-            "pair_code": pair.pair_code,
-            "occurred_at_utc": new_snapshot["created_at_utc"],
-        },
-    )
 
     try:
+        session.add(pair)
+        await session.flush()
+
+        # High-fidelity audit & outbox
+        new_snapshot = serialize_pair_audit(pair)
+        await _write_audit(
+            session,
+            target_type="PAIR",
+            target_id=str(pair.route_pair_id),
+            action_type="CREATE",
+            actor_id=auth.actor_id,
+            actor_role=auth.actor_type,
+            new_snapshot=new_snapshot,
+        )
+        await _write_outbox(
+            session,
+            event_name="location.pair.created.v1",
+            payload={
+                "pair_id": str(pair.route_pair_id),
+                "pair_code": pair.pair_code,
+                "occurred_at_utc": new_snapshot["created_at_utc"],
+            },
+        )
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()

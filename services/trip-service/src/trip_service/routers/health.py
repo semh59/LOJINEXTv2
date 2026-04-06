@@ -57,8 +57,8 @@ async def readiness(request: Request) -> JSONResponse:
     checks["auth_verify"] = auth_verify_status()
     overall = overall and checks["auth_verify"] == "ok"
 
-    checks["auth_outbound"] = auth_outbound_status()
-    overall = overall and checks["auth_outbound"] in {"ok", "cold"}
+    checks["auth_outbound"] = await auth_outbound_status()
+    overall = overall and checks["auth_outbound"] == "ok"
 
     checks["fleet_service"] = "ok" if await probe_fleet_service() else "unavailable"
     overall = overall and checks["fleet_service"] == "ok"

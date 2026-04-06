@@ -9,6 +9,9 @@ Auth model:
 
 from __future__ import annotations
 
+import json
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 
 from fastapi import Header
@@ -25,7 +28,6 @@ from platform_auth import (
     decode_bearer_token,
 )
 from platform_auth.key_provider import build_verification_provider
-from platform_auth.token_factory import ServiceTokenFactory
 
 _TRIP_SERVICE_ALLOWLIST = {"trip-service"}
 _SERVICE_TOKEN_CACHE = ServiceTokenCache()
@@ -68,17 +70,12 @@ class AuthContext:
 
 
 def _platform_auth_settings(*, audience: str | None = None) -> AuthSettings:
-    """Build shared auth settings for inbound verification and outbound signing."""
-    effective_audience = settings.auth_audience or audience or None
+    """Build shared auth settings for inbound verification and outbound tokens."""
+    effective_audience = audience or settings.auth_audience or None
     return AuthSettings(
         algorithm=settings.auth_jwt_algorithm,
-        shared_secret=(
-            settings.resolved_auth_jwt_secret if settings.auth_jwt_algorithm.upper().startswith("HS") else None
-        ),
         issuer=settings.auth_issuer or None,
         audience=effective_audience,
-        public_key=settings.auth_public_key or None,
-        private_key=settings.auth_private_key or None,
         jwks_url=settings.auth_jwks_url or None,
         jwks_cache_ttl_seconds=settings.auth_jwks_cache_ttl_seconds,
     )
@@ -86,20 +83,29 @@ def _platform_auth_settings(*, audience: str | None = None) -> AuthSettings:
 
 def _service_token_audience(explicit_audience: str | None = None) -> str:
     """Return the canonical audience for outbound service tokens."""
-    del explicit_audience
-    return settings.auth_audience or _DEFAULT_SERVICE_AUDIENCE
+    return explicit_audience or settings.auth_audience or _DEFAULT_SERVICE_AUDIENCE
+
+
+def _probe_jwks_document(jwks_url: str) -> bool:
+    """Return whether the configured JWKS endpoint serves a usable keys array."""
+    request = urllib.request.Request(jwks_url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:  # noqa: S310
+            payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, ValueError, urllib.error.URLError):
+        return False
+    return isinstance(payload, dict) and isinstance(payload.get("keys"), list) and bool(payload["keys"])
 
 
 def auth_verify_status() -> str:
-    """Return `ok` when inbound auth config is locally coherent."""
+    """Return `ok` when inbound auth config is live and coherent."""
     auth_settings = _platform_auth_settings()
-    if auth_settings.uses_hmac and not auth_settings.shared_secret:
+    if auth_settings.algorithm.upper() != "RS256":
         return "fail"
-    if auth_settings.uses_rsa:
-        if not auth_settings.issuer or not auth_settings.audience:
-            return "fail"
-        if not auth_settings.public_key and not auth_settings.jwks_url:
-            return "fail"
+    if not auth_settings.issuer or not auth_settings.audience or not auth_settings.jwks_url:
+        return "fail"
+    if not _probe_jwks_document(auth_settings.jwks_url):
+        return "fail"
     try:
         build_verification_provider(auth_settings)
     except Exception:
@@ -107,18 +113,20 @@ def auth_verify_status() -> str:
     return "ok"
 
 
-def auth_outbound_status(*, audience: str | None = None) -> str:
-    """Return `cold`, `ok`, or `fail` for outbound auth readiness."""
+async def auth_outbound_status(*, audience: str | None = None) -> str:
+    """Return `ok` or `fail` for outbound auth readiness."""
     auth_settings = _platform_auth_settings(audience=_service_token_audience(audience))
-    if auth_settings.uses_hmac or auth_settings.private_key:
-        return "ok"
-    return _SERVICE_TOKEN_CACHE.readiness_state(
-        service_name=settings.service_name,
-        audience=auth_settings.audience if isinstance(auth_settings.audience, str) else None,
-        token_url=settings.auth_service_token_url,
-        client_id=settings.auth_service_client_id,
-        client_secret=settings.auth_service_client_secret,
-    )
+    try:
+        await _SERVICE_TOKEN_CACHE.get_token(
+            service_name=settings.service_name,
+            audience=auth_settings.audience if isinstance(auth_settings.audience, str) else None,
+            token_url=settings.auth_service_token_url,
+            client_id=settings.auth_service_client_id,
+            client_secret=settings.auth_service_client_secret,
+        )
+    except ServiceTokenAcquisitionError:
+        return "fail"
+    return "ok"
 
 
 def _decode_claims(authorization: str | None):
@@ -132,20 +140,9 @@ def _decode_claims(authorization: str | None):
         raise AuthInvalidError(detail) from exc
 
 
-def sign_service_token(target_secret: str, target_name: str = "fleet-to-target") -> str:
-    """Generate a locally signed JWT token for outbound service-to-service calls."""
-    del target_secret, target_name
-    factory = ServiceTokenFactory(service_name=settings.service_name, settings=_platform_auth_settings())
-    return factory.issue()
-
-
 async def issue_service_token(*, audience: str | None = None) -> str:
     """Return an outbound service token for dependency calls."""
     auth_settings = _platform_auth_settings(audience=_service_token_audience(audience))
-    if auth_settings.uses_hmac or auth_settings.private_key:
-        factory = ServiceTokenFactory(service_name=settings.service_name, settings=auth_settings)
-        return factory.issue()
-
     try:
         return await _SERVICE_TOKEN_CACHE.get_token(
             service_name=settings.service_name,
@@ -195,6 +192,8 @@ def require_service_token(authorization: str | None, *, allowed_services: set[st
     actor_id = claims.sub.strip()
     service_name = (claims.service or "").strip()
     if role != ActorType.SERVICE or not actor_id or not service_name:
+        raise UnauthorizedInternalCallError()
+    if actor_id != service_name:
         raise UnauthorizedInternalCallError()
     if allowed_services is not None and service_name not in allowed_services:
         raise UnauthorizedInternalCallError()

@@ -40,6 +40,7 @@ from driver_service.models import (
     DriverModel,
     DriverOutboxModel,
 )
+from driver_service.observability import correlation_id
 from driver_service.schemas import MergeDriversRequest
 from driver_service.serializers import serialize_driver_admin
 
@@ -75,13 +76,17 @@ async def _check_trip_references(driver_id: str) -> bool:
 
     Returns True if safe to delete (no active trips), False if blocked.
     """
-    token = await issue_internal_service_token(audience="trip-service")
+    token = await issue_internal_service_token()
     url = f"{settings.trip_service_base_url}/internal/v1/assets/reference-check"
     payload = {"asset_id": driver_id, "asset_type": "DRIVER"}
 
     try:
         async with httpx.AsyncClient(timeout=settings.dependency_timeout_seconds) as client:
-            resp = await client.post(url, json=payload, headers={"Authorization": f"Bearer {token}"})
+            headers = {"Authorization": f"Bearer {token}"}
+            if c_id := correlation_id.get():
+                headers["X-Correlation-ID"] = c_id
+
+            resp = await client.post(url, json=payload, headers=headers)
             if resp.status_code == 200:
                 data = resp.json()
                 # is_referenced=True means there ARE active trips, so NOT safe to delete

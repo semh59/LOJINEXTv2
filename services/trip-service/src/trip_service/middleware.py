@@ -16,6 +16,7 @@ from fastapi import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from trip_service.errors import trip_if_match_required, trip_validation_error, trip_version_mismatch
+from trip_service.observability import correlation_id
 from trip_service.timezones import InvalidTimezoneError, calendar_date_range_to_utc
 
 # ---------------------------------------------------------------------------
@@ -39,23 +40,36 @@ class RequestIdMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Extract or generate X-Request-Id
-        headers = dict(scope.get("headers", []))
-        request_id = headers.get(b"x-request-id", b"").decode() or str(uuid.uuid4())
+        # Extract or generate X-Correlation-ID (case-insensitive extraction)
+        headers = {k.lower(): v for k, v in scope.get("headers", [])}
+        correlation_id_val = (
+            headers.get(b"x-correlation-id", b"").decode()
+            or headers.get(b"x-request-id", b"").decode()
+            or str(uuid.uuid4())
+        )
 
         # Store in scope state for downstream access
         if "state" not in scope:
             scope["state"] = {}
-        scope["state"]["request_id"] = request_id
+        scope["state"]["correlation_id"] = correlation_id_val
+        # Legacy support for internal code still using request_id
+        scope["state"]["request_id"] = correlation_id_val
 
-        async def send_with_request_id(message: Message) -> None:
+        # Set ContextVar for automated propagation and logging
+        token = correlation_id.set(correlation_id_val)
+
+        async def send_with_correlation_id(message: Message) -> None:
             if message["type"] == "http.response.start":
                 existing_headers = list(message.get("headers", []))
-                existing_headers.append((b"x-request-id", request_id.encode()))
+                # Inject standard X-Correlation-ID (standard case)
+                existing_headers.append((b"X-Correlation-ID", correlation_id_val.encode()))
                 message["headers"] = existing_headers
             await send(message)
 
-        await self.app(scope, receive, send_with_request_id)
+        try:
+            await self.app(scope, receive, send_with_correlation_id)
+        finally:
+            correlation_id.reset(token)
 
 
 # ---------------------------------------------------------------------------
@@ -191,7 +205,7 @@ class PrometheusMiddleware:
 
         import time
 
-        from trip_service.observability import REQUEST_DURATION
+        from trip_service.observability import REQUEST_DURATION, get_standard_labels
 
         start_time = time.perf_counter()
         method = scope["method"]
@@ -212,9 +226,11 @@ class PrometheusMiddleware:
             await self.app(scope, receive, wrapped_send)
         finally:
             duration = time.perf_counter() - start_time
+            labels = get_standard_labels()
             # Standard labels: method, endpoint, status_code
             REQUEST_DURATION.labels(
                 method=method,
                 endpoint=path,
                 status_code=status_code[0],
+                **labels,
             ).observe(duration)

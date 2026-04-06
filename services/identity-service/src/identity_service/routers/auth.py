@@ -18,6 +18,7 @@ from identity_service.schemas import (
     TokenPairResponse,
 )
 from identity_service.token_service import (
+    InvalidUserRoleAssignmentsError,
     authenticate_user,
     issue_service_token,
     issue_token_pair,
@@ -37,7 +38,11 @@ async def login(
     user = await authenticate_user(session, body.username, body.password)
     if user is None:
         raise HTTPException(status_code=401, detail="Invalid username or password.")
-    token_pair = await issue_token_pair(session, user)
+    try:
+        token_pair = await issue_token_pair(session, user)
+    except InvalidUserRoleAssignmentsError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     await session.commit()
     return TokenPairResponse(**token_pair)
 
@@ -59,7 +64,11 @@ async def refresh(
     """Rotate a refresh token into a fresh token pair."""
     try:
         token_pair = await rotate_refresh_token(session, body.refresh_token)
+    except InvalidUserRoleAssignmentsError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
+        await session.rollback()
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     await session.commit()
     return TokenPairResponse(**token_pair)

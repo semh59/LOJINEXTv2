@@ -5,12 +5,14 @@ from unittest.mock import AsyncMock, patch
 
 import jwt
 import pytest
+from conftest import TEST_JWKS_BUNDLE
 from httpx import AsyncClient
+from platform_auth_testing import sign_test_token
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from driver_service.auth import generate_internal_service_token, require_internal_service_token
+from driver_service.auth import issue_internal_service_token, require_internal_service_token
 from driver_service.config import settings
 from driver_service.errors import ProblemDetailError
 from driver_service.models import DriverOutboxModel
@@ -36,7 +38,13 @@ class DriverUpdatedEvent(BaseModel):
 
 def _service_token(payload: dict[str, object]) -> str:
     """Build a service token signed the same way as the runtime auth helpers."""
-    return jwt.encode(payload, settings.resolved_auth_jwt_secret, algorithm=settings.auth_jwt_algorithm)
+    return sign_test_token(
+        TEST_JWKS_BUNDLE,
+        sub=str(payload["sub"]),
+        role=str(payload["role"]),
+        service=str(payload["service"]) if payload.get("service") is not None else None,
+        aud=str(payload["aud"]) if payload.get("aud") is not None else settings.auth_audience,
+    )
 
 
 @pytest.mark.asyncio
@@ -85,20 +93,33 @@ async def test_trip_client_check_usage():
     assert mock_post.await_args.kwargs["json"] == {"asset_id": driver_id, "asset_type": "DRIVER"}
 
 
-def test_generate_internal_service_token_uses_service_role() -> None:
-    """Recovery tokens must use the SERVICE role accepted by trip-service."""
-    token = generate_internal_service_token()
+@pytest.mark.asyncio
+async def test_issue_internal_service_token_uses_service_role(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Outbound tokens must be fetched from identity-service with SERVICE role semantics."""
+    async def fake_get_token(**kwargs) -> str:
+        return sign_test_token(
+            TEST_JWKS_BUNDLE,
+            sub=kwargs["service_name"],
+            role="SERVICE",
+            service=kwargs["client_id"],
+            aud=kwargs["audience"],
+        )
+
+    monkeypatch.setattr("driver_service.auth._SERVICE_TOKEN_CACHE.get_token", fake_get_token)
+
+    token = await issue_internal_service_token(audience="trip-service")
     payload = jwt.decode(
         token,
-        settings.resolved_auth_jwt_secret,
-        algorithms=[settings.auth_jwt_algorithm],
-        audience="lojinext-platform",
+        TEST_JWKS_BUNDLE.public_key_pem,
+        algorithms=["RS256"],
+        audience="trip-service",
+        issuer=settings.auth_issuer,
     )
 
     assert payload["sub"] == settings.service_name
     assert payload["role"] == "SERVICE"
     assert payload["service"] == settings.service_name
-    assert payload["aud"] == "lojinext-platform"
+    assert payload["aud"] == "trip-service"
 
 
 def test_require_internal_service_token_rejects_unapproved_service() -> None:

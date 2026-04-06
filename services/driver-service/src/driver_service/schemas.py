@@ -148,7 +148,7 @@ class DriverManagerResponse(BaseModel):
 
 
 class DriverInternalResponse(BaseModel):
-    """Driver resource shape for INTERNAL_SERVICE callers — minimal fields."""
+    """Driver resource shape for SERVICE callers — minimal fields."""
 
     driver_id: str
     company_driver_code: str | None = None

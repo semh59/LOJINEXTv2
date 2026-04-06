@@ -15,7 +15,7 @@ from fleet_service.worker_heartbeats import get_worker_heartbeat_snapshot
 
 logger = logging.getLogger("fleet_service.routers.health")
 
-router = APIRouter(prefix="/v1", tags=["health"])
+router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
@@ -27,7 +27,7 @@ async def health() -> dict[str, str]:
 @router.get("/metrics")
 async def metrics() -> Response:
     """Prometheus metrics endpoint."""
-    from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
@@ -82,8 +82,8 @@ async def ready(request: Request) -> JSONResponse:
     if checks["auth_verify"] != "ok":
         ready_state = False
 
-    checks["auth_outbound"] = auth_outbound_status()
-    if checks["auth_outbound"] not in {"ok", "cold"}:
+    checks["auth_outbound"] = await auth_outbound_status()
+    if checks["auth_outbound"] != "ok":
         ready_state = False
 
     return JSONResponse(

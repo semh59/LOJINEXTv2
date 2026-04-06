@@ -186,10 +186,19 @@ def main() -> None:
         return str(_parse_json(body)["access_token"])
 
     trip_token = service_token("trip-service")
+    location_token = service_token("location-service")
     fleet_token = service_token("fleet-service")
     driver_token = service_token("driver-service")
 
     print("\n[Service Contracts]")
+    _expect(
+        failures,
+        label="location service token can read ready",
+        method="GET",
+        url=f"{location}/ready",
+        expected_statuses={200},
+        headers=_bearer(location_token),
+    )
     _expect(
         failures,
         label="trip->location resolve contract",

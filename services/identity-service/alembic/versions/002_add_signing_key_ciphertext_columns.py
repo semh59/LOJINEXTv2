@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "002_add_signing_key_ciphertext_columns"
+revision = "002_signing_key_ciphertext"
 down_revision = "001_initial_schema"
 branch_labels = None
 depends_on = None

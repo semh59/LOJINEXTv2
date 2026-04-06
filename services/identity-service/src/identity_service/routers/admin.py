@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
@@ -19,6 +19,7 @@ from identity_service.schemas import (
     UserResponse,
 )
 from identity_service.token_service import (
+    InvalidUserRoleAssignmentsError,
     _write_audit,
     _write_outbox,
     assign_groups,
@@ -40,6 +41,7 @@ def _now_utc() -> datetime:
 @router.post("", response_model=UserResponse, status_code=201)
 async def create_user(
     body: AdminCreateUserRequest,
+    request: Request,
     session: AsyncSession = Depends(get_session),
     admin: dict[str, object] = Depends(require_super_admin),
 ) -> UserResponse:
@@ -70,8 +72,9 @@ async def create_user(
     await session.flush()
     await assign_groups(session, user, body.groups)
 
-    admin_actor_id = str(admin.get("sub", "SYSTEM"))
+    admin_actor_id = str(admin.get("user_id", "SYSTEM"))
     admin_role = str(admin.get("role", "SUPER_ADMIN"))
+    request_id = getattr(request.state, "request_id", None)
 
     await _write_audit(
         session,
@@ -81,10 +84,10 @@ async def create_user(
         admin_actor_id,
         admin_role,
         new_snapshot=serialize_user(user, mask_pii=True),
+        request_id=request_id,
     )
     await _write_outbox(
         session,
-        user.user_id,
         "identity.user.created.v1",
         {
             "user_id": user.user_id,
@@ -92,16 +95,21 @@ async def create_user(
             "email": user.email,
             "occurred_at_utc": _now_utc().isoformat(),
         },
+        aggregate_id=user.user_id,
     )
 
     await session.commit()
-    return UserResponse(**(await build_user_profile(session, user)))
+    try:
+        return UserResponse(**(await build_user_profile(session, user)))
+    except InvalidUserRoleAssignmentsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.patch("/{user_id}", response_model=UserResponse)
 async def update_user(
     user_id: str,
     body: AdminUpdateUserRequest,
+    request: Request,
     session: AsyncSession = Depends(get_session),
     admin: dict[str, object] = Depends(require_super_admin),
 ) -> UserResponse:
@@ -123,8 +131,9 @@ async def update_user(
         await assign_groups(session, user, body.groups)
 
     # Extract actor info from admin dependency
-    admin_actor_id = str(admin.get("sub", "SYSTEM"))
+    admin_actor_id = str(admin.get("user_id", "SYSTEM"))
     admin_role = str(admin.get("role", "SUPER_ADMIN"))
+    request_id = getattr(request.state, "request_id", None)
 
     await _write_audit(
         session,
@@ -135,16 +144,17 @@ async def update_user(
         admin_role,
         old_snapshot=old_snapshot,
         new_snapshot=serialize_user(user, mask_pii=True),
+        request_id=request_id,
     )
     await _write_outbox(
         session,
-        user.user_id,
         "identity.user.updated.v1",
         {
             "user_id": user.user_id,
             "username": user.username,
             "occurred_at_utc": _now_utc().isoformat(),
         },
+        aggregate_id=user.user_id,
     )
 
     try:
@@ -158,4 +168,7 @@ async def update_user(
             status_code=409, detail="User with same email already exists."
         )
 
-    return UserResponse(**(await build_user_profile(session, user)))
+    try:
+        return UserResponse(**(await build_user_profile(session, user)))
+    except InvalidUserRoleAssignmentsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

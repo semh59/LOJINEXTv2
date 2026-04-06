@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 
 from fastapi import Header
-from platform_auth import AuthSettings, TokenInvalidError, TokenMissingError, decode_bearer_token
+from platform_auth import AuthSettings, TokenClaims, TokenInvalidError, TokenMissingError, decode_bearer_token
 from platform_auth.key_provider import build_verification_provider
 
 from location_service.config import settings
@@ -26,33 +29,43 @@ class AuthContext:
     role: str
     service_name: str | None = None
 
+    @property
+    def actor_type(self) -> str:
+        """Backward-compatible alias for legacy router audit code."""
+        return self.role
+
 
 def _platform_auth_settings() -> AuthSettings:
     """Build shared auth settings for inbound token verification."""
     return AuthSettings(
         algorithm=settings.auth_jwt_algorithm,
-        shared_secret=(
-            settings.resolved_auth_jwt_secret if settings.auth_jwt_algorithm.upper().startswith("HS") else None
-        ),
         issuer=settings.auth_issuer or None,
         audience=settings.auth_audience or None,
-        public_key=settings.auth_public_key or None,
-        private_key=settings.auth_private_key or None,
         jwks_url=settings.auth_jwks_url or None,
         jwks_cache_ttl_seconds=settings.auth_jwks_cache_ttl_seconds,
     )
 
 
+def _probe_jwks_document(jwks_url: str) -> bool:
+    """Return whether the configured JWKS endpoint serves a usable keys array."""
+    request = urllib.request.Request(jwks_url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:  # noqa: S310
+            payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, ValueError, urllib.error.URLError):
+        return False
+    return isinstance(payload, dict) and isinstance(payload.get("keys"), list) and bool(payload["keys"])
+
+
 def auth_verify_status() -> str:
-    """Return `ok` when inbound auth config is locally coherent."""
+    """Return `ok` when inbound auth config is live and coherent."""
     auth_settings = _platform_auth_settings()
-    if auth_settings.uses_hmac and not auth_settings.shared_secret:
+    if auth_settings.algorithm.upper() != "RS256":
         return "fail"
-    if auth_settings.uses_rsa:
-        if not auth_settings.issuer or not auth_settings.audience:
-            return "fail"
-        if not auth_settings.public_key and not auth_settings.jwks_url:
-            return "fail"
+    if not auth_settings.issuer or not auth_settings.audience or not auth_settings.jwks_url:
+        return "fail"
+    if not _probe_jwks_document(auth_settings.jwks_url):
+        return "fail"
     try:
         build_verification_provider(auth_settings)
     except Exception:
@@ -60,14 +73,14 @@ def auth_verify_status() -> str:
     return "ok"
 
 
-def _decode_claims(authorization: str | None):
+def _decode_claims(authorization: str | None) -> TokenClaims:
     """Decode Authorization header into normalized claims."""
     try:
         return decode_bearer_token(authorization, _platform_auth_settings())
     except TokenMissingError as exc:
         raise location_auth_required() from exc
     except TokenInvalidError as exc:  # pragma: no cover - exercised via router tests
-        detail = str(exc).strip() or None
+        detail = str(exc).strip() or "Invalid or expired token."
         raise location_auth_invalid(detail) from exc
 
 

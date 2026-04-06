@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 from typing import Any, Literal
-from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
@@ -78,7 +77,7 @@ class PointUpdate(LocationBaseModel):
 class PointResponse(TimestampMixin, PointCreate):
     """Response shape for Location Point endpoints."""
 
-    location_id: UUID
+    location_id: str
     normalized_name_tr: str
     normalized_name_en: str
     row_version: int
@@ -107,11 +106,11 @@ class PairUpdateRequest(LocationBaseModel):
 class PairResponse(TimestampMixin, LocationBaseModel):
     """Response shape for route pair endpoints."""
 
-    pair_id: UUID = Field(validation_alias="route_pair_id")
+    pair_id: str = Field(validation_alias="route_pair_id")
     pair_code: str
     status: str = Field(validation_alias="pair_status")
-    origin_location_id: UUID
-    destination_location_id: UUID
+    origin_location_id: str
+    destination_location_id: str
     profile_code: ProfileCode
     origin_code: str
     origin_name_tr: str
@@ -119,8 +118,8 @@ class PairResponse(TimestampMixin, LocationBaseModel):
     destination_code: str
     destination_name_tr: str
     destination_name_en: str
-    forward_route_id: UUID | None = None
-    reverse_route_id: UUID | None = None
+    forward_route_id: str | None = None
+    reverse_route_id: str | None = None
 
     @computed_field
     def is_active(self) -> bool:
@@ -153,8 +152,8 @@ class CalculateRequest(LocationBaseModel):
 class ProcessingRunResponse(TimestampMixin, LocationBaseModel):
     """Response shape for processing run endpoints."""
 
-    run_id: UUID = Field(validation_alias="processing_run_id")
-    pair_id: UUID = Field(validation_alias="route_pair_id")
+    run_id: str = Field(validation_alias="processing_run_id")
+    pair_id: str = Field(validation_alias="route_pair_id")
     pair_code: str
     trigger_type: TriggerType
     run_status: RunStatus
@@ -175,9 +174,9 @@ class ProcessingRunListResponse(PaginatedResponse):
 class RouteVersionDetailResponse(LocationBaseModel):
     """Frontend-facing route version detail payload."""
 
-    route_id: UUID
+    route_id: str
     route_code: str
-    pair_id: UUID
+    pair_id: str
     pair_code: str
     direction: DirectionCode
     version_no: int
@@ -208,7 +207,7 @@ class RouteVersionDetailResponse(LocationBaseModel):
 class RouteGeometryResponse(LocationBaseModel):
     """Frontend-facing 2D geometry payload for a route version."""
 
-    route_id: UUID
+    route_id: str
     version_no: int
     direction: DirectionCode
     coordinate_count: int
@@ -218,7 +217,7 @@ class RouteGeometryResponse(LocationBaseModel):
 class BulkRefreshTriggerRequest(LocationBaseModel):
     """Request payload for triggering bulk refresh."""
 
-    pair_ids: list[UUID] | None = None
+    pair_ids: list[str] | None = None
 
 
 class BulkRefreshTriggerResponse(LocationBaseModel):
@@ -242,22 +241,22 @@ class InternalRouteResolveRequest(LocationBaseModel):
 class InternalRouteResolveResponse(LocationBaseModel):
     """Resolved route identity returned to trip-service."""
 
-    route_id: UUID
-    pair_id: UUID
+    route_id: str
+    pair_id: str
     resolution: Literal["EXACT_TR", "EXACT_EN"]
 
 
 class InternalTripContextResponse(LocationBaseModel):
     """Active forward/reverse trip context for a route pair."""
 
-    pair_id: UUID
-    origin_location_id: UUID
+    pair_id: str
+    origin_location_id: str
     origin_name: str
-    destination_location_id: UUID
+    destination_location_id: str
     destination_name: str
-    forward_route_id: UUID
+    forward_route_id: str
     forward_duration_s: int
-    reverse_route_id: UUID
+    reverse_route_id: str
     reverse_duration_s: int
     profile_code: ProfileCode
     pair_status: str

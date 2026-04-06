@@ -15,6 +15,7 @@ import httpx
 from fleet_service.auth import issue_service_token
 from fleet_service.config import settings
 from fleet_service.errors import DependencyUnavailableError
+from fleet_service.observability import correlation_id
 
 logger = logging.getLogger("fleet_service.clients.trip_client")
 
@@ -74,7 +75,7 @@ async def check_asset_references(asset_id: str, asset_type: str) -> dict[str, An
     _check_breaker()
 
     url = f"{settings.trip_service_base_url}/internal/v1/assets/reference-check"
-    token = await issue_service_token(audience="trip-service")
+    token = await issue_service_token()
     payload = {"asset_id": asset_id, "asset_type": asset_type}
 
     try:
@@ -86,7 +87,11 @@ async def check_asset_references(asset_id: str, asset_type: str) -> dict[str, An
                 pool=settings.http_total_timeout,
             ),
         ) as client:
-            resp = await client.post(url, json=payload, headers={"Authorization": f"Bearer {token}"})
+            headers = {"Authorization": f"Bearer {token}"}
+            if c_id := correlation_id.get():
+                headers["X-Correlation-ID"] = c_id
+
+            resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()
             _record_success()

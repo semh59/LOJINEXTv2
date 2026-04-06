@@ -13,10 +13,7 @@ from identity_service.middleware import PrometheusMiddleware, RequestIdMiddlewar
 from identity_service.routers.admin import router as admin_router
 from identity_service.routers.auth import router as auth_router
 from identity_service.routers.health import router as health_router
-from identity_service.token_service import (
-    ensure_active_signing_key,
-    seed_bootstrap_state,
-)
+from identity_service.token_service import seed_bootstrap_state, validate_bootstrap_state
 
 import logging
 from sqlalchemy import text
@@ -33,12 +30,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Bootstrap state and signing keys once on startup
     async with async_session_factory() as session:
         try:
-            # 78216 is an arbitrary 64-bit integer for the lock key
-            await session.execute(text("SELECT pg_advisory_xact_lock(78216)"))
-            logger.info("Acquired bootstrap advisory lock")
+            bind = session.get_bind()
+            if bind is not None and bind.dialect.name == "postgresql":
+                # 78216 is an arbitrary 64-bit integer for the lock key.
+                await session.execute(text("SELECT pg_advisory_xact_lock(78216)"))
+                logger.info("Acquired bootstrap advisory lock")
 
             await seed_bootstrap_state(session)
-            await ensure_active_signing_key(session)
+            await validate_bootstrap_state(session)
             await session.commit()
             logger.info("Bootstrap complete")
         except Exception as exc:

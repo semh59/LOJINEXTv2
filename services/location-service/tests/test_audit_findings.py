@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import uuid
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -11,8 +10,14 @@ from conftest import SUPER_ADMIN_HEADERS
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.testclient import TestClient
+from ulid import ULID
 
-from location_service.auth import trip_service_auth_dependency, user_auth_dependency
+from location_service.auth import (
+    AuthContext,
+    super_admin_auth_dependency,
+    trip_service_auth_dependency,
+    user_auth_dependency,
+)
 from location_service.domain.normalization import normalize_en, normalize_tr
 from location_service.errors import ProblemDetailError, problem_detail_handler, validation_exception_handler
 from location_service.main import create_app
@@ -57,6 +62,11 @@ def app_client(mock_session):
     from location_service.database import get_db
 
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[user_auth_dependency] = lambda: AuthContext(actor_id="admin-test-001", role="ADMIN")
+    app.dependency_overrides[super_admin_auth_dependency] = lambda: AuthContext(
+        actor_id="super-admin-001",
+        role="SUPER_ADMIN",
+    )
     return TestClient(app, raise_server_exceptions=False)
 
 
@@ -68,7 +78,7 @@ def test_schema_guards_forbid_removed_fields() -> None:
 
 
 def test_patch_point_requires_if_match(app_client, mock_session) -> None:
-    location_id = uuid.uuid4()
+    location_id = str(ULID())
     mock_point = MagicMock(spec=LocationPoint)
     mock_point.location_id = location_id
     mock_point.row_version = 1
@@ -88,7 +98,7 @@ def test_patch_point_requires_if_match(app_client, mock_session) -> None:
 
 
 def test_patch_point_etag_mismatch(app_client, mock_session) -> None:
-    location_id = uuid.uuid4()
+    location_id = str(ULID())
     mock_point = MagicMock(spec=LocationPoint)
     mock_point.location_id = location_id
     mock_point.row_version = 5
@@ -112,7 +122,7 @@ def test_patch_point_etag_mismatch(app_client, mock_session) -> None:
 
 
 def test_deactivate_point_blocked_by_active_pair(app_client, mock_session) -> None:
-    location_id = uuid.uuid4()
+    location_id = str(ULID())
     mock_point = MagicMock(spec=LocationPoint)
     mock_point.location_id = location_id
     mock_point.row_version = 2
@@ -163,11 +173,11 @@ def test_create_point_code_conflict(app_client, mock_session) -> None:
 
 def test_create_pair_inactive_origin(app_client, mock_session) -> None:
     inactive_origin = MagicMock(spec=LocationPoint)
-    inactive_origin.location_id = uuid.uuid4()
+    inactive_origin.location_id = str(ULID())
     inactive_origin.is_active = False
 
     active_destination = MagicMock(spec=LocationPoint)
-    active_destination.location_id = uuid.uuid4()
+    active_destination.location_id = str(ULID())
     active_destination.is_active = True
 
     origin_result = MagicMock()
@@ -182,7 +192,7 @@ def test_create_pair_inactive_origin(app_client, mock_session) -> None:
 
 
 def test_create_pair_same_origin_destination(app_client, mock_session) -> None:
-    same_id = uuid.uuid4()
+    same_id = str(ULID())
     same_point = MagicMock(spec=LocationPoint)
     same_point.location_id = same_id
     same_point.is_active = True
@@ -199,7 +209,7 @@ def test_create_pair_same_origin_destination(app_client, mock_session) -> None:
 
 
 def test_soft_delete_pair_and_already_deleted(app_client, mock_session) -> None:
-    pair_id = uuid.uuid4()
+    pair_id = str(ULID())
     pair = MagicMock(spec=RoutePair)
     pair.pair_status = "DRAFT"
     pair.row_version = 1
@@ -220,7 +230,7 @@ def test_soft_delete_pair_and_already_deleted(app_client, mock_session) -> None:
 
 
 def test_processing_state_guards(app_client, mock_session) -> None:
-    pair_id = uuid.uuid4()
+    pair_id = str(ULID())
 
     soft_deleted_pair = MagicMock(spec=RoutePair)
     soft_deleted_pair.pair_status = "SOFT_DELETED"
@@ -259,13 +269,13 @@ def test_processing_state_guards(app_client, mock_session) -> None:
 
 
 def test_force_fail_respects_sla(app_client, mock_session) -> None:
-    run_id = uuid.uuid4()
+    run_id = str(ULID())
     mock_run = MagicMock(spec=ProcessingRun)
     mock_run.run_status = "RUNNING"
     mock_run.started_at_utc = datetime.now(UTC)
     mock_run.created_at_utc = datetime.now(UTC)
     mock_run.processing_run_id = run_id
-    mock_run.route_pair_id = uuid.uuid4()
+    mock_run.route_pair_id = str(ULID())
     mock_run.attempt_no = 1
     mock_run.provider_mapbox_status = "PENDING"
     mock_run.provider_ors_status = "PENDING"
@@ -297,7 +307,7 @@ def test_force_fail_respects_sla(app_client, mock_session) -> None:
 
 @pytest.mark.asyncio
 async def test_approve_soft_deleted_pair_rejected() -> None:
-    pair_id = uuid.uuid4()
+    pair_id = str(ULID())
     mock_pair = MagicMock()
     mock_pair.pair_status = "SOFT_DELETED"
     mock_pair.pending_forward_version_no = 1
@@ -332,8 +342,8 @@ def test_import_export_routes_removed_from_openapi_and_runtime() -> None:
 
 @pytest.mark.asyncio
 async def test_trigger_processing_only_enqueues_run(mock_session) -> None:
-    pair_id = uuid.uuid4()
-    run_id = uuid.uuid4()
+    pair_id = str(ULID())
+    run_id = str(ULID())
 
     with patch("location_service.processing.pipeline.async_session_factory", return_value=mock_session):
         created_run_id = await trigger_processing(pair_id=pair_id, run_id=run_id)

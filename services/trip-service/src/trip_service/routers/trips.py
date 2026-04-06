@@ -98,7 +98,6 @@ from trip_service.schemas import (
 )
 from trip_service.timezones import local_datetime_to_utc
 from trip_service.trip_helpers import (
-    _LEGACY_DELETED_STATUSES,
     _check_idempotency_key,
     _classify_manual_status,
     _create_outbox_event,
@@ -111,6 +110,7 @@ from trip_service.trip_helpers import (
     apply_trip_context,
     assert_no_trip_overlap,
     build_delete_audit,
+    get_standard_labels,
     is_deleted_trip_status,
     normalize_trip_status,
     serialize_trip_admin,
@@ -124,7 +124,7 @@ router = APIRouter(tags=["trips"])
 _REFERENCE_ALLOWED_SERVICES = {"driver-service", "fleet-service"}
 _REFERENCE_EXCLUDED_STATUSES = (
     TripStatus.REJECTED.value,
-    *_LEGACY_DELETED_STATUSES,
+    TripStatus.SOFT_DELETED.value,
 )
 
 
@@ -244,9 +244,7 @@ def _coerce_actor_type(role: str) -> str:
 
 
 def _apply_status_filter(stmt, status: TripStatus):  # noqa: ANN001
-    """Apply canonical status filters while still reading legacy deleted rows."""
-    if status == TripStatus.SOFT_DELETED:
-        return stmt.where(TripTrip.status.in_(_LEGACY_DELETED_STATUSES))
+    """Apply canonical status filters to the given statement."""
     return stmt.where(TripTrip.status == status.value)
 
 
@@ -561,7 +559,7 @@ async def ingest_trip_slip(
         )
     )
     await _create_outbox_event(session, trip, "trip.created.v1")
-    TRIP_CREATED_TOTAL.labels(source_type=trip.source_type).inc()
+    TRIP_CREATED_TOTAL.labels(source_type=trip.source_type, **get_standard_labels()).inc()
 
     try:
         await session.flush()
@@ -682,7 +680,7 @@ async def ingest_trip_slip_fallback(
         )
     )
     await _create_outbox_event(session, trip, "trip.created.v1")
-    TRIP_CREATED_TOTAL.labels(source_type=trip.source_type).inc()
+    TRIP_CREATED_TOTAL.labels(source_type=trip.source_type, **get_standard_labels()).inc()
 
     try:
         await session.flush()
@@ -800,7 +798,7 @@ async def ingest_excel_trip(
         )
     )
     await _create_outbox_event(session, trip, "trip.created.v1")
-    TRIP_CREATED_TOTAL.labels(source_type=trip.source_type).inc()
+    TRIP_CREATED_TOTAL.labels(source_type=trip.source_type, **get_standard_labels()).inc()
 
     try:
         await session.flush()
@@ -847,7 +845,7 @@ async def excel_export_feed(
     stmt = (
         select(TripTrip)
         .options(selectinload(TripTrip.enrichment), selectinload(TripTrip.evidence))
-        .where(TripTrip.status.notin_(_LEGACY_DELETED_STATUSES))
+        .where(TripTrip.status != TripStatus.SOFT_DELETED.value)
     )
     if status is not None:
         stmt = _apply_status_filter(stmt, status)
@@ -981,10 +979,10 @@ async def create_trip(
         )
     )
     await _create_outbox_event(session, trip, "trip.created.v1")
-    TRIP_CREATED_TOTAL.labels(source_type=trip.source_type).inc()
+    TRIP_CREATED_TOTAL.labels(source_type=trip.source_type, **get_standard_labels()).inc()
     if trip.status == TripStatus.COMPLETED:
         await _create_outbox_event(session, trip, "trip.completed.v1")
-        TRIP_COMPLETED_TOTAL.inc()
+        TRIP_COMPLETED_TOTAL.labels(**get_standard_labels()).inc()
 
     try:
         await session.flush()
@@ -1031,7 +1029,7 @@ async def list_trips(
     if status is not None:
         stmt = _apply_status_filter(stmt, status)
     else:
-        stmt = stmt.where(TripTrip.status.notin_(_LEGACY_DELETED_STATUSES))
+        stmt = stmt.where(TripTrip.status != TripStatus.SOFT_DELETED.value)
     if source_type is not None:
         stmt = stmt.where(TripTrip.source_type == source_type)
     if driver_id is not None:
@@ -1446,10 +1444,10 @@ async def create_empty_return(
         )
     )
     await _create_outbox_event(session, trip, "trip.created.v1")
-    TRIP_CREATED_TOTAL.labels(source_type=trip.source_type).inc()
+    TRIP_CREATED_TOTAL.labels(source_type=trip.source_type, **get_standard_labels()).inc()
     if trip.status == TripStatus.COMPLETED:
         await _create_outbox_event(session, trip, "trip.completed.v1")
-        TRIP_COMPLETED_TOTAL.inc()
+        TRIP_COMPLETED_TOTAL.labels(**get_standard_labels()).inc()
 
     try:
         await session.flush()
@@ -1514,7 +1512,7 @@ async def cancel_trip(
         )
     )
     await _create_outbox_event(session, trip, "trip.soft_deleted.v1")
-    TRIP_CANCELLED_TOTAL.inc()
+    TRIP_CANCELLED_TOTAL.labels(**get_standard_labels()).inc()
     await session.commit()
 
     trip = await _get_trip_or_404(session, trip.id)
@@ -1552,7 +1550,7 @@ async def hard_delete_trip(
     )
     session.add(audit_row)
     await _create_outbox_event(session, trip, "trip.hard_deleted.v1", {"reason": body.reason, **_event_payload(trip)})
-    TRIP_HARD_DELETED_TOTAL.inc()
+    TRIP_HARD_DELETED_TOTAL.labels(**get_standard_labels()).inc()
     await session.delete(trip)
     await session.commit()
     return Response(status_code=204)

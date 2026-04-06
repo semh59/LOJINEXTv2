@@ -150,34 +150,47 @@ class IdentityOutboxModel(Base):
 
     outbox_id: Mapped[str] = mapped_column(String(26), primary_key=True)
     aggregate_type: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="USER"
+        String(32), nullable=False, default="USER"
     )
     aggregate_id: Mapped[str] = mapped_column(
         String(26),
         ForeignKey("identity_users.user_id", ondelete="CASCADE"),
         nullable=False,
     )
-    event_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    event_name: Mapped[str] = mapped_column(String(128), nullable=False)
     event_version: Mapped[int] = mapped_column(nullable=False, default=1)
     payload_json: Mapped[str] = mapped_column(Text, nullable=False)
-    partition_key: Mapped[str] = mapped_column(String(26), nullable=False)
     publish_status: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="PENDING"
+        String(32), nullable=False, default="PENDING"
     )
     retry_count: Mapped[int] = mapped_column(nullable=False, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at_utc: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
     next_attempt_at_utc: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+    claim_expires_at_utc: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     published_at_utc: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 
     __table_args__ = (
-        Index("idx_identity_outbox_aggregate", "aggregate_type", "aggregate_id"),
-        Index("idx_identity_outbox_pending", "publish_status", "next_attempt_at_utc"),
+        Index(
+            "idx_identity_outbox_aggregate",
+            "aggregate_type",
+            "aggregate_id",
+            "created_at_utc",
+        ),
+        Index(
+            "idx_identity_outbox_pending",
+            "publish_status",
+            "next_attempt_at_utc",
+            "created_at_utc",
+        ),
     )
 
 
@@ -196,11 +209,31 @@ class IdentityAuditLogModel(Base):
         nullable=True,
     )
     action_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    actor_id: Mapped[str] = mapped_column(String(26), nullable=False)
-    actor_role: Mapped[str] = mapped_column(String(32), nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    actor_role: Mapped[str] = mapped_column(String(64), nullable=False)
     old_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     new_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     request_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at_utc: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    __table_args__ = (
+        Index(
+            "idx_identity_audit_target_created",
+            "target_type",
+            "target_id",
+            "created_at_utc",
+        ),
+    )
+
+
+class IdentityWorkerHeartbeatModel(Base):
+    """Worker heartbeat rows used by readiness probes."""
+
+    __tablename__ = "identity_worker_heartbeats"
+
+    worker_name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    last_seen_at_utc: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

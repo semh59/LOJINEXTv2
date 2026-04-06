@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from location_service.config import settings
 from location_service.errors import internal_error
+from location_service.observability import correlation_id
 
 logger = logging.getLogger(__name__)
 
@@ -63,9 +64,13 @@ class MapboxDirectionsClient:
         max_retries = max(self.max_retries, 0)
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
+            headers = {}
+            if c_id := correlation_id.get():
+                headers["X-Correlation-ID"] = c_id
+
             for attempt in range(max_retries + 1):
                 try:
-                    response = await client.get(url, params=self.default_params)
+                    response = await client.get(url, params=self.default_params, headers=headers)
 
                     if response.status_code == 200:
                         data = response.json()

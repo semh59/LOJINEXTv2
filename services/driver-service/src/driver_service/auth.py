@@ -13,8 +13,7 @@ from platform_auth import (
     TokenMissingError,
     decode_bearer_token,
 )
-from platform_auth.key_provider import build_verification_provider
-from platform_auth.token_factory import ServiceTokenFactory
+from platform_auth.key_provider import JWKSKeyProvider, build_verification_provider
 
 from driver_service.config import settings
 from driver_service.enums import ActorRole
@@ -28,7 +27,6 @@ from driver_service.errors import (
 
 _ALLOWED_INTERNAL_SERVICES = {"driver-service", "fleet-service"}
 _SERVICE_TOKEN_CACHE = ServiceTokenCache()
-_DEFAULT_SERVICE_AUDIENCE = "lojinext-platform"
 
 
 @dataclass(frozen=True)
@@ -52,21 +50,15 @@ class AuthContext:
     @property
     def is_internal_service(self) -> bool:
         """Return whether the caller is an internal service."""
-        return self.role in {ActorRole.INTERNAL_SERVICE, ActorRole.SERVICE}
+        return self.role == ActorRole.SERVICE
 
 
-def _platform_auth_settings(*, audience: str | None = None) -> AuthSettings:
-    """Build shared auth settings for inbound verification and outbound signing."""
-    effective_audience = settings.auth_audience or audience or None
+def _verification_auth_settings() -> AuthSettings:
+    """Build shared auth settings for inbound RS256 verification."""
     return AuthSettings(
         algorithm=settings.auth_jwt_algorithm,
-        shared_secret=(
-            settings.resolved_auth_jwt_secret if settings.auth_jwt_algorithm.upper().startswith("HS") else None
-        ),
         issuer=settings.auth_issuer or None,
-        audience=effective_audience,
-        public_key=settings.auth_public_key or None,
-        private_key=settings.auth_private_key or None,
+        audience=settings.auth_audience or None,
         jwks_url=settings.auth_jwks_url or None,
         jwks_cache_ttl_seconds=settings.auth_jwks_cache_ttl_seconds,
     )
@@ -74,45 +66,50 @@ def _platform_auth_settings(*, audience: str | None = None) -> AuthSettings:
 
 def _service_token_audience(explicit_audience: str | None = None) -> str:
     """Return the canonical audience for outbound service tokens."""
-    del explicit_audience
-    return settings.auth_audience or _DEFAULT_SERVICE_AUDIENCE
+    return explicit_audience or settings.auth_service_audience
+
+
+def _outbound_token_request(*, audience: str | None = None) -> dict[str, str | None]:
+    """Return outbound service-token request arguments."""
+    return {
+        "service_name": settings.service_name,
+        "audience": _service_token_audience(audience),
+        "token_url": settings.auth_service_token_url,
+        "client_id": settings.auth_service_client_id,
+        "client_secret": settings.auth_service_client_secret,
+    }
 
 
 def auth_verify_status() -> str:
-    """Return `ok` when inbound auth config is locally coherent."""
-    auth_settings = _platform_auth_settings()
-    if auth_settings.uses_hmac and not auth_settings.shared_secret:
+    """Return `ok` when inbound RS256 verification can load JWKS material."""
+    auth_settings = _verification_auth_settings()
+    if auth_settings.algorithm.upper() != "RS256":
         return "fail"
-    if auth_settings.uses_rsa:
-        if not auth_settings.issuer or not auth_settings.audience:
-            return "fail"
-        if not auth_settings.public_key and not auth_settings.jwks_url:
-            return "fail"
+    if not auth_settings.issuer or not auth_settings.audience or not auth_settings.jwks_url:
+        return "fail"
     try:
-        build_verification_provider(auth_settings)
+        provider = build_verification_provider(auth_settings)
+        if not isinstance(provider, JWKSKeyProvider):
+            return "fail"
+        provider._load_jwks()
     except Exception:
         return "fail"
     return "ok"
 
 
-def auth_outbound_status(*, audience: str | None = None) -> str:
-    """Return `cold`, `ok`, or `fail` for outbound auth readiness."""
-    auth_settings = _platform_auth_settings(audience=_service_token_audience(audience))
-    if auth_settings.uses_hmac or auth_settings.private_key:
-        return "ok"
-    return _SERVICE_TOKEN_CACHE.readiness_state(
-        service_name=settings.service_name,
-        audience=auth_settings.audience if isinstance(auth_settings.audience, str) else None,
-        token_url=settings.auth_service_token_url,
-        client_id=settings.auth_service_client_id,
-        client_secret=settings.auth_service_client_secret,
-    )
+async def auth_outbound_status(*, audience: str | None = None) -> str:
+    """Return `ok` when outbound service auth can acquire a token."""
+    try:
+        await _SERVICE_TOKEN_CACHE.get_token(**_outbound_token_request(audience=audience))
+    except ServiceTokenAcquisitionError:
+        return "fail"
+    return "ok"
 
 
 def _decode_claims(authorization: str | None):
     """Decode Authorization header into normalized claims."""
     try:
-        return decode_bearer_token(authorization, _platform_auth_settings())
+        return decode_bearer_token(authorization, _verification_auth_settings())
     except TokenMissingError as exc:
         raise driver_auth_required() from exc
     except TokenInvalidError as exc:
@@ -120,27 +117,10 @@ def _decode_claims(authorization: str | None):
         raise driver_auth_invalid(detail) from exc
 
 
-def _issue_local_service_token(*, audience: str | None = None) -> str:
-    """Issue a locally signed service token when shared-secret signing is allowed."""
-    auth_settings = _platform_auth_settings(audience=_service_token_audience(audience))
-    factory = ServiceTokenFactory(service_name=settings.service_name, settings=auth_settings)
-    return factory.issue()
-
-
 async def issue_internal_service_token(*, audience: str | None = None) -> str:
-    """Return an outbound service token for Trip-bound maintenance calls."""
-    auth_settings = _platform_auth_settings(audience=_service_token_audience(audience))
-    if auth_settings.uses_hmac or auth_settings.private_key:
-        return _issue_local_service_token(audience=audience)
-
+    """Return an outbound service token acquired from identity-service."""
     try:
-        return await _SERVICE_TOKEN_CACHE.get_token(
-            service_name=settings.service_name,
-            audience=auth_settings.audience if isinstance(auth_settings.audience, str) else None,
-            token_url=settings.auth_service_token_url,
-            client_id=settings.auth_service_client_id,
-            client_secret=settings.auth_service_client_secret,
-        )
+        return await _SERVICE_TOKEN_CACHE.get_token(**_outbound_token_request(audience=audience))
     except ServiceTokenAcquisitionError as exc:
         raise RuntimeError(str(exc)) from exc
 
@@ -172,37 +152,41 @@ def require_admin_or_manager_token(authorization: str | None) -> AuthContext:
 def require_internal_service_token(authorization: str | None) -> AuthContext:
     """Validate a service bearer token for internal endpoints."""
     try:
-        claims = decode_bearer_token(authorization, _platform_auth_settings())
+        claims = decode_bearer_token(authorization, _verification_auth_settings())
     except TokenMissingError as exc:
         raise driver_internal_auth_required() from exc
     except TokenInvalidError as exc:
         detail = str(exc).strip() or "Invalid token."
         raise driver_auth_invalid(detail) from exc
 
-    role = claims.role
+    role = claims.role.strip()
     service_name = (claims.service or "").strip()
     actor_id = claims.sub.strip()
-    if role not in {ActorRole.SERVICE, ActorRole.INTERNAL_SERVICE} or not actor_id:
+    if role != ActorRole.SERVICE or not service_name or not actor_id:
         raise driver_internal_forbidden("Token is not a valid service token.")
+    if actor_id != service_name:
+        raise driver_internal_forbidden("Service token subject must match service name.")
     if not service_name or service_name not in _ALLOWED_INTERNAL_SERVICES:
         raise driver_internal_forbidden("Service token is not allowed for driver internal endpoints.")
-    return AuthContext(actor_id=actor_id, role=ActorRole.INTERNAL_SERVICE, service_name=service_name)
+    return AuthContext(actor_id=actor_id, role=ActorRole.SERVICE, service_name=service_name)
 
 
 def require_admin_or_internal_token(authorization: str | None) -> AuthContext:
-    """Validate a bearer token requiring ADMIN or INTERNAL_SERVICE role."""
+    """Validate a bearer token requiring ADMIN or SERVICE role."""
     claims = _decode_claims(authorization)
-    role = claims.role
+    role = claims.role.strip()
     actor_id = claims.sub.strip()
     if not actor_id:
         raise driver_auth_invalid("Token is missing sub.")
     if role == ActorRole.ADMIN:
         return AuthContext(actor_id=actor_id, role=role)
     service_name = (claims.service or "").strip()
-    if role in {ActorRole.SERVICE, ActorRole.INTERNAL_SERVICE}:
-        if not service_name or service_name not in _ALLOWED_INTERNAL_SERVICES:
+    if role == ActorRole.SERVICE:
+        if not service_name or service_name != actor_id:
+            raise driver_forbidden("Service token subject must match service name.")
+        if service_name not in _ALLOWED_INTERNAL_SERVICES:
             raise driver_forbidden("Service token is not allowed for this endpoint.")
-        return AuthContext(actor_id=actor_id, role=ActorRole.INTERNAL_SERVICE, service_name=service_name)
+        return AuthContext(actor_id=actor_id, role=ActorRole.SERVICE, service_name=service_name)
     raise driver_forbidden("ADMIN or internal service role required.")
 
 
@@ -232,8 +216,3 @@ def admin_or_internal_auth_dependency(
 ) -> AuthContext:
     """FastAPI dependency for ADMIN or internal service endpoints."""
     return require_admin_or_internal_token(authorization)
-
-
-def generate_internal_service_token() -> str:
-    """Generate a locally signed internal service token for HS256 recovery paths."""
-    return _issue_local_service_token()

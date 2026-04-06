@@ -90,64 +90,70 @@ async def _relay_batch(broker: MessageBroker, batch_size: int) -> int:
 
 async def _publish_single(broker: MessageBroker, outbox_id: str) -> bool:
     """Attempt to publish and finalize a single outbox event."""
-    async with async_session_factory() as session:
-        row = await _reload_row(session, outbox_id)
-        if row is None:
-            logger.warning("Outbox %s: row disappeared before publish", outbox_id)
-            return False
+    from fleet_service.observability import correlation_id
 
-        message = _build_message(row)
-        now = _now_utc()
-        publish_error: Exception | None = None
+    token = correlation_id.set(outbox_id)
+    try:
+        async with async_session_factory() as session:
+            row = await _reload_row(session, outbox_id)
+            if row is None:
+                logger.warning("Outbox %s: row disappeared before publish", outbox_id)
+                return False
 
-        try:
-            await broker.publish(message)
-        except Exception as exc:
-            publish_error = exc
+            message = _build_message(row)
+            now = _now_utc()
+            publish_error: Exception | None = None
+
+            try:
+                await broker.publish(message)
+            except Exception as exc:
+                publish_error = exc
+
+            if publish_error is None:
+                await outbox_repo.mark_published(session, outbox_id, now)
+            else:
+                new_attempt_count = row.attempt_count + 1
+                if new_attempt_count >= settings.outbox_max_retries:
+                    await outbox_repo.mark_dead_letter(session, outbox_id)
+                else:
+                    next_at = _next_attempt_at(new_attempt_count)
+                    await outbox_repo.mark_failed(
+                        session,
+                        outbox_id,
+                        error_code="PUBLISH_ERROR",
+                        error_message=str(publish_error)[:200],
+                        next_attempt_at=next_at,
+                    )
+            await session.commit()
 
         if publish_error is None:
-            await outbox_repo.mark_published(session, outbox_id, now)
+            logger.info(
+                "Outbox %s: published event %s for %s/%s",
+                message.event_id,
+                message.event_name,
+                message.aggregate_type,
+                message.aggregate_id,
+            )
+            return True
+
+        if (row.attempt_count + 1) >= settings.outbox_max_retries:
+            logger.error(
+                "Outbox %s: DEAD_LETTER after %d failures: %s",
+                message.event_id,
+                row.attempt_count + 1,
+                publish_error,
+            )
         else:
-            new_attempt_count = row.attempt_count + 1
-            if new_attempt_count >= settings.outbox_max_retries:
-                await outbox_repo.mark_dead_letter(session, outbox_id)
-            else:
-                next_at = _next_attempt_at(new_attempt_count)
-                await outbox_repo.mark_failed(
-                    session,
-                    outbox_id,
-                    error_code="PUBLISH_ERROR",
-                    error_message=str(publish_error)[:200],
-                    next_attempt_at=next_at,
-                )
-        await session.commit()
-
-    if publish_error is None:
-        logger.info(
-            "Outbox %s: published event %s for %s/%s",
-            message.event_id,
-            message.event_name,
-            message.aggregate_type,
-            message.aggregate_id,
-        )
-        return True
-
-    if (row.attempt_count + 1) >= settings.outbox_max_retries:
-        logger.error(
-            "Outbox %s: DEAD_LETTER after %d failures: %s",
-            message.event_id,
-            row.attempt_count + 1,
-            publish_error,
-        )
-    else:
-        logger.warning(
-            "Outbox %s: publish failed (attempt %d/%d): %s",
-            message.event_id,
-            row.attempt_count + 1,
-            settings.outbox_max_retries,
-            publish_error,
-        )
-    return False
+            logger.warning(
+                "Outbox %s: publish failed (attempt %d/%d): %s",
+                message.event_id,
+                row.attempt_count + 1,
+                settings.outbox_max_retries,
+                publish_error,
+            )
+        return False
+    finally:
+        correlation_id.reset(token)
 
 
 async def _reload_row(session, outbox_id: str) -> FleetOutbox | None:  # type: ignore[type-arg]

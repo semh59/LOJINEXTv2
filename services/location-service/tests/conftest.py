@@ -5,10 +5,10 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 
-import jwt
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from platform_auth_testing import build_test_jwks_bundle, install_jwks_urlopen_mock, sign_test_token
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -22,16 +22,23 @@ from location_service.provider_health import ProviderProbeResult, reset_provider
 from location_service.worker_heartbeats import record_worker_heartbeat
 
 _pg_url: str = ""
-TEST_AUTH_SECRET = "location-service-test-secret-please-change-me-32b"
+TEST_JWKS_BUNDLE = build_test_jwks_bundle()
 settings.environment = "test"
-settings.auth_jwt_secret = TEST_AUTH_SECRET
-settings.auth_jwt_algorithm = "HS256"
+settings.auth_jwt_algorithm = "RS256"
+settings.auth_issuer = TEST_JWKS_BUNDLE.issuer
+settings.auth_audience = TEST_JWKS_BUNDLE.audience
+settings.auth_jwks_url = TEST_JWKS_BUNDLE.jwks_url
 settings.mapbox_api_key = "test-mapbox-key"
 settings.enable_ors_validation = False
 
 
 def _token(payload: dict[str, str]) -> str:
-    return jwt.encode(payload, settings.resolved_auth_jwt_secret, algorithm=settings.auth_jwt_algorithm)
+    return sign_test_token(
+        TEST_JWKS_BUNDLE,
+        sub=payload["sub"],
+        role=payload["role"],
+        service=payload.get("service"),
+    )
 
 
 def _bearer_headers(payload: dict[str, str]) -> dict[str, str]:
@@ -52,8 +59,10 @@ FORBIDDEN_USER_HEADERS: dict[str, str] = _bearer_headers({"sub": "driver-test-00
 @pytest.fixture(scope="session", autouse=True)
 def configure_test_settings() -> None:
     settings.environment = "test"
-    settings.auth_jwt_secret = TEST_AUTH_SECRET
-    settings.auth_jwt_algorithm = "HS256"
+    settings.auth_jwt_algorithm = "RS256"
+    settings.auth_issuer = TEST_JWKS_BUNDLE.issuer
+    settings.auth_audience = TEST_JWKS_BUNDLE.audience
+    settings.auth_jwks_url = TEST_JWKS_BUNDLE.jwks_url
     settings.mapbox_api_key = "test-mapbox-key"
     settings.enable_ors_validation = False
 
@@ -114,6 +123,7 @@ async def raw_client(db_engine, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerat
 
     app.dependency_overrides[get_db] = override_get_db
 
+    install_jwks_urlopen_mock(monkeypatch, TEST_JWKS_BUNDLE, jwks_url=settings.auth_jwks_url)
     monkeypatch.setattr("location_service.database.async_session_factory", session_factory)
     monkeypatch.setattr("location_service.routers.health.async_session_factory", session_factory)
     monkeypatch.setattr("location_service.processing.pipeline.async_session_factory", session_factory)

@@ -46,7 +46,12 @@ build-backend = "setuptools.build_meta"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 testpaths = ["tests"]
-pythonpath = ["src", "../../packages/platform-auth/src", "../../packages/platform-common/src"]
+pythonpath = [
+    "src",
+    "../../packages/platform-auth/src",
+    "../../packages/platform-auth/tests/support",
+    "../../packages/platform-common/src",
+]
 markers = [
     "unit: pure logic and branch-level tests",
     "contract: HTTP contract and auth boundary tests",

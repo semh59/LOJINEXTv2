@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from uuid import uuid4
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
+from ulid import ULID
 
 from location_service.enums import DirectionCode, PairStatus, ProcessingStatus, SpeedBand, SpeedLimitState, UrbanClass
 from location_service.models import LocationPoint, Route, RoutePair, RouteSegment, RouteVersion
@@ -15,7 +15,7 @@ from location_service.models import LocationPoint, Route, RoutePair, RouteSegmen
 
 async def _seed_route_version(test_session: AsyncSession) -> tuple[Route, RouteVersion]:
     origin = LocationPoint(
-        location_id=uuid4(),
+        location_id=str(ULID()),
         code="RV_O",
         name_tr="Route Version Origin",
         name_en="Route Version Origin",
@@ -26,7 +26,7 @@ async def _seed_route_version(test_session: AsyncSession) -> tuple[Route, RouteV
         is_active=True,
     )
     destination = LocationPoint(
-        location_id=uuid4(),
+        location_id=str(ULID()),
         code="RV_D",
         name_tr="Route Version Destination",
         name_en="Route Version Destination",
@@ -37,7 +37,7 @@ async def _seed_route_version(test_session: AsyncSession) -> tuple[Route, RouteV
         is_active=True,
     )
     pair = RoutePair(
-        route_pair_id=uuid4(),
+        route_pair_id=str(ULID()),
         pair_code="RP_BBBBBBBBBBBBBBBBBBBBBBBBBB",
         origin_location_id=origin.location_id,
         destination_location_id=destination.location_id,
@@ -48,7 +48,7 @@ async def _seed_route_version(test_session: AsyncSession) -> tuple[Route, RouteV
     test_session.add_all([origin, destination, pair])
     await test_session.flush()
     route = Route(
-        route_id=uuid4(),
+        route_id=str(ULID()),
         route_pair_id=pair.route_pair_id,
         route_code="ROUTE_DETAIL_001",
         direction=DirectionCode.FORWARD,
@@ -169,10 +169,10 @@ async def test_get_route_version_geometry_returns_ordered_coordinates(
 
 @pytest.mark.asyncio
 async def test_missing_route_version_returns_not_found(client: AsyncClient) -> None:
-    response = await client.get(f"/v1/routes/{uuid4()}/versions/1")
+    response = await client.get(f"/v1/routes/{str(ULID())}/versions/1")
     assert response.status_code == 404
     assert response.json()["code"] == "LOCATION_ROUTE_VERSION_NOT_FOUND"
 
-    geometry = await client.get(f"/v1/routes/{uuid4()}/versions/1/geometry")
+    geometry = await client.get(f"/v1/routes/{str(ULID())}/versions/1/geometry")
     assert geometry.status_code == 404
     assert geometry.json()["code"] == "LOCATION_ROUTE_VERSION_NOT_FOUND"

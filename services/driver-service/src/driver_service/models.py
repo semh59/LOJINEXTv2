@@ -65,7 +65,7 @@ class DriverModel(Base):
     employment_end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     # Status and lifecycle
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="IN_REVIEW")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="ACTIVE")
     inactive_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Generated stored column — DB-level computation
@@ -86,6 +86,7 @@ class DriverModel(Base):
     created_by_actor_id: Mapped[str] = mapped_column(String(64), nullable=False)
     updated_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_by_actor_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    soft_deleted_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         # Check constraints
@@ -151,8 +152,10 @@ class DriverAuditLogModel(Base):
     changed_fields_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     old_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     new_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    actor_id: Mapped[str] = mapped_column(String(26), nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(64), nullable=False)
     actor_role: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    request_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     __table_args__ = (
@@ -183,6 +186,7 @@ class DriverOutboxModel(Base):
     event_name: Mapped[str] = mapped_column(String(128), nullable=False)
     event_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    partition_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     publish_status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING")
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -14,7 +14,7 @@ from driver_service.database import async_session_factory
 from driver_service.models import WorkerHeartbeat
 
 logger = logging.getLogger("driver_service")
-router = APIRouter(prefix="/v1", tags=["health"])
+router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
@@ -39,22 +39,19 @@ async def readiness_check(request: Request) -> JSONResponse:
             checks["broker"] = "ok"
         else:
             try:
-                broker_ok = bool(await broker_health_check())
+                await broker_health_check()
+                checks["broker"] = "ok"
             except Exception as exc:
                 logger.error("Readiness: broker check failed: %s", exc)
                 checks["broker"] = "fail"
                 ready = False
-            else:
-                checks["broker"] = "ok" if broker_ok else "fail"
-                if not broker_ok:
-                    ready = False
 
     checks["auth_verify"] = auth_verify_status()
     if checks["auth_verify"] != "ok":
         ready = False
 
-    checks["auth_outbound"] = auth_outbound_status()
-    if checks["auth_outbound"] not in {"ok", "cold"}:
+    checks["auth_outbound"] = await auth_outbound_status()
+    if checks["auth_outbound"] != "ok":
         ready = False
 
     try:

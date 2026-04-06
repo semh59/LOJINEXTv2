@@ -145,9 +145,10 @@ def test_utc_now_is_timezone_aware() -> None:
     assert utc_now().tzinfo == UTC
 
 
-def test_normalize_trip_status_maps_legacy_cancelled() -> None:
-    assert normalize_trip_status("CANCELLED") == "SOFT_DELETED"
+def test_normalize_trip_status_is_stable() -> None:
+    assert normalize_trip_status("SOFT_DELETED") == "SOFT_DELETED"
     assert normalize_trip_status("COMPLETED") == "COMPLETED"
+    assert normalize_trip_status(TripStatus.COMPLETED) == "COMPLETED"
 
 
 def test_canonicalize_body_is_order_stable() -> None:
@@ -194,32 +195,44 @@ def test_map_integrity_error_covers_known_constraints() -> None:
         def __str__(self) -> str:
             return self.constraint_name
 
-    assert getattr(
-        _map_integrity_error(IntegrityError("stmt", {}, FakeOrig("uq_trip_trips_trip_no")), trip_no="TR-001"),
-        "code",
-        None,
-    ) == "TRIP_TRIP_NO_CONFLICT"
-    assert getattr(
-        _map_integrity_error(
-            IntegrityError("stmt", {}, FakeOrig("uq_trips_source_slip_no_telegram")),
-            source_slip_no="SLIP-001",
-        ),
-        "code",
-        None,
-    ) == "TRIP_SOURCE_SLIP_CONFLICT"
-    assert getattr(
-        _map_integrity_error(
-            IntegrityError("stmt", {}, FakeOrig("uq_trips_source_reference_key")),
-            source_reference_key="ref-001",
-        ),
-        "code",
-        None,
-    ) == "TRIP_SOURCE_REFERENCE_CONFLICT"
-    assert getattr(
-        _map_integrity_error(IntegrityError("stmt", {}, FakeOrig("uq_trips_empty_return_base_trip"))),
-        "code",
-        None,
-    ) == "TRIP_EMPTY_RETURN_ALREADY_EXISTS"
+    assert (
+        getattr(
+            _map_integrity_error(IntegrityError("stmt", {}, FakeOrig("uq_trip_trips_trip_no")), trip_no="TR-001"),
+            "code",
+            None,
+        )
+        == "TRIP_TRIP_NO_CONFLICT"
+    )
+    assert (
+        getattr(
+            _map_integrity_error(
+                IntegrityError("stmt", {}, FakeOrig("uq_trips_source_slip_no_telegram")),
+                source_slip_no="SLIP-001",
+            ),
+            "code",
+            None,
+        )
+        == "TRIP_SOURCE_SLIP_CONFLICT"
+    )
+    assert (
+        getattr(
+            _map_integrity_error(
+                IntegrityError("stmt", {}, FakeOrig("uq_trips_source_reference_key")),
+                source_reference_key="ref-001",
+            ),
+            "code",
+            None,
+        )
+        == "TRIP_SOURCE_REFERENCE_CONFLICT"
+    )
+    assert (
+        getattr(
+            _map_integrity_error(IntegrityError("stmt", {}, FakeOrig("uq_trips_empty_return_base_trip"))),
+            "code",
+            None,
+        )
+        == "TRIP_EMPTY_RETURN_ALREADY_EXISTS"
+    )
 
 
 def test_require_admin_super_admin_and_reference_access_helpers() -> None:
@@ -315,9 +328,9 @@ def test_apply_status_filter_and_reference_column_helpers() -> None:
     soft_deleted_sql = str(soft_deleted_stmt.compile(compile_kwargs={"literal_binds": True}))
     completed_sql = str(completed_stmt.compile(compile_kwargs={"literal_binds": True}))
 
-    assert "IN" in soft_deleted_sql
+    assert "=" in soft_deleted_sql
     assert "SOFT_DELETED" in soft_deleted_sql
-    assert "CANCELLED" in soft_deleted_sql
+    assert "CANCELLED" not in soft_deleted_sql
     assert "=" in completed_sql
     assert "COMPLETED" in completed_sql
     assert _reference_column_for_asset_type("DRIVER").key == "driver_id"

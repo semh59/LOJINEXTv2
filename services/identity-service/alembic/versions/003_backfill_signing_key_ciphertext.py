@@ -15,8 +15,8 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import sqlalchemy as sa
 
 
-revision = "003_backfill_signing_key_ciphertext"
-down_revision = "002_add_signing_key_ciphertext_columns"
+revision = "003_backfill_key_ciphertext"
+down_revision = "002_signing_key_ciphertext"
 branch_labels = None
 depends_on = None
 

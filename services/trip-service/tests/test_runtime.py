@@ -68,6 +68,7 @@ def test_project_wires_shared_platform_packages() -> None:
     assert pyproject["tool"]["pytest"]["ini_options"]["pythonpath"] == [
         "src",
         "../../packages/platform-auth/src",
+        "../../packages/platform-auth/tests/support",
         "../../packages/platform-common/src",
     ]
     assert pyproject["tool"]["uv"]["sources"] == {

@@ -2,35 +2,57 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
-from typing import Any
-from zoneinfo import ZoneInfo
+# AGGRESSIVE GLOBAL AUTH PATCH: MUST RUN BEFORE ANY OTHER IMPORTS
+import platform_auth.service_tokens
+from platform_auth_testing import build_test_jwks_bundle, sign_test_token
 
-import jwt
-import pytest
-import pytest_asyncio
-from alembic.config import Config
-from fastapi import FastAPI
-from fastapi.exceptions import RequestValidationError
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import NullPool
-from testcontainers.postgres import PostgresContainer
+_GLOBAL_JWKS_BUNDLE = build_test_jwks_bundle()
 
-from alembic import command
-from trip_service.broker import NoOpBroker
-from trip_service.config import settings
-from trip_service.database import get_session
-from trip_service.dependencies import LocationRouteResolution, LocationTripContext
-from trip_service.errors import ProblemDetailError, problem_detail_handler, validation_exception_handler
-from trip_service.middleware import PrometheusMiddleware, RequestIdMiddleware
-from trip_service.routers import driver_statement, health, removed_endpoints, trips
-from trip_service.worker_heartbeats import record_worker_heartbeat
+
+async def _global_mock_get_token(*args, **kwargs):
+    # Signature: (self, *, service_name, audience, token_url, client_id, client_secret)
+    aud = kwargs.get("audience") or (args[2] if len(args) > 2 else "unknown")
+    return sign_test_token(
+        _GLOBAL_JWKS_BUNDLE,
+        sub="test-service",
+        role="SERVICE",
+        service="test-service",
+        aud=aud,
+    )
+
+
+# Overwrite the class method directly at the very beginning
+platform_auth.service_tokens.ServiceTokenCache.get_token = _global_mock_get_token
+
+from collections.abc import AsyncGenerator  # noqa: E402
+from contextlib import asynccontextmanager  # noqa: E402
+from dataclasses import dataclass  # noqa: E402
+from datetime import UTC, datetime, timedelta  # noqa: E402
+from pathlib import Path  # noqa: E402
+from typing import Any  # noqa: E402
+from zoneinfo import ZoneInfo  # noqa: E402
+
+import pytest  # noqa: E402
+import pytest_asyncio  # noqa: E402
+from alembic.config import Config  # noqa: E402
+from fastapi import FastAPI  # noqa: E402
+from fastapi.exceptions import RequestValidationError  # noqa: E402
+from httpx import ASGITransport, AsyncClient  # noqa: E402
+from platform_auth_testing import install_jwks_urlopen_mock  # noqa: E402
+from sqlalchemy import text  # noqa: E402
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine  # noqa: E402
+from sqlalchemy.pool import NullPool  # noqa: E402
+from testcontainers.postgres import PostgresContainer  # noqa: E402
+
+from alembic import command  # noqa: E402
+from trip_service.broker import NoOpBroker  # noqa: E402
+from trip_service.config import settings  # noqa: E402
+from trip_service.database import get_session  # noqa: E402
+from trip_service.dependencies import LocationRouteResolution, LocationTripContext  # noqa: E402
+from trip_service.errors import ProblemDetailError, problem_detail_handler, validation_exception_handler  # noqa: E402
+from trip_service.middleware import PrometheusMiddleware, RequestIdMiddleware  # noqa: E402
+from trip_service.routers import driver_statement, health, removed_endpoints, trips  # noqa: E402
+from trip_service.worker_heartbeats import record_worker_heartbeat  # noqa: E402
 
 TRUNCATE_TABLES = (
     "trip_trip_timeline",
@@ -45,6 +67,15 @@ TRUNCATE_TABLES = (
 
 _pg_url: str = ""
 _TEST_TZ = ZoneInfo("Europe/Istanbul")
+TEST_JWKS_BUNDLE = build_test_jwks_bundle()
+settings.environment = "test"
+settings.auth_jwt_algorithm = "RS256"
+settings.auth_issuer = TEST_JWKS_BUNDLE.issuer
+settings.auth_audience = TEST_JWKS_BUNDLE.audience
+settings.auth_jwks_url = TEST_JWKS_BUNDLE.jwks_url
+settings.auth_service_token_url = "http://identity.test/auth/v1/token/service"
+settings.auth_service_client_id = settings.service_name
+settings.auth_service_client_secret = "trip-client-secret"
 
 
 @dataclass(frozen=True)
@@ -93,7 +124,13 @@ NAME_TO_PAIR: dict[tuple[str, str], str] = {
 
 def _token(payload: dict[str, Any]) -> str:
     """Build a JWT token for tests."""
-    return jwt.encode(payload, settings.auth_jwt_secret, algorithm=settings.auth_jwt_algorithm)
+    return sign_test_token(
+        TEST_JWKS_BUNDLE,
+        sub=str(payload["sub"]),
+        role=str(payload["role"]),
+        service=str(payload["service"]) if payload.get("service") is not None else None,
+        extra_claims={key: value for key, value in payload.items() if key not in {"sub", "role", "service"}},
+    )
 
 
 def _bearer_headers(payload: dict[str, Any]) -> dict[str, str]:
@@ -101,7 +138,7 @@ def _bearer_headers(payload: dict[str, Any]) -> dict[str, str]:
     return {"Authorization": f"Bearer {_token(payload)}"}
 
 
-ADMIN_HEADERS: dict[str, str] = _bearer_headers({"sub": "admin-test-001", "role": "ADMIN"})
+ADMIN_HEADERS: dict[str, str] = _bearer_headers({"sub": "admin-test-001", "role": "MANAGER"})
 SUPER_ADMIN_HEADERS: dict[str, str] = _bearer_headers({"sub": "super-admin-001", "role": "SUPER_ADMIN"})
 TELEGRAM_SERVICE_HEADERS: dict[str, str] = _bearer_headers(
     {"sub": "telegram-service", "role": "SERVICE", "service": "telegram-service"}
@@ -177,7 +214,7 @@ async def test_session(db_engine) -> AsyncGenerator[AsyncSession, None]:  # noqa
 
 
 @pytest_asyncio.fixture
-async def client(db_engine, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[AsyncClient, None]:  # noqa: ANN001
+async def client(db_engine, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[AsyncClient, None]:
     """Provide a test HTTP client with dependency probes and route context stubbed healthy."""
 
     @asynccontextmanager
@@ -241,6 +278,12 @@ async def client(db_engine, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[A
             yield session
 
     test_app.dependency_overrides[get_session] = override_get_session
+    install_jwks_urlopen_mock(monkeypatch, TEST_JWKS_BUNDLE, jwks_url=settings.auth_jwks_url)
+
+    # Also patch the global database factory to ensure heartbeats use the test engine
+    import trip_service.database
+
+    monkeypatch.setattr(trip_service.database, "async_session_factory", session_factory)
     monkeypatch.setattr("trip_service.routers.health.async_session_factory", session_factory)
     monkeypatch.setattr("trip_service.worker_heartbeats.async_session_factory", session_factory)
     monkeypatch.setattr("trip_service.routers.health.probe_fleet_service", healthy_dependency_probe)
@@ -249,6 +292,7 @@ async def client(db_engine, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[A
     monkeypatch.setattr("trip_service.routers.trips.fetch_trip_context", stub_fetch_trip_context)
     monkeypatch.setattr("trip_service.routers.trips.resolve_route_by_names", stub_resolve_route_by_names)
 
+    # Initialize heartbeats for health checks
     await record_worker_heartbeat("enrichment-worker")
     await record_worker_heartbeat("outbox-relay")
     await record_worker_heartbeat("cleanup-worker")

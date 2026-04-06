@@ -14,6 +14,7 @@ from trip_service.errors import (
     trip_validation_error,
 )
 from trip_service.http_clients import get_dependency_client
+from trip_service.observability import correlation_id
 
 
 @dataclass(frozen=True)
@@ -67,13 +68,19 @@ def _location_trip_context_url(pair_id: str) -> str:
 
 
 async def _fleet_service_headers() -> dict[str, str]:
-    token = await issue_internal_service_token(audience="fleet-service")
-    return {"Authorization": f"Bearer {token}"}
+    token = await issue_internal_service_token()
+    headers = {"Authorization": f"Bearer {token}"}
+    if c_id := correlation_id.get():
+        headers["X-Correlation-ID"] = c_id
+    return headers
 
 
 async def _location_service_headers() -> dict[str, str]:
-    token = await issue_internal_service_token(audience="location-service")
-    return {"Authorization": f"Bearer {token}"}
+    token = await issue_internal_service_token()
+    headers = {"Authorization": f"Bearer {token}"}
+    if c_id := correlation_id.get():
+        headers["X-Correlation-ID"] = c_id
+    return headers
 
 
 def _problem_code(response: httpx.Response) -> str | None:

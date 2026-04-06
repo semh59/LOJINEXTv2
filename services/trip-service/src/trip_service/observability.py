@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
@@ -26,6 +27,9 @@ from trip_service.models import TripIdempotencyRecord, TripOutbox
 from trip_service.worker_heartbeats import record_worker_heartbeat
 
 logger = logging.getLogger("trip_service.cleanup")
+
+# Correlation ContextVar for cross-service tracing propagation
+correlation_id: ContextVar[str | None] = ContextVar("correlation_id", default=None)
 
 
 # ---------------------------------------------------------------------------
@@ -42,15 +46,22 @@ def setup_logging(level: str = "INFO") -> None:
 
     class JsonFormatter(logging.Formatter):
         def format(self, record: logging.LogRecord) -> str:
+            # Prioritize ContextVar, fallback to record attribute, then None
+            c_id = (
+                correlation_id.get() or getattr(record, "correlation_id", None) or getattr(record, "request_id", None)
+            )
+
             log_entry = {
                 "timestamp": datetime.now(UTC).isoformat(),
                 "level": record.levelname,
                 "service": settings.service_name,
+                "version": settings.service_version,
+                "env": settings.environment,
                 "logger": record.name,
                 "message": record.getMessage(),
             }
-            if hasattr(record, "request_id"):
-                log_entry["request_id"] = record.request_id
+            if c_id:
+                log_entry["correlation_id"] = c_id
             if record.exc_info:
                 log_entry["exception"] = self.formatException(record.exc_info)
             return json_mod.dumps(log_entry)
@@ -68,25 +79,38 @@ def setup_logging(level: str = "INFO") -> None:
 # V8 Section 18.2 — Prometheus Metrics
 # ---------------------------------------------------------------------------
 
-# Core Prometheus counters per V8 Section 18.2
+# Core Prometheus counters per V8 Section 18.2 (Standardized per TASK-0047)
 
-TRIP_CREATED_TOTAL = Counter("trip_created_total", "Total trips created", ["source_type"])
-TRIP_COMPLETED_TOTAL = Counter("trip_completed_total", "Total trips completed (approved)")
-TRIP_CANCELLED_TOTAL = Counter("trip_cancelled_total", "Total trips cancelled (soft deleted)")
-TRIP_HARD_DELETED_TOTAL = Counter("trip_hard_deleted_total", "Total trips hard deleted")
-ENRICHMENT_CLAIMED_TOTAL = Counter("enrichment_claimed_total", "Enrichment rows claimed by workers")
-ENRICHMENT_COMPLETED_TOTAL = Counter("enrichment_completed_total", "Enrichment rows completed", ["result"])
-ENRICHMENT_FAILED_TOTAL = Counter("enrichment_failed_total", "Enrichment rows that reached max retries")
-OUTBOX_PUBLISHED_TOTAL = Counter("outbox_published_total", "Outbox events published", ["event_name"])
-OUTBOX_DEAD_LETTER_TOTAL = Counter("outbox_dead_letter_total", "Outbox events that reached DEAD_LETTER")
+METRICS_LABELS = ["service", "env", "version"]
+
+TRIP_CREATED_TOTAL = Counter("trip_created_total", "Total trips created", METRICS_LABELS + ["source_type"])
+TRIP_COMPLETED_TOTAL = Counter("trip_completed_total", "Total trips completed (approved)", METRICS_LABELS)
+TRIP_CANCELLED_TOTAL = Counter("trip_cancelled_total", "Total trips cancelled (soft deleted)", METRICS_LABELS)
+TRIP_HARD_DELETED_TOTAL = Counter("trip_hard_deleted_total", "Total trips hard deleted", METRICS_LABELS)
+ENRICHMENT_CLAIMED_TOTAL = Counter("enrichment_claimed_total", "Enrichment rows claimed by workers", METRICS_LABELS)
+ENRICHMENT_COMPLETED_TOTAL = Counter(
+    "enrichment_completed_total", "Enrichment rows completed", METRICS_LABELS + ["result"]
+)
+ENRICHMENT_FAILED_TOTAL = Counter("enrichment_failed_total", "Enrichment rows that reached max retries", METRICS_LABELS)
+OUTBOX_PUBLISHED_TOTAL = Counter("outbox_published_total", "Outbox events published", METRICS_LABELS + ["event_name"])
+OUTBOX_DEAD_LETTER_TOTAL = Counter("outbox_dead_letter_total", "Outbox events that reached DEAD_LETTER", METRICS_LABELS)
 REQUEST_DURATION = Histogram(
     "http_request_duration_seconds",
     "HTTP request duration",
-    ["method", "endpoint", "status_code"],
+    METRICS_LABELS + ["method", "endpoint", "status_code"],
 )
 
 SERVICE_INFO = Info("trip_service", "Trip Service version info")
-SERVICE_INFO.info({"version": "0.1.0", "service": settings.service_name})
+SERVICE_INFO.info({"version": settings.service_version, "service": settings.service_name, "env": settings.environment})
+
+
+def get_standard_labels() -> dict[str, str]:
+    """Return the standard metadata labels for Prometheus metrics."""
+    return {
+        "service": settings.service_name,
+        "env": settings.environment,
+        "version": settings.service_version,
+    }
 
 
 # ---------------------------------------------------------------------------

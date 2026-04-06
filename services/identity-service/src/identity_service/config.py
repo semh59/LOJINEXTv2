@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     """Identity Service configuration loaded from environment variables."""
 
     service_name: str = "identity-service"
+    service_version: str = "0.1.0"
     service_port: int = 8105
     environment: Literal["dev", "test", "prod"] = "dev"
     database_url: str = DEFAULT_DATABASE_URL
@@ -25,6 +26,7 @@ class Settings(BaseSettings):
     access_token_ttl_seconds: int = 900
     refresh_token_ttl_seconds: int = 60 * 60 * 24 * 14
     service_token_ttl_seconds: int = 300
+    broker_backend: Literal["kafka", "log", "noop"] | None = None
     outbox_poll_interval_seconds: int = 5
     outbox_publish_batch_size: int = 50
     outbox_retry_max: int = 5
@@ -41,6 +43,7 @@ class Settings(BaseSettings):
     bootstrap_service_clients_json: str = ""
     key_encryption_key_b64: str = ""
     key_encryption_key_version: str = ""
+    auth_strict_audience_check: bool = False
 
     model_config = {"env_prefix": "IDENTITY_", "env_file": ".env", "extra": "ignore"}
 
@@ -63,6 +66,27 @@ class Settings(BaseSettings):
         """Return the bootstrap secret for a named service client."""
         return os.getenv(self.service_client_secret_env_name(service_name), "").strip()
 
+    @property
+    def resolved_broker_backend(self) -> Literal["kafka", "log", "noop"]:
+        """Resolve the broker backend from env override or runtime environment."""
+        if self.broker_backend is not None:
+            return self.broker_backend
+        if self.environment == "prod":
+            return "kafka"
+        if self.environment == "test":
+            return "noop"
+        return "log"
+
+    @property
+    def outbox_claim_ttl_seconds(self) -> int:
+        """Return the worker claim TTL used for stale PUBLISHING recovery."""
+        return max(self.outbox_poll_interval_seconds * 3, 15)
+
+    @property
+    def outbox_worker_stale_after_seconds(self) -> int:
+        """Return the heartbeat staleness threshold for readiness checks."""
+        return max(self.outbox_poll_interval_seconds * 3, 15)
+
 
 settings = Settings()
 
@@ -75,9 +99,15 @@ def validate_prod_settings(current: Settings) -> None:
     errors: list[str] = []
     if current.auth_jwt_algorithm.upper() != "RS256":
         errors.append("IDENTITY_AUTH_JWT_ALGORITHM must be RS256 in prod.")
+    if current.resolved_broker_backend != "kafka":
+        errors.append("IDENTITY_BROKER_BACKEND must resolve to kafka in prod.")
     if not current.database_url or current.database_url == DEFAULT_DATABASE_URL:
         errors.append(
             "IDENTITY_DATABASE_URL must be set to a non-default value in prod."
+        )
+    if current.kafka_bootstrap_servers == "localhost:9092":
+        errors.append(
+            "IDENTITY_KAFKA_BOOTSTRAP_SERVERS must be set to a non-default value in prod."
         )
     if not current.auth_issuer:
         errors.append("IDENTITY_AUTH_ISSUER must be set in prod.")

@@ -200,3 +200,10 @@ def parse_if_match(if_match: str | None) -> int | None:
         return int(stripped)
     except ValueError:
         return None
+
+
+def derive_lifecycle_state(status: str, soft_deleted_at_utc: object | None) -> str:
+    """Return the externally visible lifecycle state for driver resources."""
+    if soft_deleted_at_utc is not None:
+        return "SOFT_DELETED"
+    return str(status)

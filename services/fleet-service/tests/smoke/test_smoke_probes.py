@@ -22,22 +22,35 @@ async def test_health_probes(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_ready_allows_cold_auth_outbound(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr("fleet_service.routers.health.auth_outbound_status", lambda: "cold")
+async def test_ready_requires_live_auth_outbound(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    async def cold_outbound() -> str:
+        return "fail"
 
-    resp = await client.get("/ready")
-
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "ready"
-    assert resp.json()["checks"]["auth_outbound"] == "cold"
-
-
-@pytest.mark.asyncio
-async def test_ready_fails_when_auth_outbound_is_invalid(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr("fleet_service.routers.health.auth_outbound_status", lambda: "fail")
+    monkeypatch.setattr("fleet_service.routers.health.auth_outbound_status", cold_outbound)
 
     resp = await client.get("/ready")
 
     assert resp.status_code == 503
     assert resp.json()["status"] == "not_ready"
     assert resp.json()["checks"]["auth_outbound"] == "fail"
+
+
+@pytest.mark.asyncio
+async def test_ready_fails_when_auth_outbound_is_invalid(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    async def broken_outbound() -> str:
+        return "fail"
+
+    monkeypatch.setattr("fleet_service.routers.health.auth_outbound_status", broken_outbound)
+
+    resp = await client.get("/ready")
+
+    assert resp.status_code == 503
+    assert resp.json()["status"] == "not_ready"
+    assert resp.json()["checks"]["auth_outbound"] == "fail"
+
+
+@pytest.mark.asyncio
+async def test_health_endpoints_are_not_served_under_v1_prefix(client: AsyncClient):
+    prefixed = await client.get("/v1/health")
+
+    assert prefixed.status_code == 404

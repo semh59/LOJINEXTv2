@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from location_service.config import DEFAULT_AUTH_JWT_SECRET, DEFAULT_DATABASE_URL, settings, validate_prod_settings
+from location_service.config import DEFAULT_DATABASE_URL, settings, validate_prod_settings
 
 
 def _candidate(**overrides: object):
@@ -10,23 +10,22 @@ def _candidate(**overrides: object):
     return base.model_copy(update=overrides)
 
 
-def test_prod_validation_rejects_default_jwt_secret() -> None:
+def test_prod_validation_rejects_hs256_runtime() -> None:
     candidate = _candidate(
         environment="prod",
-        auth_jwt_secret=DEFAULT_AUTH_JWT_SECRET,
+        auth_jwt_algorithm="HS256",
         database_url="postgresql+asyncpg://user:pass@db.example.com:5432/location",
         mapbox_api_key="mapbox-key",
         enable_ors_validation=False,
     )
 
-    with pytest.raises(ValueError, match="LOCATION_AUTH_JWT_SECRET"):
+    with pytest.raises(ValueError, match="LOCATION_AUTH_JWT_ALGORITHM"):
         validate_prod_settings(candidate)
 
 
 def test_prod_validation_rejects_default_database_url() -> None:
     candidate = _candidate(
         environment="prod",
-        auth_jwt_secret="prod-secret-12345678901234567890",
         database_url=DEFAULT_DATABASE_URL,
         mapbox_api_key="mapbox-key",
         enable_ors_validation=False,
@@ -36,10 +35,24 @@ def test_prod_validation_rejects_default_database_url() -> None:
         validate_prod_settings(candidate)
 
 
+def test_prod_validation_requires_jwks_issuer_and_audience() -> None:
+    candidate = _candidate(
+        environment="prod",
+        auth_issuer="",
+        auth_audience="",
+        auth_jwks_url="",
+        database_url="postgresql+asyncpg://user:pass@db.example.com:5432/location",
+        mapbox_api_key="mapbox-key",
+        enable_ors_validation=False,
+    )
+
+    with pytest.raises(ValueError, match="LOCATION_AUTH_ISSUER"):
+        validate_prod_settings(candidate)
+
+
 def test_prod_validation_requires_mapbox_key() -> None:
     candidate = _candidate(
         environment="prod",
-        auth_jwt_secret="prod-secret-12345678901234567890",
         database_url="postgresql+asyncpg://user:pass@db.example.com:5432/location",
         mapbox_api_key="",
         enable_ors_validation=False,
@@ -52,7 +65,6 @@ def test_prod_validation_requires_mapbox_key() -> None:
 def test_prod_validation_requires_ors_settings_when_enabled() -> None:
     candidate = _candidate(
         environment="prod",
-        auth_jwt_secret="prod-secret-12345678901234567890",
         database_url="postgresql+asyncpg://user:pass@db.example.com:5432/location",
         mapbox_api_key="mapbox-key",
         enable_ors_validation=True,
@@ -64,10 +76,13 @@ def test_prod_validation_requires_ors_settings_when_enabled() -> None:
         validate_prod_settings(candidate)
 
 
-def test_prod_validation_accepts_complete_config() -> None:
+def test_prod_validation_accepts_complete_rs256_config() -> None:
     candidate = _candidate(
         environment="prod",
-        auth_jwt_secret="prod-secret-12345678901234567890",
+        auth_jwt_algorithm="RS256",
+        auth_issuer="lojinext-platform",
+        auth_audience="lojinext-platform",
+        auth_jwks_url="http://identity-api:8105/.well-known/jwks.json",
         database_url="postgresql+asyncpg://user:pass@db.example.com:5432/location",
         mapbox_api_key="mapbox-key",
         enable_ors_validation=True,

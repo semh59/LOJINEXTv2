@@ -6,84 +6,26 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from uuid import UUID
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from ulid import ULID
 
+from location_service.audit_helpers import (
+    _write_audit,
+    _write_outbox,
+)
+from location_service.audit_helpers import (
+    serialize_pair_audit as serialize_pair,
+)
 from location_service.database import async_session_factory
 from location_service.enums import DirectionCode, PairStatus, ProcessingStatus
 from location_service.models import (
-    LocationAuditLogModel,
-    LocationOutboxModel,
     Route,
     RoutePair,
     RouteVersion,
 )
 
 logger = logging.getLogger(__name__)
-
-
-async def _write_audit(
-    session: AsyncSession,
-    target_type: str,
-    target_id: str,
-    action_type: str,
-    actor_id: str,
-    actor_role: str,
-    *,
-    old_snapshot: dict | None = None,
-    new_snapshot: dict | None = None,
-    request_id: str | None = None,
-) -> None:
-    audit = LocationAuditLogModel(
-        audit_id=str(ULID()),
-        target_type=target_type,
-        target_id=target_id,
-        action_type=action_type,
-        actor_id=actor_id,
-        actor_role=actor_role,
-        old_snapshot_json=old_snapshot,
-        new_snapshot_json=new_snapshot,
-        request_id=request_id,
-        created_at_utc=datetime.now(UTC),
-    )
-    session.add(audit)
-
-
-async def _write_outbox(
-    session: AsyncSession,
-    event_name: str,
-    payload: dict,
-) -> None:
-    outbox = LocationOutboxModel(
-        outbox_id=str(ULID()),
-        event_name=event_name,
-        event_version=1,
-        payload_json=payload,
-        publish_status="PENDING",
-        retry_count=0,
-        created_at_utc=datetime.now(UTC),
-        next_attempt_at_utc=datetime.now(UTC),
-    )
-    session.add(outbox)
-
-
-def serialize_pair(pair: RoutePair) -> dict[str, object]:
-    """Fallback serialization for audit snapshots when full schema-based validation is overkill or missing fields."""
-    return {
-        "route_pair_id": str(pair.route_pair_id),
-        "pair_code": pair.pair_code,
-        "pair_status": pair.pair_status,
-        "row_version": pair.row_version,
-        "forward_route_id": str(pair.forward_route_id) if pair.forward_route_id else None,
-        "reverse_route_id": str(pair.reverse_route_id) if pair.reverse_route_id else None,
-        "current_active_forward_version_no": pair.current_active_forward_version_no,
-        "current_active_reverse_version_no": pair.current_active_reverse_version_no,
-        "pending_forward_version_no": pair.pending_forward_version_no,
-        "pending_reverse_version_no": pair.pending_reverse_version_no,
-    }
 
 
 @asynccontextmanager
@@ -97,7 +39,7 @@ async def _session_scope(session: AsyncSession | None) -> AsyncIterator[AsyncSes
         yield managed_session
 
 
-async def _get_locked_pair(session: AsyncSession, pair_id: UUID) -> RoutePair:
+async def _get_locked_pair(session: AsyncSession, pair_id: str) -> RoutePair:
     """Load and lock the pair row for approval/discard mutations."""
     pair = await session.get(RoutePair, pair_id, with_for_update=True)
     if pair is None:
@@ -107,7 +49,7 @@ async def _get_locked_pair(session: AsyncSession, pair_id: UUID) -> RoutePair:
     return pair
 
 
-async def _get_routes_by_direction(session: AsyncSession, pair_id: UUID) -> dict[DirectionCode, Route]:
+async def _get_routes_by_direction(session: AsyncSession, pair_id: str) -> dict[DirectionCode, Route]:
     """Return the pair routes keyed by direction, or raise if incomplete."""
     routes = (await session.execute(select(Route).where(Route.route_pair_id == pair_id))).scalars().all()
     route_map = {DirectionCode(route.direction): route for route in routes}
@@ -116,7 +58,7 @@ async def _get_routes_by_direction(session: AsyncSession, pair_id: UUID) -> dict
     return route_map
 
 
-async def approve_route_versions(pair_id: UUID, *, session: AsyncSession | None = None) -> RoutePair:
+async def approve_route_versions(pair_id: str, *, session: AsyncSession | None = None) -> RoutePair:
     """Atomically promote pending draft versions to ACTIVE and return the pair."""
     async with _session_scope(session) as active_session:
         pair = await _get_locked_pair(active_session, pair_id)
@@ -190,7 +132,7 @@ async def approve_route_versions(pair_id: UUID, *, session: AsyncSession | None 
         return pair
 
 
-async def discard_route_versions(pair_id: UUID, *, session: AsyncSession | None = None) -> RoutePair:
+async def discard_route_versions(pair_id: str, *, session: AsyncSession | None = None) -> RoutePair:
     """Discard pending draft versions for a pair and return the pair."""
     async with _session_scope(session) as active_session:
         pair = await _get_locked_pair(active_session, pair_id)

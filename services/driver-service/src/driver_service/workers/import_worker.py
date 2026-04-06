@@ -162,6 +162,7 @@ async def _run_job_logic(session: AsyncSession, job_id: str) -> None:
                 existing_driver.row_version += 1
                 existing_driver.updated_at_utc = now
                 existing_driver.updated_by_actor_id = job.created_by_actor_id
+                await session.flush()  # V2.1: Ensure driver updated before auditing
 
                 # Capture NEW snapshot
                 new_snapshot = serialize_driver_admin(existing_driver)
@@ -227,6 +228,7 @@ async def _run_job_logic(session: AsyncSession, job_id: str) -> None:
                     updated_by_actor_id=job.created_by_actor_id,
                 )
                 session.add(driver)
+                await session.flush()  # V2.1: Ensure driver exists before auditing (FK)
 
                 # Capture snapshot
                 new_snapshot = serialize_driver_admin(driver)

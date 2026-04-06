@@ -13,6 +13,7 @@ from PIL import Image
 
 from location_service.config import settings
 from location_service.errors import internal_error
+from location_service.observability import correlation_id
 
 logger = logging.getLogger(__name__)
 
@@ -52,9 +53,13 @@ class MapboxTerrainClient:
         url = f"{self.base_url}/mapbox.terrain-rgb/{self.ZOOM}/{xtile}/{ytile}.pngraw?access_token={self.api_key}"
 
         max_retries = max(self.max_retries, 0)
+        headers = {}
+        if c_id := correlation_id.get():
+            headers["X-Correlation-ID"] = c_id
+
         for attempt in range(max_retries + 1):
             try:
-                resp = await client.get(url)
+                resp = await client.get(url, headers=headers)
                 if resp.status_code == 200:
                     img = Image.open(io.BytesIO(resp.content)).convert("RGB")
                     self.tile_cache[(xtile, ytile)] = img

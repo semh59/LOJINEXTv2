@@ -25,8 +25,8 @@ router = APIRouter(prefix="/v1/bulk-refresh", tags=["bulk-refresh"])
     dependencies=[Depends(super_admin_auth_dependency)],
 )
 async def create_bulk_refresh_job(
+    db: Annotated[AsyncSession, Depends(get_db)],
     request: BulkRefreshTriggerRequest | None = None,
-    db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> BulkRefreshTriggerResponse:
     """Trigger bulk refresh for selected or all active pairs."""
     del db

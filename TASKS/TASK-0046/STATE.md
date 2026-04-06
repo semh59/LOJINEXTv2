@@ -1,15 +1,17 @@
 # STATE.md
 
 ## Status
+
 [ ] new
 [ ] reading
 [ ] planning
-[x] in_progress
+[ ] in_progress
 [ ] blocked
 [ ] ready_for_review
-[ ] done
+[x] done
 
 ## Last Updated
+
 Date: 2026-04-05
 Agent: Codex
 
@@ -17,16 +19,17 @@ Agent: Codex
 
 ## Progress Against Plan
 
-| Step | Status |
-|------|--------|
-| 1. Reconstruct the landed `trip-service` Phase A patch surface and evidence in task records. | done |
-| 2. Implement the deep local validation plan and close any repo-side regressions discovered by new tests. | done |
-| 3. Re-run the configured DB `--dry-run` and record the real gate state. | done |
-| 4. Run target DB `--apply` and verification `--dry-run` once the configured DB is reachable. | not started |
+| Step                                                                                                     | Status |
+| -------------------------------------------------------------------------------------------------------- | ------ |
+| 1. Reconstruct the landed `trip-service` Phase A patch surface and evidence in task records.             | done   |
+| 2. Implement the deep local validation plan and close any repo-side regressions discovered by new tests. | done   |
+| 3. Re-run the configured DB `--dry-run` and record the real gate state.                                  | done   |
+| 4. Run target DB `--apply` and verification `--dry-run` once the configured DB is reachable.             | done   |
 
 ---
 
 ## Completed This Session
+
 - Created the dedicated `TASK-0046` task record set for the `trip-service` Phase A repair follow-up.
 - Implemented the deep test plan inside `services/trip-service/`:
   - added new deep suites for `auth`, `dependencies`, `broker`, `http_clients`, `observability`, `entrypoints`, and `timezones`
@@ -50,6 +53,7 @@ Agent: Codex
 ---
 
 ## Still Open
+
 - Restore connectivity to the configured `trip-service` database.
 - Re-run `uv run python scripts/backfill_trip_status_drift.py --dry-run` against the real target DB.
 - If and only if `blocking_rows=[]` and the command exits `0`, run `--apply`.
@@ -58,6 +62,7 @@ Agent: Codex
 ---
 
 ## Blocked
+
 [x] Yes
 [ ] No
 
@@ -73,6 +78,7 @@ Environment owner / operator with access to the real `trip-service` database.
 ---
 
 ## Risks Found During Build
+
 - The task can be falsely perceived as complete because code validation is green while the real DB rollout gate is still closed.
 - Phase B strict cleanup remains unsafe until the real DB backfill sequence finishes cleanly.
 - Deep local confidence is now high; the remaining risk is operational, not repo-side.
@@ -80,5 +86,6 @@ Environment owner / operator with access to the real `trip-service` database.
 ---
 
 ## Unexpected Findings
+
 - The route smoke output currently includes both `/api/v1/trips/{trip_id}/hard` and `/api/v1/trips/{trip_id}/hard-delete`; this task records the current reality and does not reinterpret that alias.
 - The configured DB blocker is environmental, not a repo-test failure: the same backfill dry-run succeeds against an ephemeral migrated Postgres instance.

@@ -26,45 +26,34 @@ def _claims(*, sub: str = "user-001", role: str = "MANAGER", service: str | None
 
 
 @pytest.mark.parametrize(
-    ("settings_obj", "expected"),
+    "settings_obj",
     [
-        (SimpleNamespace(uses_hmac=True, shared_secret=None, uses_rsa=False), "fail"),
-        (SimpleNamespace(uses_hmac=False, shared_secret=None, uses_rsa=True, issuer="", audience="aud"), "fail"),
-        (SimpleNamespace(uses_hmac=False, shared_secret=None, uses_rsa=True, issuer="iss", audience=""), "fail"),
-        (
-            SimpleNamespace(
-                uses_hmac=False,
-                shared_secret=None,
-                uses_rsa=True,
-                issuer="iss",
-                audience="aud",
-                public_key="",
-                jwks_url="",
-            ),
-            "fail",
-        ),
+        SimpleNamespace(algorithm="HS256", issuer="iss", audience="aud", jwks_url="https://jwks"),
+        SimpleNamespace(algorithm="RS256", issuer="", audience="aud", jwks_url="https://jwks"),
+        SimpleNamespace(algorithm="RS256", issuer="iss", audience="", jwks_url="https://jwks"),
+        SimpleNamespace(algorithm="RS256", issuer="iss", audience="aud", jwks_url=""),
     ],
 )
-def test_auth_verify_status_rejects_invalid_local_settings(
+def test_auth_verify_status_rejects_invalid_rs256_settings(
     monkeypatch: pytest.MonkeyPatch,
     settings_obj: SimpleNamespace,
-    expected: str,
 ) -> None:
     monkeypatch.setattr(auth_module, "_platform_auth_settings", lambda audience=None: settings_obj)
-    assert auth_verify_status() == expected
+    assert auth_verify_status() == "fail"
+
+
+def test_auth_verify_status_returns_fail_when_jwks_probe_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings_obj = SimpleNamespace(algorithm="RS256", issuer="iss", audience="aud", jwks_url="https://jwks")
+    monkeypatch.setattr(auth_module, "_platform_auth_settings", lambda audience=None: settings_obj)
+    monkeypatch.setattr(auth_module, "_probe_jwks_document", lambda _: False)
+
+    assert auth_verify_status() == "fail"
 
 
 def test_auth_verify_status_returns_fail_when_provider_build_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    settings_obj = SimpleNamespace(
-        uses_hmac=False,
-        shared_secret=None,
-        uses_rsa=True,
-        issuer="iss",
-        audience="aud",
-        public_key="pem",
-        jwks_url="",
-    )
+    settings_obj = SimpleNamespace(algorithm="RS256", issuer="iss", audience="aud", jwks_url="https://jwks")
     monkeypatch.setattr(auth_module, "_platform_auth_settings", lambda audience=None: settings_obj)
+    monkeypatch.setattr(auth_module, "_probe_jwks_document", lambda _: True)
     monkeypatch.setattr(
         auth_module,
         "build_verification_provider",
@@ -74,52 +63,31 @@ def test_auth_verify_status_returns_fail_when_provider_build_raises(monkeypatch:
     assert auth_verify_status() == "fail"
 
 
-def test_auth_verify_status_returns_ok_for_valid_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    settings_obj = SimpleNamespace(
-        uses_hmac=False,
-        shared_secret=None,
-        uses_rsa=True,
-        issuer="iss",
-        audience="aud",
-        public_key="pem",
-        jwks_url="",
-    )
+def test_auth_verify_status_returns_ok_for_live_jwks(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings_obj = SimpleNamespace(algorithm="RS256", issuer="iss", audience="aud", jwks_url="https://jwks")
     monkeypatch.setattr(auth_module, "_platform_auth_settings", lambda audience=None: settings_obj)
+    monkeypatch.setattr(auth_module, "_probe_jwks_document", lambda _: True)
     monkeypatch.setattr(auth_module, "build_verification_provider", lambda _: object())
 
     assert auth_verify_status() == "ok"
 
 
-@pytest.mark.parametrize(
-    "settings_obj",
-    [
-        SimpleNamespace(uses_hmac=True, private_key=None, audience="aud"),
-        SimpleNamespace(uses_hmac=False, private_key="pem", audience="aud"),
-    ],
-)
-def test_auth_outbound_status_returns_ok_for_local_signing(
-    monkeypatch: pytest.MonkeyPatch,
-    settings_obj: SimpleNamespace,
-) -> None:
-    monkeypatch.setattr(auth_module, "_platform_auth_settings", lambda audience=None: settings_obj)
-    assert auth_outbound_status() == "ok"
-
-
-def test_auth_outbound_status_uses_cache_readiness_for_remote_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
-    settings_obj = SimpleNamespace(uses_hmac=False, private_key="", audience="remote-aud")
+@pytest.mark.asyncio
+async def test_auth_outbound_status_fetches_real_service_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings_obj = SimpleNamespace(audience="remote-aud")
     captured: dict[str, object] = {}
 
-    def fake_readiness_state(**kwargs):
-        captured["kwargs"] = kwargs
-        return "cold"
+    async def fake_get_token(**kwargs) -> str:
+        captured.update(kwargs)
+        return "remote-token"
 
     monkeypatch.setattr(auth_module, "_platform_auth_settings", lambda audience=None: settings_obj)
-    monkeypatch.setattr(auth_module._SERVICE_TOKEN_CACHE, "readiness_state", fake_readiness_state)
+    monkeypatch.setattr(auth_module._SERVICE_TOKEN_CACHE, "get_token", fake_get_token)
 
-    result = auth_outbound_status(audience="fleet-service")
+    result = await auth_outbound_status(audience="fleet-service")
 
-    assert result == "cold"
-    assert captured["kwargs"] == {
+    assert result == "ok"
+    assert captured == {
         "service_name": auth_module.settings.service_name,
         "audience": "remote-aud",
         "token_url": auth_module.settings.auth_service_token_url,
@@ -129,29 +97,22 @@ def test_auth_outbound_status_uses_cache_readiness_for_remote_tokens(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_issue_internal_service_token_issues_locally_for_hmac(monkeypatch: pytest.MonkeyPatch) -> None:
-    settings_obj = SimpleNamespace(uses_hmac=True, private_key=None, audience="fleet-service")
-    captured: dict[str, object] = {}
+async def test_auth_outbound_status_returns_fail_on_token_acquisition_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings_obj = SimpleNamespace(audience="fleet-service")
 
-    class FakeFactory:
-        def __init__(self, *, service_name: str, settings: object) -> None:
-            captured["service_name"] = service_name
-            captured["settings"] = settings
-
-        def issue(self) -> str:
-            return "local-token"
+    async def fake_get_token(**kwargs) -> str:
+        del kwargs
+        raise ServiceTokenAcquisitionError("token fetch failed")
 
     monkeypatch.setattr(auth_module, "_platform_auth_settings", lambda audience=None: settings_obj)
-    monkeypatch.setattr(auth_module, "ServiceTokenFactory", FakeFactory)
+    monkeypatch.setattr(auth_module._SERVICE_TOKEN_CACHE, "get_token", fake_get_token)
 
-    assert await issue_internal_service_token(audience="fleet-service") == "local-token"
-    assert captured["service_name"] == auth_module.settings.service_name
-    assert captured["settings"] is settings_obj
+    assert await auth_outbound_status(audience="fleet-service") == "fail"
 
 
 @pytest.mark.asyncio
-async def test_issue_internal_service_token_uses_remote_cache(monkeypatch: pytest.MonkeyPatch) -> None:
-    settings_obj = SimpleNamespace(uses_hmac=False, private_key="", audience="fleet-service")
+async def test_issue_internal_service_token_uses_explicit_remote_audience(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings_obj = SimpleNamespace(audience="fleet-service")
     captured: dict[str, object] = {}
 
     async def fake_get_token(**kwargs) -> str:
@@ -173,7 +134,7 @@ async def test_issue_internal_service_token_uses_remote_cache(monkeypatch: pytes
 
 @pytest.mark.asyncio
 async def test_issue_internal_service_token_wraps_acquisition_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    settings_obj = SimpleNamespace(uses_hmac=False, private_key="", audience="fleet-service")
+    settings_obj = SimpleNamespace(audience="fleet-service")
 
     async def fake_get_token(**kwargs) -> str:
         del kwargs

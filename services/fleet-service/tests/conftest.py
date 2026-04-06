@@ -7,12 +7,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-import jwt
 import pytest
 import pytest_asyncio
 from alembic.config import Config
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from platform_auth_testing import build_test_jwks_bundle, install_jwks_urlopen_mock, sign_test_token
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -37,11 +37,25 @@ TRUNCATE_TABLES = (
 )
 
 _pg_url: str = ""
+TEST_JWKS_BUNDLE = build_test_jwks_bundle()
+settings.environment = "test"
+settings.auth_jwt_algorithm = "RS256"
+settings.auth_issuer = TEST_JWKS_BUNDLE.issuer
+settings.auth_audience = TEST_JWKS_BUNDLE.audience
+settings.auth_jwks_url = TEST_JWKS_BUNDLE.jwks_url
+settings.auth_service_token_url = "http://identity.test/auth/v1/token/service"
+settings.auth_service_client_id = settings.service_name
+settings.auth_service_client_secret = "fleet-client-secret"
 
 
 def _token(payload: dict[str, Any]) -> str:
     """Build a JWT token for tests."""
-    return jwt.encode(payload, settings.resolved_auth_jwt_secret, algorithm=settings.auth_jwt_algorithm)
+    return sign_test_token(
+        TEST_JWKS_BUNDLE,
+        sub=str(payload["sub"]),
+        role=str(payload["role"]),
+        service=str(payload["service"]) if payload.get("service") is not None else None,
+    )
 
 
 def _bearer_headers(payload: dict[str, Any]) -> dict[str, str]:
@@ -193,8 +207,27 @@ async def client(db_engine, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[A
             "active_trip_count": 0,
         }
 
+    async def stub_get_token(
+        *,
+        service_name: str,
+        audience: str | None,
+        token_url: str,
+        client_id: str,
+        client_secret: str,
+    ) -> str:
+        del token_url, client_secret
+        return sign_test_token(
+            TEST_JWKS_BUNDLE,
+            sub=service_name,
+            role="SERVICE",
+            service=client_id,
+            aud=audience or settings.auth_audience,
+        )
+
     monkeypatch.setattr("fleet_service.clients.driver_client.validate_driver", mock_validate_driver)
     monkeypatch.setattr("fleet_service.clients.trip_client.check_asset_references", mock_reference_check)
+    install_jwks_urlopen_mock(monkeypatch, TEST_JWKS_BUNDLE, jwks_url=settings.auth_jwks_url)
+    monkeypatch.setattr("fleet_service.auth._SERVICE_TOKEN_CACHE.get_token", stub_get_token)
     await record_worker_heartbeat("outbox-relay")
     await record_worker_heartbeat("fleet-worker")
     test_app.state.broker = NoOpBroker()

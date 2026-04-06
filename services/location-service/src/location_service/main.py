@@ -57,19 +57,17 @@ def create_app() -> FastAPI:
     app.add_exception_handler(ProblemDetailError, problem_detail_handler)  # type: ignore[arg-type]
     app.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore[arg-type]
     app.add_exception_handler(Exception, unexpected_exception_handler)
-    app.include_router(health.router, prefix="/api/v1/location")
+    app.include_router(health.router)
     public_dependencies = [Depends(user_auth_dependency)]
-    app.include_router(points.router, prefix="/api/v1/location", dependencies=public_dependencies)
-    app.include_router(pairs.router, prefix="/api/v1/location", dependencies=public_dependencies)
-    app.include_router(processing.router, prefix="/api/v1/location", dependencies=public_dependencies)
-    app.include_router(processing.public_router, prefix="/api/v1/location", dependencies=public_dependencies)
-    app.include_router(approval.router, prefix="/api/v1/location", dependencies=public_dependencies)
-    app.include_router(bulk_refresh.router, prefix="/api/v1/location", dependencies=public_dependencies)
-    app.include_router(routes_public.router, prefix="/api/v1/location", dependencies=public_dependencies)
-    app.include_router(removed_endpoints.router, prefix="/api/v1/location", dependencies=public_dependencies)
-    app.include_router(
-        internal_routes.router, prefix="/api/v1/location", dependencies=[Depends(trip_service_auth_dependency)]
-    )
+    app.include_router(points.router, dependencies=public_dependencies)
+    app.include_router(pairs.router, dependencies=public_dependencies)
+    app.include_router(processing.router, dependencies=public_dependencies)
+    app.include_router(processing.public_router, dependencies=public_dependencies)
+    app.include_router(approval.router, dependencies=public_dependencies)
+    app.include_router(bulk_refresh.router, dependencies=public_dependencies)
+    app.include_router(routes_public.router, dependencies=public_dependencies)
+    app.include_router(removed_endpoints.router, dependencies=public_dependencies)
+    app.include_router(internal_routes.router, dependencies=[Depends(trip_service_auth_dependency)])
     return app
 
 

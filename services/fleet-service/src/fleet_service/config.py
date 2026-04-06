@@ -1,12 +1,10 @@
 """Application configuration via environment variables (Fleet Service v1.5, Section 13)."""
 
-import os
 from typing import Literal
 
 from pydantic_settings import BaseSettings
 
 DEFAULT_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/fleet_service"
-DEFAULT_AUTH_JWT_SECRET = "fleet-service-dev-secret-please-change-me-32b"
 
 
 class Settings(BaseSettings):
@@ -14,6 +12,7 @@ class Settings(BaseSettings):
 
     # --- Service identity ---
     service_name: str = "fleet-service"
+    service_version: str = "0.1.0"
     service_port: int = 8102
     environment: Literal["dev", "test", "prod"] = "dev"
 
@@ -21,10 +20,9 @@ class Settings(BaseSettings):
     database_url: str = DEFAULT_DATABASE_URL
 
     # --- Auth ---
-    auth_jwt_secret: str = DEFAULT_AUTH_JWT_SECRET
-    auth_jwt_algorithm: str = "HS256"
-    auth_issuer: str = ""
-    auth_audience: str = ""
+    auth_jwt_algorithm: str = "RS256"
+    auth_issuer: str = "lojinext-platform"
+    auth_audience: str = "lojinext-platform"
     auth_public_key: str = ""
     auth_private_key: str = ""
     auth_jwks_url: str = ""
@@ -95,11 +93,6 @@ class Settings(BaseSettings):
             return "noop"
         return "log"
 
-    @property
-    def resolved_auth_jwt_secret(self) -> str:
-        """Return the recovery-time shared secret if set, otherwise the local auth secret."""
-        return os.getenv("PLATFORM_JWT_SECRET") or self.auth_jwt_secret
-
     model_config = {"env_prefix": "FLEET_", "env_file": ".env", "extra": "ignore"}
 
 
@@ -112,19 +105,22 @@ def validate_prod_settings(current: Settings) -> None:
         return
 
     errors: list[str] = []
-    if current.auth_jwt_algorithm.upper().startswith("HS") and (
-        not current.resolved_auth_jwt_secret or current.resolved_auth_jwt_secret == DEFAULT_AUTH_JWT_SECRET
-    ):
-        errors.append("FLEET_AUTH_JWT_SECRET must be set to a non-default value in prod.")
-    if current.auth_jwt_algorithm.upper().startswith("RS"):
-        if not current.auth_jwks_url and not current.auth_public_key:
-            errors.append("FLEET_AUTH_JWKS_URL or FLEET_AUTH_PUBLIC_KEY must be set for RS* auth in prod.")
-        if current.auth_private_key:
-            errors.append("FLEET_AUTH_PRIVATE_KEY must not be set in prod; signing belongs to identity-service.")
-        if not current.auth_service_token_url:
-            errors.append("FLEET_AUTH_SERVICE_TOKEN_URL must be set for RS* outbound auth in prod.")
-        if not current.auth_service_client_secret:
-            errors.append("FLEET_AUTH_SERVICE_CLIENT_SECRET must be set for RS* outbound auth in prod.")
+    if current.auth_jwt_algorithm.upper() != "RS256":
+        errors.append("FLEET_AUTH_JWT_ALGORITHM must be RS256 in prod.")
+    if not current.auth_issuer:
+        errors.append("FLEET_AUTH_ISSUER must be set for RS256 auth in prod.")
+    if not current.auth_audience:
+        errors.append("FLEET_AUTH_AUDIENCE must be set for RS256 auth in prod.")
+    if not current.auth_jwks_url:
+        errors.append("FLEET_AUTH_JWKS_URL must be set for RS256 auth in prod.")
+    if current.auth_public_key:
+        errors.append("FLEET_AUTH_PUBLIC_KEY must not be set in prod; verification must use JWKS.")
+    if current.auth_private_key:
+        errors.append("FLEET_AUTH_PRIVATE_KEY must not be set in prod; signing belongs to identity-service.")
+    if not current.auth_service_token_url:
+        errors.append("FLEET_AUTH_SERVICE_TOKEN_URL must be set for outbound auth in prod.")
+    if not current.auth_service_client_secret:
+        errors.append("FLEET_AUTH_SERVICE_CLIENT_SECRET must be set for outbound auth in prod.")
     if not current.database_url or current.database_url == DEFAULT_DATABASE_URL:
         errors.append("FLEET_DATABASE_URL must be set to a non-default value in prod.")
     if current.broker_type is None:

@@ -14,6 +14,7 @@ from sqlalchemy import (
     Boolean,
     Computed,
     Date,
+    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -272,13 +273,13 @@ class FleetAuditLogModel(Base):
     aggregate_id: Mapped[str] = mapped_column(String(26), nullable=False)
     action_type: Mapped[str] = mapped_column(String(32), nullable=False)
     changed_fields_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    old_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    new_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    actor_id: Mapped[str] = mapped_column(String(26), nullable=False)
+    old_snapshot_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    new_snapshot_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    actor_id: Mapped[str] = mapped_column(String(64), nullable=False)
     actor_role: Mapped[str] = mapped_column(String(32), nullable=False)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     request_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    created_at_utc: Mapped[datetime.datetime] = mapped_column(nullable=False)
+    created_at_utc: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     __table_args__ = (Index("idx_fleet_audit_agg_created", "aggregate_type", "aggregate_id", "created_at_utc"),)
 

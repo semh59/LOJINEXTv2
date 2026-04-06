@@ -40,6 +40,11 @@ ROLE_PRIORITY = {
     str(PlatformRole.MANAGER): 2,
     str(PlatformRole.OPERATOR): 1,
 }
+USER_ROLE_NAMES = set(ROLE_PRIORITY)
+
+
+class InvalidUserRoleAssignmentsError(ValueError):
+    """Raised when a human user carries SERVICE or unknown group assignments."""
 
 
 def _now_utc() -> datetime:
@@ -214,6 +219,22 @@ async def seed_bootstrap_state(session: AsyncSession) -> None:
     await ensure_active_signing_key(session)
 
 
+async def validate_bootstrap_state(session: AsyncSession) -> None:
+    """Ensure the seeded superadmin and active signing key exist after bootstrap."""
+    result = await session.execute(
+        select(IdentityUserModel).where(
+            IdentityUserModel.username == settings.bootstrap_superadmin_username
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        raise RuntimeError("Bootstrap superadmin was not created.")
+    signing_key = await ensure_active_signing_key(session)
+    if not signing_key.private_key_ciphertext_b64:
+        raise RuntimeError("Active signing key ciphertext is missing.")
+    if not signing_key.private_key_kek_version:
+        raise RuntimeError("Active signing key KEK version is missing.")
+
+
 async def _user_groups(session: AsyncSession, user_id: str) -> list[str]:
     query = (
         select(IdentityGroupModel.group_name)
@@ -245,6 +266,11 @@ async def _permissions_for_groups(
 
 
 def _role_for_groups(group_names: list[str]) -> str:
+    invalid_groups = sorted(
+        {item for item in group_names if item not in USER_ROLE_NAMES}
+    )
+    if invalid_groups:
+        raise InvalidUserRoleAssignmentsError("User role assignments invalid.")
     if not group_names:
         return str(PlatformRole.MANAGER)
     return max(group_names, key=lambda item: ROLE_PRIORITY.get(item, 0))
@@ -292,11 +318,12 @@ async def _write_outbox(
         event_name=event_name,
         event_version=1,
         payload_json=json.dumps(payload),
-        partition_key=aggregate_id,  # V2.1 requirement: partition by aggregate_id
         publish_status="PENDING",
         retry_count=0,
+        last_error=None,
         created_at_utc=_now_utc(),
         next_attempt_at_utc=_now_utc(),
+        claim_expires_at_utc=None,
     )
     session.add(outbox)
 
@@ -419,9 +446,9 @@ async def issue_token_pair(
     session: AsyncSession, user: IdentityUserModel
 ) -> dict[str, object]:
     """Issue and persist an access/refresh token pair for a user."""
+    profile = await build_user_profile(session, user)
     signing_key = await ensure_active_signing_key(session)
     private_key_pem = _signing_private_key(signing_key)
-    profile = await build_user_profile(session, user)
     access_token = _issue_user_access_token(
         signing_key,
         private_key_pem=private_key_pem,
@@ -506,13 +533,20 @@ async def issue_service_token(
     ):
         raise ValueError("Service client credentials are invalid.")
     if audience and audience != settings.auth_audience:
-        raise ValueError("Service token audience must match the platform audience.")
+        if settings.auth_strict_audience_check:
+            raise ValueError(
+                "Strict Mode: Service token audience must match the platform audience."
+            )
+        if audience not in settings.bootstrap_service_names:
+            raise ValueError(
+                "Service token audience must match the platform audience or a registered service."
+            )
     signing_key = await ensure_active_signing_key(session)
     access_token = _issue_service_access_token(
         signing_key,
         private_key_pem=_signing_private_key(signing_key),
         service_name=client.service_name,
-        audience=settings.auth_audience,
+        audience=audience or settings.auth_audience,
     )
     return {
         "access_token": access_token,

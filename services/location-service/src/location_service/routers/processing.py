@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy import func, select
@@ -49,7 +48,7 @@ _ALLOWED_LIST_SORTS = {
 _DEFAULT_LIST_SORT = "created_at_utc:desc"
 
 
-async def _check_pair_and_guard(pair_id: UUID, db: AsyncSession) -> RoutePair:
+async def _check_pair_and_guard(pair_id: str, db: AsyncSession) -> RoutePair:
     """Fetch pair and enforce common state guards for processing triggers."""
     pair = await db.get(RoutePair, pair_id)
     if pair is None:
@@ -70,7 +69,7 @@ async def _check_pair_and_guard(pair_id: UUID, db: AsyncSession) -> RoutePair:
     return pair
 
 
-async def _get_run_with_pair(db: AsyncSession, run_id: UUID) -> tuple[ProcessingRun, RoutePair]:
+async def _get_run_with_pair(db: AsyncSession, run_id: str) -> tuple[ProcessingRun, RoutePair]:
     row = (
         await db.execute(
             select(ProcessingRun, RoutePair)
@@ -80,7 +79,8 @@ async def _get_run_with_pair(db: AsyncSession, run_id: UUID) -> tuple[Processing
     ).one_or_none()
     if row is None:
         raise processing_run_not_found(str(run_id))
-    return row
+    run, pair = row
+    return run, pair
 
 
 def _serialize_run(run: ProcessingRun, pair: RoutePair) -> ProcessingRunResponse:
@@ -103,7 +103,7 @@ def _serialize_run(run: ProcessingRun, pair: RoutePair) -> ProcessingRunResponse
 
 @router.post("/{pair_id}/calculate", status_code=status.HTTP_202_ACCEPTED, response_model=ProcessingRunResponse)
 async def calculate_route_pair(
-    pair_id: UUID = Path(...),
+    pair_id: str = Path(...),
     request: CalculateRequest | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> ProcessingRunResponse:
@@ -124,7 +124,7 @@ async def calculate_route_pair(
 
 @router.post("/{pair_id}/refresh", status_code=status.HTTP_202_ACCEPTED, response_model=ProcessingRunResponse)
 async def refresh_route_pair(
-    pair_id: UUID = Path(...),
+    pair_id: str = Path(...),
     db: AsyncSession = Depends(get_db),
 ) -> ProcessingRunResponse:
     """Trigger refresh for an ACTIVE pair."""
@@ -141,7 +141,7 @@ async def refresh_route_pair(
 
 @public_router.get("/processing-runs/{run_id}", response_model=ProcessingRunResponse)
 @router.get("/processing-runs/{run_id}", response_model=ProcessingRunResponse)
-async def get_processing_run(run_id: UUID = Path(...), db: AsyncSession = Depends(get_db)) -> ProcessingRunResponse:
+async def get_processing_run(run_id: str = Path(...), db: AsyncSession = Depends(get_db)) -> ProcessingRunResponse:
     """Get status of a ProcessingRun."""
     run, pair = await _get_run_with_pair(db, run_id)
     return _serialize_run(run, pair)
@@ -149,7 +149,7 @@ async def get_processing_run(run_id: UUID = Path(...), db: AsyncSession = Depend
 
 @router.get("/{pair_id}/processing-runs", response_model=ProcessingRunListResponse)
 async def list_pair_processing_runs(
-    pair_id: UUID,
+    pair_id: str,
     db: AsyncSession = Depends(get_db),
     page: Annotated[int, Query(ge=1)] = 1,
     per_page: Annotated[int | None, Query(ge=1, le=100)] = None,
@@ -218,7 +218,7 @@ async def list_pair_processing_runs(
     dependencies=[Depends(super_admin_auth_dependency)],
 )
 async def force_fail_processing_run(
-    run_id: UUID = Path(...),
+    run_id: str = Path(...),
     db: AsyncSession = Depends(get_db),
 ) -> ProcessingRunResponse:
     """Force-fail a stuck processing run once the SLA has elapsed."""

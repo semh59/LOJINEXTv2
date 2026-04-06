@@ -24,7 +24,11 @@ from trip_service.config import settings
 from trip_service.database import async_session_factory
 from trip_service.enums import OutboxPublishStatus
 from trip_service.models import TripOutbox
-from trip_service.observability import OUTBOX_DEAD_LETTER_TOTAL, OUTBOX_PUBLISHED_TOTAL
+from trip_service.observability import (
+    OUTBOX_DEAD_LETTER_TOTAL,
+    OUTBOX_PUBLISHED_TOTAL,
+    get_standard_labels,
+)
 from trip_service.worker_heartbeats import record_worker_heartbeat
 
 logger = logging.getLogger("trip_service.outbox_relay")
@@ -148,81 +152,89 @@ async def _relay_batch(broker: MessageBroker, worker_id: str, batch_size: int = 
 
 async def _publish_single(broker: MessageBroker, event_id: str, claim_token: str) -> bool:
     """Attempt to publish and finalize a single claimed outbox event."""
-    async with async_session_factory() as session:
-        row = (
-            await session.execute(
-                select(TripOutbox)
-                .where(
-                    TripOutbox.event_id == event_id,
-                    TripOutbox.claim_token == claim_token,
+    from trip_service.observability import correlation_id
+
+    token = correlation_id.set(event_id)
+    try:
+        async with async_session_factory() as session:
+            row = (
+                await session.execute(
+                    select(TripOutbox)
+                    .where(
+                        TripOutbox.event_id == event_id,
+                        TripOutbox.claim_token == claim_token,
+                    )
+                    .with_for_update()
                 )
-                .with_for_update()
-            )
-        ).scalar_one_or_none()
+            ).scalar_one_or_none()
 
-        if row is None:
-            logger.warning("Outbox %s: claim lost before publish finalization", event_id)
-            return False
+            if row is None:
+                logger.warning("Outbox %s: claim lost before publish finalization", event_id)
+                return False
 
-        message = _build_message(row)
-        now = _now_utc()
-        publish_error: Exception | None = None
+            message = _build_message(row)
+            now = _now_utc()
+            publish_error: Exception | None = None
 
-        try:
-            await broker.publish(message)
-        except Exception as exc:  # pragma: no cover - exercised through worker tests
-            publish_error = exc
+            try:
+                await broker.publish(message)
+            except Exception as exc:  # pragma: no cover - exercised through worker tests
+                publish_error = exc
+
+            if publish_error is None:
+                row.publish_status = OutboxPublishStatus.PUBLISHED
+                row.published_at_utc = now
+                row.attempt_count = 0
+                row.next_attempt_at_utc = None
+                row.last_error_code = None
+            else:
+                row.attempt_count += 1
+                row.last_error_code = str(publish_error)[:100]
+                if row.attempt_count >= settings.outbox_relay_max_failures:
+                    row.publish_status = OutboxPublishStatus.DEAD_LETTER
+                    row.next_attempt_at_utc = None
+                else:
+                    row.publish_status = OutboxPublishStatus.FAILED
+                    row.next_attempt_at_utc = _outbox_next_attempt_at(row.attempt_count)
+
+            row.claim_token = None
+            row.claim_expires_at_utc = None
+            row.claimed_by_worker = None
+            await session.commit()
 
         if publish_error is None:
-            row.publish_status = OutboxPublishStatus.PUBLISHED
-            row.published_at_utc = now
-            row.attempt_count = 0
-            row.next_attempt_at_utc = None
-            row.last_error_code = None
+            labels = get_standard_labels()
+            OUTBOX_PUBLISHED_TOTAL.labels(event_name=message.event_name, **labels).inc()
+            logger.info(
+                "Outbox %s: published event %s for %s/%s",
+                message.event_id,
+                message.event_name,
+                message.aggregate_type,
+                message.aggregate_id,
+            )
+            return True
+
+        if row.attempt_count >= settings.outbox_relay_max_failures:
+            labels = get_standard_labels()
+            OUTBOX_DEAD_LETTER_TOTAL.labels(**labels).inc()
+            logger.error(
+                "Outbox %s: DEAD_LETTER after %d consecutive failures: %s",
+                message.event_id,
+                row.attempt_count,
+                publish_error,
+            )
         else:
-            row.attempt_count += 1
-            row.last_error_code = str(publish_error)[:100]
-            if row.attempt_count >= settings.outbox_relay_max_failures:
-                row.publish_status = OutboxPublishStatus.DEAD_LETTER
-                row.next_attempt_at_utc = None
-            else:
-                row.publish_status = OutboxPublishStatus.FAILED
-                row.next_attempt_at_utc = _outbox_next_attempt_at(row.attempt_count)
-
-        row.claim_token = None
-        row.claim_expires_at_utc = None
-        row.claimed_by_worker = None
-        await session.commit()
-
-    if publish_error is None:
-        OUTBOX_PUBLISHED_TOTAL.labels(event_name=message.event_name).inc()
-        logger.info(
-            "Outbox %s: published event %s for %s/%s",
-            message.event_id,
-            message.event_name,
-            message.aggregate_type,
-            message.aggregate_id,
-        )
-        return True
-
-    if row.attempt_count >= settings.outbox_relay_max_failures:
-        OUTBOX_DEAD_LETTER_TOTAL.inc()
-        logger.error(
-            "Outbox %s: DEAD_LETTER after %d consecutive failures: %s",
-            message.event_id,
-            row.attempt_count,
-            publish_error,
-        )
-    else:
-        logger.warning(
-            "Outbox %s: publish failed (attempt %d/%d), next retry at %s: %s",
-            message.event_id,
-            row.attempt_count,
-            settings.outbox_relay_max_failures,
-            row.next_attempt_at_utc,
-            publish_error,
-        )
-    return False
+            logger.warning(
+                "Outbox %s: publish failed (attempt %d/%d), next retry at %s: %s",
+                message.event_id,
+                row.attempt_count,
+                settings.outbox_relay_max_failures,
+                row.next_attempt_at_utc,
+                publish_error,
+            )
+        return False
+    finally:
+        correlation_id.reset(token)
 
 
 # ---------------------------------------------------------------------------

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from uuid import UUID
-
 from fastapi import APIRouter, Depends, Path, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,13 +16,13 @@ from location_service.errors import (
 from location_service.middleware import check_version_match, set_etag
 from location_service.models import RoutePair
 from location_service.processing.approval import approve_route_versions, discard_route_versions
-from location_service.routers.pairs import _get_pair_detail, serialize_pair
+from location_service.routers.pairs import _get_pair_detail, serialize_pair_response
 from location_service.schemas import PairResponse
 
 router = APIRouter(prefix="/v1/pairs", tags=["approval"])
 
 
-def _raise_from_approval_error(pair_id: UUID, exc: ValueError, *, discard: bool = False) -> None:
+def _raise_from_approval_error(pair_id: str, exc: ValueError, *, discard: bool = False) -> None:
     """Translate approval flow ValueError messages into stable API problems."""
     message = str(exc)
     if "not found" in message:
@@ -42,7 +40,7 @@ def _raise_from_approval_error(pair_id: UUID, exc: ValueError, *, discard: bool 
 async def approve_route_pair_draft(
     request: Request,
     response: Response,
-    pair_id: UUID = Path(...),
+    pair_id: str = Path(...),
     db: AsyncSession = Depends(get_db),
 ) -> PairResponse:
     """Promote pending directional drafts to ACTIVE status."""
@@ -58,14 +56,14 @@ async def approve_route_pair_draft(
 
     pair, origin, destination = await _get_pair_detail(db, pair_id)
     set_etag(response, pair.row_version)
-    return serialize_pair(pair, origin, destination)
+    return serialize_pair_response(pair, origin, destination)
 
 
 @router.post("/{pair_id}/discard", response_model=PairResponse)
 async def discard_route_pair_draft(
     request: Request,
     response: Response,
-    pair_id: UUID = Path(...),
+    pair_id: str = Path(...),
     db: AsyncSession = Depends(get_db),
 ) -> PairResponse:
     """Discard pending directional drafts without activating them."""
@@ -81,4 +79,4 @@ async def discard_route_pair_draft(
 
     pair, origin, destination = await _get_pair_detail(db, pair_id)
     set_etag(response, pair.row_version)
-    return serialize_pair(pair, origin, destination)
+    return serialize_pair_response(pair, origin, destination)
