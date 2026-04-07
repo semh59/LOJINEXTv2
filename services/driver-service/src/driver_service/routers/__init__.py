@@ -20,7 +20,7 @@ router = APIRouter(tags=["health"])
 @router.get("/health")
 async def health_check() -> dict[str, str]:
     """Liveness probe that returns immediately."""
-    return {"status": "ok", "service": "driver-service", "version": "0.1.0"}
+    return {"status": "ok", "service": "driver-service"}
 
 
 @router.get("/ready")

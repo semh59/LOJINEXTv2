@@ -88,9 +88,13 @@ async def driver_statement(
                 "from": origin_name,
                 "to": destination_name,
                 "net_weight_kg": trip.net_weight_kg or 0,
+                "tare_weight_kg": trip.tare_weight_kg or 0,
+                "gross_weight_kg": trip.gross_weight_kg or 0,
                 "hour": local_dt.strftime("%H:%M"),
                 "fee": "",
-                "approval": "",
+                "approval": "ONAYLANDI",
+                "trip_no": trip.trip_no,
+                "source_slip_no": trip.source_slip_no or "",
             }
         )
 

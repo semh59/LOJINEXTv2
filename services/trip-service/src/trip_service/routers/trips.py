@@ -244,7 +244,12 @@ def _coerce_actor_type(role: str) -> str:
 
 
 def _apply_status_filter(stmt, status: TripStatus):  # noqa: ANN001
-    """Apply canonical status filters to the given statement."""
+    """Apply canonical status filters to the given statement.
+
+    SOFT_DELETED filter also matches legacy 'CANCELLED' rows (prior schema).
+    """
+    if status == TripStatus.SOFT_DELETED:
+        return stmt.where(TripTrip.status.in_([TripStatus.SOFT_DELETED.value, "CANCELLED"]))
     return stmt.where(TripTrip.status == status.value)
 
 
@@ -842,10 +847,11 @@ async def excel_export_feed(
     """Return structured trip rows for the separate Excel service."""
     del auth
     pagination = parse_pagination(page, per_page)
+    _deleted_statuses = [TripStatus.SOFT_DELETED.value, "CANCELLED"]
     stmt = (
         select(TripTrip)
         .options(selectinload(TripTrip.enrichment), selectinload(TripTrip.evidence))
-        .where(TripTrip.status != TripStatus.SOFT_DELETED.value)
+        .where(TripTrip.status.not_in(_deleted_statuses))
     )
     if status is not None:
         stmt = _apply_status_filter(stmt, status)
@@ -1029,7 +1035,7 @@ async def list_trips(
     if status is not None:
         stmt = _apply_status_filter(stmt, status)
     else:
-        stmt = stmt.where(TripTrip.status != TripStatus.SOFT_DELETED.value)
+        stmt = stmt.where(TripTrip.status.not_in([TripStatus.SOFT_DELETED.value, "CANCELLED"]))
     if source_type is not None:
         stmt = stmt.where(TripTrip.source_type == source_type)
     if driver_id is not None:
@@ -1067,7 +1073,7 @@ async def list_trips(
     )
 
 
-@router.get("/api/v1/trips/{trip_id}")
+@router.get("/api/v1/trips/{trip_id}", response_model=TripResource)
 async def get_trip(
     trip_id: str,
     session: AsyncSession = Depends(get_session),
@@ -1092,7 +1098,7 @@ async def get_trip_timeline(
     return _timeline_item_rows(trip)
 
 
-@router.patch("/api/v1/trips/{trip_id}")
+@router.patch("/api/v1/trips/{trip_id}", response_model=TripResource)
 async def edit_trip(
     trip_id: str,
     body: EditTripRequest,
@@ -1237,7 +1243,7 @@ async def edit_trip(
     return _json_response(200, resource.model_dump(mode="json"), _response_headers_for_trip(trip))
 
 
-@router.post("/api/v1/trips/{trip_id}/approve")
+@router.post("/api/v1/trips/{trip_id}/approve", response_model=TripResource)
 async def approve_trip(
     trip_id: str,
     body: ApproveRequest,
@@ -1297,7 +1303,7 @@ async def approve_trip(
     return _json_response(200, resource.model_dump(mode="json"), _response_headers_for_trip(trip))
 
 
-@router.post("/api/v1/trips/{trip_id}/reject")
+@router.post("/api/v1/trips/{trip_id}/reject", response_model=TripResource)
 async def reject_trip(
     trip_id: str,
     body: RejectRequest,
@@ -1335,7 +1341,7 @@ async def reject_trip(
     return _json_response(200, resource.model_dump(mode="json"), _response_headers_for_trip(trip))
 
 
-@router.post("/api/v1/trips/{base_trip_id}/empty-return", status_code=201)
+@router.post("/api/v1/trips/{base_trip_id}/empty-return", response_model=TripResource, status_code=201)
 async def create_empty_return(
     base_trip_id: str,
     body: EmptyReturnRequest,
@@ -1473,7 +1479,7 @@ async def create_empty_return(
     return _json_response(201, resource_dict, headers)
 
 
-@router.post("/api/v1/trips/{trip_id}/cancel")
+@router.post("/api/v1/trips/{trip_id}/cancel", response_model=TripResource)
 async def cancel_trip(
     trip_id: str,
     request: Request,

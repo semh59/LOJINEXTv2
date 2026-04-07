@@ -117,6 +117,13 @@ async def raw_client(db_engine, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerat
     session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
     app = create_app()
 
+    # D3 fix: Attach a mock broker so /ready broker check passes
+    class _MockBroker:
+        async def check_health(self) -> None:
+            pass
+
+    app.state.broker = _MockBroker()
+
     async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
         async with session_factory() as session:
             yield session

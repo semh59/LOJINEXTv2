@@ -83,8 +83,6 @@ async def test_hard_delete_blocked(
     """Edge Case 31: Hard delete blocked by trips."""
     from unittest.mock import patch
 
-    import httpx
-
     from driver_service.config import settings
 
     monkeypatch.setattr(settings, "enable_hard_delete", True)
@@ -108,12 +106,11 @@ async def test_hard_delete_blocked(
         f"/api/v1/drivers/{driver_id}/soft-delete", json={"reason": "bye"}, headers={**auth_admin, "If-Match": etag}
     )
 
-    # Mock Trip Service as NOT safe to delete
-    mock_response = httpx.Response(
-        200, json={"driver_id": driver_id, "has_references": True, "safe_to_delete": False, "active_trip_count": 1}
-    )
-
-    with patch("httpx.AsyncClient.get", return_value=mock_response):
+    # Mock Trip Service: driver has active trips → NOT safe to delete
+    with patch(
+        "driver_service.routers.maintenance._check_trip_references",
+        return_value=False,
+    ):
         # Attempt hard delete
         hd_resp = await client.post(f"/internal/v1/drivers/{driver_id}/hard-delete", headers=auth_internal)
 

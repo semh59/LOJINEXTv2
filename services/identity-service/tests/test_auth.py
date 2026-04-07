@@ -278,7 +278,7 @@ async def test_validate_bootstrap_state_requires_seeded_superadmin() -> None:
 async def test_health_and_ready_endpoints(client) -> None:
     health_response = await client.get("/health")
     assert health_response.status_code == 200
-    assert health_response.json() == {"status": "ok"}
+    assert health_response.json() == {"status": "ok", "service": "identity-service"}
 
     async with async_session_factory() as session:
         session.add(

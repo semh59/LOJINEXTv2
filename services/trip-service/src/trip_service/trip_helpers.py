@@ -37,6 +37,7 @@ from trip_service.models import (
     TripTripDeleteAudit,
     TripTripEvidence,
 )
+from trip_service.observability import get_standard_labels as get_standard_labels  # re-export for trips.py
 from trip_service.schemas import EnrichmentSummary, EvidenceSummary, TripResource
 from trip_service.state_machine import TripStateMachine
 
@@ -48,12 +49,19 @@ def latest_evidence(trip: TripTrip) -> TripTripEvidence | None:
     """Return the most recent piece of evidence for this trip without lazy-loading."""
     if "evidence" not in trip.__dict__ or not trip.evidence:
         return None
-    return sorted(trip.evidence, key=lambda e: e.created_at_utc, reverse=True)[0]
+    return sorted(trip.evidence, key=lambda e: (e.created_at_utc, e.id), reverse=True)[0]
 
 
 def normalize_trip_status(status: str | TripStatus) -> str:
-    """Return the canonical string value for a trip status."""
-    return status.value if isinstance(status, TripStatus) else str(status)
+    """Return the canonical string value for a trip status.
+
+    Legacy DB rows may carry 'CANCELLED' from a prior schema; these are
+    treated as SOFT_DELETED for all read/serialization purposes.
+    """
+    raw = status.value if isinstance(status, TripStatus) else str(status)
+    if raw == "CANCELLED":
+        return TripStatus.SOFT_DELETED.value
+    return raw
 
 
 def is_deleted_trip_status(status: str) -> bool:

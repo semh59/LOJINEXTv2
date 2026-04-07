@@ -640,3 +640,32 @@ There was similar ambiguity around `active_trip_count` in the new Trip internal 
 ### Status
 
 active
+
+---
+
+## [2026-04-07] Location Service outbox relay implements V2.1 skip-locked concurrency with stale claim recovery
+
+### Context
+
+The Location Service P5 outbox hardening required bridging the reliability gap to reach 100% V2.1 architecture compliance. The previous batch process used simple `PENDING` fetching without proper component isolation, risking duplicate publishes, deadlock overlap during concurrency, and lacking proper DLQ fallback logging (`last_error_code`).
+
+### Decision
+
+- `LocationOutboxModel` was enriched with `last_error_code` and `claim_expires_at_utc`.
+- The outbox relay (`_process_batch`) now actively transitions fetched rows to a `PUBLISHING` status with a 5-minute atomic claim expiry utilizing Postgres `FOR UPDATE SKIP LOCKED`.
+- Commits are executed on a per-event basis within the array loop; any exception sets that single event's `last_error_code` and transitions it to `FAILED` or `DEAD_LETTER` (if retry caps exceed) without aborting adjacent outbox dispatches.
+- Missing `claim_expires_at_utc` allows `outbox_relay` to dynamically republish abandoned `PUBLISHING` rows stuck due to pod crashes mid-execution.
+
+### Alternatives Considered
+
+- Using a single `session.commit()` at the end of the batch: rejected because one faulty broker publish aborts the entire transaction block and increases the duplicate delivery loop.
+- Relying purely on internal memory tracking rather than a persisted `PUBLISHING` state: rejected because it cannot tolerate arbitrary orchestrator evictions or cross-replica collisions.
+
+### Consequences
+
+- Exactly-once processing logic inside outbox batch polling is vastly improved, though at-least-once edge cases remain on network latency as defined historically.
+- Adds two new schema columns to the `location_outbox` table securely verified by strict migration rules.
+
+### Status
+
+active

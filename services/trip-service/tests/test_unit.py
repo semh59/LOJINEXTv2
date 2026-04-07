@@ -328,9 +328,10 @@ def test_apply_status_filter_and_reference_column_helpers() -> None:
     soft_deleted_sql = str(soft_deleted_stmt.compile(compile_kwargs={"literal_binds": True}))
     completed_sql = str(completed_stmt.compile(compile_kwargs={"literal_binds": True}))
 
-    assert "=" in soft_deleted_sql
+    # SOFT_DELETED filter uses IN to also cover legacy 'CANCELLED' rows
+    assert "IN" in soft_deleted_sql
     assert "SOFT_DELETED" in soft_deleted_sql
-    assert "CANCELLED" not in soft_deleted_sql
+    assert "CANCELLED" in soft_deleted_sql
     assert "=" in completed_sql
     assert "COMPLETED" in completed_sql
     assert _reference_column_for_asset_type("DRIVER").key == "driver_id"

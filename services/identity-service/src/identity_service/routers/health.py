@@ -27,7 +27,7 @@ def _as_utc(value: datetime) -> datetime:
 @router.get("/health")
 async def health() -> dict[str, str]:
     """Return a simple liveness probe."""
-    return {"status": "ok"}
+    return {"status": "ok", "service": settings.service_name}
 
 
 @router.get("/ready")

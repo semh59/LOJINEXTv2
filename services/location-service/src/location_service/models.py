@@ -403,6 +403,8 @@ class LocationOutboxModel(Base):
     payload_json: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
     partition_key: Mapped[str] = mapped_column(String(64), nullable=False)
     publish_status: Mapped[str] = mapped_column(String(16), nullable=False, default="PENDING")
+    last_error_code: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    claim_expires_at_utc: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     next_attempt_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

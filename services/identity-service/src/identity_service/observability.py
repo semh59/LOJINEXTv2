@@ -64,7 +64,7 @@ METRICS_LABELS = ["service", "env", "version"]
 HTTP_REQUESTS_TOTAL = Counter(
     "http_requests_total",
     "Total number of HTTP requests",
-    METRICS_LABELS + ["method", "endpoint", "http_status"],
+    METRICS_LABELS + ["method", "endpoint", "status_code"],
 )
 
 HTTP_REQUEST_DURATION_SECONDS = Histogram(

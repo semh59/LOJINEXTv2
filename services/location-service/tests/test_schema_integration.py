@@ -44,7 +44,7 @@ async def test_metrics_endpoint_exposes_prometheus_payload(raw_client: AsyncClie
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/plain")
-    assert "location_api_requests_total" in response.text
+    assert "location_request_duration_seconds" in response.text
 
 
 @pytest.mark.asyncio

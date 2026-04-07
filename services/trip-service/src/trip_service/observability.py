@@ -64,6 +64,11 @@ def setup_logging(level: str = "INFO") -> None:
                 log_entry["correlation_id"] = c_id
             if record.exc_info:
                 log_entry["exception"] = self.formatException(record.exc_info)
+            # Propagate extra fields (e.g. request_id) into the JSON output
+            _standard_attrs = logging.LogRecord("", 0, "", 0, "", (), None).__dict__.keys()
+            for key, value in record.__dict__.items():
+                if key not in _standard_attrs and key not in log_entry:
+                    log_entry[key] = value
             return json_mod.dumps(log_entry)
 
     handler = logging.StreamHandler(sys.stdout)

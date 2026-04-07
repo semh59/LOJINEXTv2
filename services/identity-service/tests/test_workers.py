@@ -30,6 +30,9 @@ class RecordingBroker(EventBroker):
     async def close(self) -> None:
         return None
 
+    async def check_health(self) -> None:
+        pass
+
     async def probe(self) -> tuple[bool, str | None]:
         return True, None
 
@@ -121,7 +124,10 @@ async def test_outbox_failure_does_not_roll_back_other_rows() -> None:
         published_row = await session.get(IdentityOutboxModel, published_id)
     assert failed_row is not None
     assert failed_row.publish_status == "FAILED"
-    assert failed_row.last_error == "RuntimeError: publish failed for identity.user.failed.v1"
+    assert (
+        failed_row.last_error
+        == "RuntimeError: publish failed for identity.user.failed.v1"
+    )
     assert published_row is not None
     assert published_row.publish_status == "PUBLISHED"
 
@@ -144,4 +150,7 @@ async def test_outbox_dead_letters_at_retry_ceiling() -> None:
     assert row is not None
     assert row.publish_status == "DEAD_LETTER"
     assert row.claim_expires_at_utc is None
-    assert row.last_error == "RuntimeError: publish failed for identity.user.dead-letter.v1"
+    assert (
+        row.last_error
+        == "RuntimeError: publish failed for identity.user.dead-letter.v1"
+    )

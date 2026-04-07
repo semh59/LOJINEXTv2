@@ -51,7 +51,7 @@ async def test_kafka_broker_publish_and_close_delegate_to_underlying_clients() -
     captured: dict[str, object] = {}
 
     class FakeProducer:
-        async def produce(self, topic: str, *, key: bytes, value: bytes):
+        async def produce(self, topic: str, *, key: bytes, value: bytes, headers=None):
             captured["topic"] = topic
             captured["key"] = key
             captured["value"] = value

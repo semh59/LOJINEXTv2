@@ -60,7 +60,7 @@ class PrometheusMiddleware(BaseHTTPMiddleware):
             process_time = time.perf_counter() - start_time
             labels = get_standard_labels()
             HTTP_REQUESTS_TOTAL.labels(
-                method=method, endpoint=endpoint, http_status=status_code, **labels
+                method=method, endpoint=endpoint, status_code=status_code, **labels
             ).inc()
             HTTP_REQUEST_DURATION_SECONDS.labels(
                 method=method, endpoint=endpoint, **labels
