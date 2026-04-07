@@ -16,6 +16,7 @@ dependencies = [
     "reportlab>=4.2.0",
     "redis>=5.0.0",
     "platform-auth",
+    "prometheus-client>=0.21.0",
 ]
 
 [project.scripts]

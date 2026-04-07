@@ -41,12 +41,20 @@ class EventBroker(abc.ABC):
         """Raise when the broker is not healthy."""
         ...
 
+    async def probe(self) -> tuple[bool, str | None]:
+        """Compatibility method for readiness checks."""
+        try:
+            await self.check_health()
+            return True, None
+        except Exception as exc:
+            return False, str(exc)
+
 
 class NoopBroker(EventBroker):
     """Swallows events."""
 
     async def publish(self, topic: str, key: str, payload: dict[str, Any]) -> None:
-        del topic, key, payload
+        pass
 
     async def close(self) -> None:
         pass
@@ -60,7 +68,13 @@ class LogBroker(EventBroker):
 
     async def publish(self, topic: str, key: str, payload: dict[str, Any]) -> None:
         c_id = correlation_id.get() or "no-correlation-id"
-        logger.info("EVENT [%s] correlation_id=%s key=%s payload=%s", topic, c_id, key, json.dumps(payload))
+        logger.info(
+            "EVENT [%s] correlation_id=%s key=%s payload=%s",
+            topic,
+            c_id,
+            key,
+            json.dumps(payload),
+        )
 
     async def close(self) -> None:
         pass
@@ -111,13 +125,28 @@ class KafkaBroker(EventBroker):
         return self._admin.list_topics(timeout=5)
 
 
-def create_broker(broker_type: Literal["kafka", "log", "noop"]) -> EventBroker:
+def create_broker(
+    broker_type: Literal["kafka", "log", "noop"] | None = None,
+) -> EventBroker:
     """Factory function to create the appropriate broker."""
-    if broker_type == "kafka":
+    # Location service might not have a BROKER_TYPE settings, so we fallback to Kafka if bootstrap exists
+    if broker_type:
+        resolved = broker_type
+    elif settings.kafka_bootstrap_servers and settings.environment != "dev":
+        resolved = "kafka"
+    elif settings.environment == "dev":
+        resolved = "log"
+    else:
+        resolved = "noop"
+
+    if resolved == "kafka":
+        if AIOProducer is None:
+            # confluent-kafka not installed (e.g. test environment) — fall back to log broker
+            return LogBroker()
         return KafkaBroker(
             bootstrap_servers=settings.kafka_bootstrap_servers,
             client_id=settings.kafka_client_id,
         )
-    if broker_type == "log":
+    if resolved == "log":
         return LogBroker()
     return NoopBroker()

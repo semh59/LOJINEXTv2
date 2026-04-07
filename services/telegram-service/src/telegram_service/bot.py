@@ -30,6 +30,11 @@ def build_dispatcher() -> Dispatcher:
 
     dp = Dispatcher(storage=storage)
 
+    # Register global middleware
+    from telegram_service.handlers.middleware import AuditMiddleware
+
+    dp.update.middleware(AuditMiddleware())
+
     # Register handler routers
     from telegram_service.handlers.common import router as common_router
     from telegram_service.handlers.slip import router as slip_router

@@ -110,7 +110,7 @@ class RoutePair(Base):
             name="chk_route_pairs_pending_pointers_atomic",
         ),
         Index(
-            "idx_route_pairs_live_unique",
+            "ix_location_route_pairs_live_unique",
             "origin_location_id",
             "destination_location_id",
             "profile_code",
@@ -184,7 +184,7 @@ class RouteVersion(Base):
 
     __table_args__ = (
         Index(
-            "idx_route_versions_active_unique",
+            "ix_location_route_versions_active_unique",
             "route_id",
             unique=True,
             postgresql_where=text("processing_status = 'ACTIVE'"),
@@ -274,8 +274,9 @@ class ProcessingRun(Base):
     )
 
     __table_args__ = (
+        Index("ix_location_processing_runs_route_pair", "route_pair_id"),
         Index(
-            "idx_processing_runs_queued_running_unique",
+            "ix_location_processing_runs_queued_running_unique",
             "route_pair_id",
             unique=True,
             postgresql_where=text("run_status IN ('QUEUED', 'RUNNING')"),
@@ -410,6 +411,16 @@ class LocationOutboxModel(Base):
     next_attempt_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     published_at_utc: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    __table_args__ = (
+        Index("ix_location_outbox_pending", "publish_status", "next_attempt_at_utc", "created_at_utc"),
+        Index("ix_location_outbox_partition", "partition_key"),
+        Index(
+            "ix_location_outbox_claim",
+            "claim_expires_at_utc",
+            postgresql_where=text("publish_status = 'PUBLISHING'"),
+        ),
+    )
+
 
 class LocationAuditLogModel(Base):
     """Deep audit log for location mutations (Point, Pair, Route)."""
@@ -427,3 +438,9 @@ class LocationAuditLogModel(Base):
     reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     request_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index("ix_location_audit_target", "target_type", "target_id", "created_at_utc"),
+        Index("ix_location_audit_actor", "actor_id", "created_at_utc"),
+        Index("ix_location_audit_action", "action_type", "created_at_utc"),
+    )

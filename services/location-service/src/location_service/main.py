@@ -7,6 +7,7 @@ from fastapi import Depends, FastAPI
 from fastapi.exceptions import RequestValidationError
 
 from location_service.auth import trip_service_auth_dependency, user_auth_dependency
+from location_service.broker import create_broker
 from location_service.config import settings, validate_prod_settings
 from location_service.database import engine
 from location_service.errors import (
@@ -33,10 +34,13 @@ from location_service.routers import (
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """FastAPI lifespan events."""
-    del app
     setup_logging()
     validate_prod_settings(settings)
+    # create_broker() handles its own resolution from settings
+    app.state.broker = create_broker()
     yield
+    # EventBroker interface uses close(), not stop()
+    await app.state.broker.close()
     await engine.dispose()
 
 

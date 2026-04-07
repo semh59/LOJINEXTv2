@@ -299,6 +299,14 @@ def _generate_segments(
             known_distance += dist
 
     ratio = 0.0 if total_distance <= 0 else round(known_distance / total_distance, 4)
+
+    # Contiguity invariant: segment_no must be 1..N with no gaps.
+    # This loop is the only writer — a gap here indicates a logic bug.
+    expected = list(range(1, len(segments) + 1))
+    actual = [s.segment_no for s in segments]
+    if actual != expected:
+        raise ValueError(f"Segment numbering is not contiguous: expected {expected}, got {actual}")
+
     return segments, ratio
 
 

@@ -43,6 +43,16 @@ class Settings(BaseSettings):
     outbox_relay_max_failures: int = 10
 
     idempotency_retention_hours: int = 24
+
+    # CORS — comma-separated list of allowed origins for browser frontends.
+    # Dev default allows common local frontend ports. Set explicitly in prod.
+    cors_allowed_origins: list[str] = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:5173",
+        "http://localhost:8080",
+    ]
+
     broker_type: Literal["kafka", "log", "noop"] | None = None
     kafka_bootstrap_servers: str = DEFAULT_KAFKA_BOOTSTRAP
     kafka_topic: str = "trip.events.v1"
@@ -102,6 +112,10 @@ def validate_prod_settings(current: Settings) -> None:
         errors.append("TRIP_KAFKA_BOOTSTRAP_SERVERS must be set to a non-default value in prod.")
     if current.kafka_security_protocol == "PLAINTEXT" and not current.allow_plaintext_in_prod:
         errors.append("TRIP_KAFKA_SECURITY_PROTOCOL cannot be PLAINTEXT in prod without TRIP_ALLOW_PLAINTEXT_IN_PROD.")
+
+    _dev_origins = {"http://localhost:3000", "http://localhost:3001", "http://localhost:5173", "http://localhost:8080"}
+    if set(current.cors_allowed_origins) == _dev_origins or not current.cors_allowed_origins:
+        errors.append("TRIP_CORS_ALLOWED_ORIGINS must be set to production frontend URLs in prod.")
 
     if errors:
         raise ValueError("Production settings invalid: " + " ".join(errors))

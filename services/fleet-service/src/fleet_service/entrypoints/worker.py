@@ -8,7 +8,7 @@ import logging
 from fleet_service.broker import create_broker
 from fleet_service.config import settings
 from fleet_service.database import async_session_factory, engine
-from fleet_service.observability import setup_structured_logging
+from fleet_service.observability import setup_logging
 from fleet_service.timestamps import utc_now_naive
 from fleet_service.worker_heartbeats import record_worker_heartbeat
 from fleet_service.workers.outbox_relay import run_outbox_relay
@@ -38,7 +38,7 @@ async def _idempotency_cleanup_loop() -> None:
                 now = utc_now_naive()
                 stmt = delete(FleetIdempotencyRecord).where(FleetIdempotencyRecord.expires_at_utc < now)
                 result = await session.execute(stmt)
-                count = result.rowcount
+                count = getattr(result, "rowcount", 0)  # Type-safe access for rowcount
                 await session.commit()
                 if count > 0:
                     logger.info("Idempotency cleanup: deleted %d expired records", count)
@@ -49,7 +49,7 @@ async def _idempotency_cleanup_loop() -> None:
 
 async def worker_main() -> None:
     """Start all background worker loops."""
-    setup_structured_logging(logging.INFO)
+    setup_logging(logging.INFO)
     logger.info("Fleet Service worker starting (env=%s)", settings.environment)
 
     broker = create_broker(settings.resolved_broker_type)

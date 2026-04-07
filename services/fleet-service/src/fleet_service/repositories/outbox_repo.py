@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fleet_service.config import settings
@@ -25,7 +25,7 @@ async def insert_outbox_event(session: AsyncSession, event: FleetOutbox) -> None
 
 
 async def dead_letter_by_aggregate(session: AsyncSession, aggregate_type: str, aggregate_id: str) -> int:
-    """Move all PENDING/FAILED outbox rows for an aggregate to DEAD_LETTER.
+    """Move all PENDING/FAILED/PUBLISHING outbox rows for an aggregate to DEAD_LETTER.
 
     Used during hard-delete to prevent publishing events for deleted aggregates.
     Returns number of rows affected.
@@ -35,9 +35,9 @@ async def dead_letter_by_aggregate(session: AsyncSession, aggregate_type: str, a
         .where(
             FleetOutbox.aggregate_type == aggregate_type,
             FleetOutbox.aggregate_id == aggregate_id,
-            FleetOutbox.publish_status.in_(["PENDING", "FAILED"]),
+            FleetOutbox.publish_status.in_(["PENDING", "FAILED", "PUBLISHING"]),
         )
-        .values(publish_status="DEAD_LETTER")
+        .values(publish_status="DEAD_LETTER", claim_expires_at_utc=None)
     )
     result = await session.execute(stmt)
     return result.rowcount  # type: ignore[return-value]
@@ -48,7 +48,8 @@ async def claim_batch(
 ) -> list[FleetOutbox]:
     """Claim a batch of outbox rows for publishing (FOR UPDATE SKIP LOCKED).
 
-    Only rows with next_attempt_at_utc <= now and status in (PENDING, FAILED).
+    Only rows with next_attempt_at_utc <= now and status in (PENDING, FAILED),
+    or rows stuck in PUBLISHING where claim_expires_at_utc < now.
     """
     if now is None:
         now = utc_now_naive()
@@ -57,8 +58,17 @@ async def claim_batch(
     stmt = (
         select(FleetOutbox)
         .where(
-            FleetOutbox.publish_status.in_(["PENDING", "FAILED"]),
-            FleetOutbox.next_attempt_at_utc <= now,
+            or_(
+                and_(
+                    FleetOutbox.publish_status.in_(["PENDING", "FAILED"]),
+                    FleetOutbox.next_attempt_at_utc <= now,
+                ),
+                and_(
+                    FleetOutbox.publish_status == "PUBLISHING",
+                    FleetOutbox.claim_expires_at_utc.is_not(None),
+                    FleetOutbox.claim_expires_at_utc < now,
+                ),
+            )
         )
         .order_by(FleetOutbox.created_at_utc)
         .limit(batch_size)
@@ -74,7 +84,11 @@ async def claim_batch(
     await session.execute(
         update(FleetOutbox)
         .where(FleetOutbox.outbox_id.in_(row_ids))
-        .values(next_attempt_at_utc=claimed_until)
+        .values(
+            publish_status="PUBLISHING",
+            next_attempt_at_utc=claimed_until,
+            claim_expires_at_utc=claimed_until,
+        )
     )
     return rows
 
@@ -88,7 +102,7 @@ async def mark_published(session: AsyncSession, outbox_id: str, now: datetime.da
     stmt = (
         update(FleetOutbox)
         .where(FleetOutbox.outbox_id == outbox_id)
-        .values(publish_status="PUBLISHED", published_at_utc=now)
+        .values(publish_status="PUBLISHED", published_at_utc=now, claim_expires_at_utc=None)
     )
     await session.execute(stmt)
 
@@ -111,6 +125,7 @@ async def mark_failed(
             last_error_code=error_code,
             last_error_message=error_message,
             next_attempt_at_utc=normalized_next_attempt_at,
+            claim_expires_at_utc=None,
         )
     )
     await session.execute(stmt)
@@ -118,5 +133,9 @@ async def mark_failed(
 
 async def mark_dead_letter(session: AsyncSession, outbox_id: str) -> None:
     """Move an outbox row to DEAD_LETTER status."""
-    stmt = update(FleetOutbox).where(FleetOutbox.outbox_id == outbox_id).values(publish_status="DEAD_LETTER")
+    stmt = (
+        update(FleetOutbox)
+        .where(FleetOutbox.outbox_id == outbox_id)
+        .values(publish_status="DEAD_LETTER", claim_expires_at_utc=None)
+    )
     await session.execute(stmt)

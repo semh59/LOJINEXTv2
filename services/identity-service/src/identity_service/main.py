@@ -13,7 +13,10 @@ from identity_service.middleware import PrometheusMiddleware, RequestIdMiddlewar
 from identity_service.routers.admin import router as admin_router
 from identity_service.routers.auth import router as auth_router
 from identity_service.routers.health import router as health_router
-from identity_service.token_service import seed_bootstrap_state, validate_bootstrap_state
+from identity_service.token_service import (
+    seed_bootstrap_state,
+    validate_bootstrap_state,
+)
 
 import logging
 from sqlalchemy import text
@@ -55,6 +58,8 @@ app = FastAPI(
     version="0.1.0",
     description="Central auth, service-token issuance, and JWKS for LOJINEXT",
     lifespan=lifespan,
+    docs_url=None if settings.environment == "prod" else "/docs",
+    redoc_url=None if settings.environment == "prod" else "/redoc",
 )
 
 app.add_middleware(RequestIdMiddleware)

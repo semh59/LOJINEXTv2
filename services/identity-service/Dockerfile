@@ -25,4 +25,7 @@ USER appuser
 
 EXPOSE 8105
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8105/health')" || exit 1
+
 CMD ["identity-api"]

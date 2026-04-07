@@ -16,7 +16,7 @@ from driver_service.errors import (
     validation_exception_handler,
 )
 from driver_service.middleware import PrometheusMiddleware, RequestIdMiddleware
-from driver_service.routers import router as health_router
+from driver_service.routers.health import router as health_router
 from driver_service.routers.import_jobs import router as import_jobs_router
 from driver_service.routers.internal import router as internal_router
 from driver_service.routers.lifecycle import router as lifecycle_router
@@ -29,9 +29,9 @@ logger = logging.getLogger("driver_service")
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: startup and shutdown hooks."""
-    from driver_service.observability import setup_structured_logging
+    from driver_service.observability import setup_logging
 
-    setup_structured_logging(logging.INFO)
+    setup_logging(logging.INFO)
     validate_prod_settings(settings)
 
     broker = create_broker(settings.resolved_broker_type)

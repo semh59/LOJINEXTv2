@@ -14,7 +14,7 @@ _worker_client: httpx.AsyncClient | None = None
 _client_lock = asyncio.Lock()
 
 
-def _inject_correlation_id(request: httpx.Request) -> None:
+async def _inject_correlation_id(request: httpx.Request) -> None:
     """Inject X-Correlation-ID header from ContextVar if present."""
     c_id = correlation_id.get()
     if c_id:

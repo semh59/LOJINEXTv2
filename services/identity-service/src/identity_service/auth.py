@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Callable
+
 from fastapi import Depends, Header, HTTPException
+from platform_auth import PlatformRole
 from platform_auth.dependencies import parse_bearer_token
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,10 +42,18 @@ async def current_user(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-async def require_super_admin(
-    user: dict[str, object] = Depends(current_user),
-) -> dict[str, object]:
-    """Require the caller to be a SUPER_ADMIN."""
-    if user.get("role") != "SUPER_ADMIN":
-        raise HTTPException(status_code=403, detail="SUPER_ADMIN role required.")
-    return user
+def require_role(role_name: str) -> Callable:
+    """Dependency factory to require a specific role."""
+    # Validate at definition time that role_name is a known PlatformRole
+    expected_role = str(PlatformRole(role_name))
+
+    async def _require_role(
+        user: dict[str, object] = Depends(current_user),
+    ) -> dict[str, object]:
+        if user.get("role") != expected_role:
+            raise HTTPException(
+                status_code=403, detail=f"{expected_role} role required."
+            )
+        return user
+
+    return _require_role

@@ -1,0 +1,417 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.3, pytest-9.0.2, pluggy-1.6.0 -- D:\PROJECT\LOJINEXTv2\services\fleet-service\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: D:\PROJECT\LOJINEXTv2\services\fleet-service
+configfile: pyproject.toml
+plugins: anyio-4.13.0, asyncio-1.3.0, cov-7.1.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=session, asyncio_default_test_loop_scope=session
+collecting ... collected 4 items
+
+tests/integration/test_worker_relay.py::test_relay_batch_success FAILED  [ 25%]
+tests/integration/test_worker_relay.py::test_relay_publish_failure_and_retry FAILED [ 50%]
+tests/integration/test_worker_relay.py::test_relay_dead_letter_after_max_retries FAILED [ 75%]
+tests/integration/test_worker_relay.py::test_concurrent_relay_safety FAILED [100%]
+
+================================== FAILURES ===================================
+__________________________ test_relay_batch_success ___________________________
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:550: in _prepare_and_execute
+    self._rows = deque(await prepared_stmt.fetch(*parameters))
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\asyncpg\prepared_stmt.py:177: in fetch
+    data = await self.__bind_execute(args, 0, timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\asyncpg\prepared_stmt.py:268: in __bind_execute
+    data, status, _ = await self.__do_execute(
+.venv\Lib\site-packages\asyncpg\prepared_stmt.py:257: in __do_execute
+    return await executor(protocol)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+asyncpg/protocol/protocol.pyx:205: in bind_execute
+    ???
+E   asyncpg.exceptions.CheckViolationError: new row for relation "fleet_outbox" violates check constraint "fleet_outbox_publish_status_check"
+E   DETAIL:  Failing row contains (01KNMK9HKX6BJJDJZPDCAZYTAZ, VEHICLE, v-1                       , test.event, 1, {"id": "v-1"}, PUBLISHING, 0, null, null, 2026-04-07 18:29:34.710617+00, 2026-04-07 18:29:19.613216+00, null, 2026-04-07 15:29:34.710617+00).
+
+The above exception was the direct cause of the following exception:
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+.venv\Lib\site-packages\sqlalchemy\engine\default.py:952: in do_execute
+    cursor.execute(statement, parameters)
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:585: in execute
+    self._adapt_connection.await_(
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:132: in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:196: in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:563: in _prepare_and_execute
+    self._handle_exception(error)
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:513: in _handle_exception
+    self._adapt_connection._handle_exception(error)
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:797: in _handle_exception
+    raise translated_error from error
+E   sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.IntegrityError: <class 'asyncpg.exceptions.CheckViolationError'>: new row for relation "fleet_outbox" violates check constraint "fleet_outbox_publish_status_check"
+E   DETAIL:  Failing row contains (01KNMK9HKX6BJJDJZPDCAZYTAZ, VEHICLE, v-1                       , test.event, 1, {"id": "v-1"}, PUBLISHING, 0, null, null, 2026-04-07 18:29:34.710617+00, 2026-04-07 18:29:19.613216+00, null, 2026-04-07 15:29:34.710617+00).
+
+The above exception was the direct cause of the following exception:
+tests\integration\test_worker_relay.py:49: in test_relay_batch_success
+    published = await _relay_batch(mock_broker, batch_size=10)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src\fleet_service\workers\outbox_relay.py:75: in _relay_batch
+    rows = await outbox_repo.claim_batch(session, batch_size, _now_utc())
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src\fleet_service\repositories\outbox_repo.py:84: in claim_batch
+    await session.execute(
+.venv\Lib\site-packages\sqlalchemy\ext\asyncio\session.py:449: in execute
+    result = await greenlet_spawn(
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:201: in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\sqlalchemy\orm\session.py:2351: in execute
+    return self._execute_internal(
+.venv\Lib\site-packages\sqlalchemy\orm\session.py:2249: in _execute_internal
+    result: Result[Any] = compile_state_cls.orm_execute_statement(
+.venv\Lib\site-packages\sqlalchemy\orm\bulk_persistence.py:1660: in orm_execute_statement
+    return super().orm_execute_statement(
+.venv\Lib\site-packages\sqlalchemy\orm\context.py:306: in orm_execute_statement
+    result = conn.execute(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1419: in execute
+    return meth(
+.venv\Lib\site-packages\sqlalchemy\sql\elements.py:527: in _execute_on_connection
+    return connection._execute_clauseelement(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1641: in _execute_clauseelement
+    ret = self._execute_context(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1846: in _execute_context
+    return self._exec_single_context(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1986: in _exec_single_context
+    self._handle_dbapi_exception(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:2363: in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+.venv\Lib\site-packages\sqlalchemy\engine\default.py:952: in do_execute
+    cursor.execute(statement, parameters)
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:585: in execute
+    self._adapt_connection.await_(
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:132: in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:196: in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:563: in _prepare_and_execute
+    self._handle_exception(error)
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:513: in _handle_exception
+    self._adapt_connection._handle_exception(error)
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:797: in _handle_exception
+    raise translated_error from error
+E   sqlalchemy.exc.IntegrityError: (sqlalchemy.dialects.postgresql.asyncpg.IntegrityError) <class 'asyncpg.exceptions.CheckViolationError'>: new row for relation "fleet_outbox" violates check constraint "fleet_outbox_publish_status_check"
+E   DETAIL:  Failing row contains (01KNMK9HKX6BJJDJZPDCAZYTAZ, VEHICLE, v-1                       , test.event, 1, {"id": "v-1"}, PUBLISHING, 0, null, null, 2026-04-07 18:29:34.710617+00, 2026-04-07 18:29:19.613216+00, null, 2026-04-07 15:29:34.710617+00).
+E   [SQL: UPDATE fleet_outbox SET publish_status=$1::VARCHAR, next_attempt_at_utc=$2::TIMESTAMP WITHOUT TIME ZONE, claim_expires_at_utc=$3::TIMESTAMP WITH TIME ZONE WHERE fleet_outbox.outbox_id IN ($4::VARCHAR)]
+E   [parameters: ('PUBLISHING', datetime.datetime(2026, 4, 7, 18, 29, 34, 710617), datetime.datetime(2026, 4, 7, 18, 29, 34, 710617), '01KNMK9HKX6BJJDJZPDCAZYTAZ')]
+E   (Background on this error at: https://sqlalche.me/e/20/gkpj)
+---------------------------- Captured stderr setup ----------------------------
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 001_schema_bootstrap, Fleet Service schema bootstrap — 9 tables, 17+ indexes, btree_gist extension.
+INFO  [alembic.runtime.migration] Running upgrade 001_schema_bootstrap -> 002_add_fleet_audit_log, add fleet audit log table
+INFO  [alembic.runtime.migration] Running upgrade 002_add_fleet_audit_log -> 003_final_forensic_parity, final forensic parity
+INFO  [alembic.runtime.migration] Running upgrade 003_final_forensic_parity -> 004_outbox_publish_state, fleet_outbox_publishing_state
+____________________ test_relay_publish_failure_and_retry _____________________
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:550: in _prepare_and_execute
+    self._rows = deque(await prepared_stmt.fetch(*parameters))
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\asyncpg\prepared_stmt.py:177: in fetch
+    data = await self.__bind_execute(args, 0, timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\asyncpg\prepared_stmt.py:268: in __bind_execute
+    data, status, _ = await self.__do_execute(
+.venv\Lib\site-packages\asyncpg\prepared_stmt.py:257: in __do_execute
+    return await executor(protocol)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+asyncpg/protocol/protocol.pyx:205: in bind_execute
+    ???
+E   asyncpg.exceptions.CheckViolationError: new row for relation "fleet_outbox" violates check constraint "fleet_outbox_publish_status_check"
+E   DETAIL:  Failing row contains (01H1234567890ABCDEFGHJKMN2, VEHICLE, v-2                       , test.event, 1, {"id": "v-2"}, PUBLISHING, 0, null, null, 2026-04-07 18:29:36.532487+00, 2026-04-07 18:29:21.451407+00, null, 2026-04-07 15:29:36.532487+00).
+
+The above exception was the direct cause of the following exception:
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+.venv\Lib\site-packages\sqlalchemy\engine\default.py:952: in do_execute
+    cursor.execute(statement, parameters)
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:585: in execute
+    self._adapt_connection.await_(
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:132: in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:196: in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:563: in _prepare_and_execute
+    self._handle_exception(error)
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:513: in _handle_exception
+    self._adapt_connection._handle_exception(error)
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:797: in _handle_exception
+    raise translated_error from error
+E   sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.IntegrityError: <class 'asyncpg.exceptions.CheckViolationError'>: new row for relation "fleet_outbox" violates check constraint "fleet_outbox_publish_status_check"
+E   DETAIL:  Failing row contains (01H1234567890ABCDEFGHJKMN2, VEHICLE, v-2                       , test.event, 1, {"id": "v-2"}, PUBLISHING, 0, null, null, 2026-04-07 18:29:36.532487+00, 2026-04-07 18:29:21.451407+00, null, 2026-04-07 15:29:36.532487+00).
+
+The above exception was the direct cause of the following exception:
+tests\integration\test_worker_relay.py:93: in test_relay_publish_failure_and_retry
+    published = await _relay_batch(mock_broker, batch_size=10)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src\fleet_service\workers\outbox_relay.py:75: in _relay_batch
+    rows = await outbox_repo.claim_batch(session, batch_size, _now_utc())
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src\fleet_service\repositories\outbox_repo.py:84: in claim_batch
+    await session.execute(
+.venv\Lib\site-packages\sqlalchemy\ext\asyncio\session.py:449: in execute
+    result = await greenlet_spawn(
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:201: in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\sqlalchemy\orm\session.py:2351: in execute
+    return self._execute_internal(
+.venv\Lib\site-packages\sqlalchemy\orm\session.py:2249: in _execute_internal
+    result: Result[Any] = compile_state_cls.orm_execute_statement(
+.venv\Lib\site-packages\sqlalchemy\orm\bulk_persistence.py:1660: in orm_execute_statement
+    return super().orm_execute_statement(
+.venv\Lib\site-packages\sqlalchemy\orm\context.py:306: in orm_execute_statement
+    result = conn.execute(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1419: in execute
+    return meth(
+.venv\Lib\site-packages\sqlalchemy\sql\elements.py:527: in _execute_on_connection
+    return connection._execute_clauseelement(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1641: in _execute_clauseelement
+    ret = self._execute_context(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1846: in _execute_context
+    return self._exec_single_context(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1986: in _exec_single_context
+    self._handle_dbapi_exception(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:2363: in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+.venv\Lib\site-packages\sqlalchemy\engine\default.py:952: in do_execute
+    cursor.execute(statement, parameters)
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:585: in execute
+    self._adapt_connection.await_(
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:132: in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:196: in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:563: in _prepare_and_execute
+    self._handle_exception(error)
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:513: in _handle_exception
+    self._adapt_connection._handle_exception(error)
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:797: in _handle_exception
+    raise translated_error from error
+E   sqlalchemy.exc.IntegrityError: (sqlalchemy.dialects.postgresql.asyncpg.IntegrityError) <class 'asyncpg.exceptions.CheckViolationError'>: new row for relation "fleet_outbox" violates check constraint "fleet_outbox_publish_status_check"
+E   DETAIL:  Failing row contains (01H1234567890ABCDEFGHJKMN2, VEHICLE, v-2                       , test.event, 1, {"id": "v-2"}, PUBLISHING, 0, null, null, 2026-04-07 18:29:36.532487+00, 2026-04-07 18:29:21.451407+00, null, 2026-04-07 15:29:36.532487+00).
+E   [SQL: UPDATE fleet_outbox SET publish_status=$1::VARCHAR, next_attempt_at_utc=$2::TIMESTAMP WITHOUT TIME ZONE, claim_expires_at_utc=$3::TIMESTAMP WITH TIME ZONE WHERE fleet_outbox.outbox_id IN ($4::VARCHAR)]
+E   [parameters: ('PUBLISHING', datetime.datetime(2026, 4, 7, 18, 29, 36, 532487), datetime.datetime(2026, 4, 7, 18, 29, 36, 532487), '01H1234567890ABCDEFGHJKMN2')]
+E   (Background on this error at: https://sqlalche.me/e/20/gkpj)
+__________________ test_relay_dead_letter_after_max_retries ___________________
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:550: in _prepare_and_execute
+    self._rows = deque(await prepared_stmt.fetch(*parameters))
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\asyncpg\prepared_stmt.py:177: in fetch
+    data = await self.__bind_execute(args, 0, timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\asyncpg\prepared_stmt.py:268: in __bind_execute
+    data, status, _ = await self.__do_execute(
+.venv\Lib\site-packages\asyncpg\prepared_stmt.py:257: in __do_execute
+    return await executor(protocol)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+asyncpg/protocol/protocol.pyx:205: in bind_execute
+    ???
+E   asyncpg.exceptions.CheckViolationError: new row for relation "fleet_outbox" violates check constraint "fleet_outbox_publish_status_check"
+E   DETAIL:  Failing row contains (01H1234567890ABCDEFGHJKMN3, VEHICLE, v-3                       , test.event, 1, {"id": "v-3"}, PUBLISHING, 4, null, null, 2026-04-07 18:29:38.206404+00, 2026-04-07 18:29:23.08197+00, null, 2026-04-07 15:29:38.206404+00).
+
+The above exception was the direct cause of the following exception:
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+.venv\Lib\site-packages\sqlalchemy\engine\default.py:952: in do_execute
+    cursor.execute(statement, parameters)
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:585: in execute
+    self._adapt_connection.await_(
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:132: in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:196: in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:563: in _prepare_and_execute
+    self._handle_exception(error)
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:513: in _handle_exception
+    self._adapt_connection._handle_exception(error)
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:797: in _handle_exception
+    raise translated_error from error
+E   sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.IntegrityError: <class 'asyncpg.exceptions.CheckViolationError'>: new row for relation "fleet_outbox" violates check constraint "fleet_outbox_publish_status_check"
+E   DETAIL:  Failing row contains (01H1234567890ABCDEFGHJKMN3, VEHICLE, v-3                       , test.event, 1, {"id": "v-3"}, PUBLISHING, 4, null, null, 2026-04-07 18:29:38.206404+00, 2026-04-07 18:29:23.08197+00, null, 2026-04-07 15:29:38.206404+00).
+
+The above exception was the direct cause of the following exception:
+tests\integration\test_worker_relay.py:139: in test_relay_dead_letter_after_max_retries
+    await _relay_batch(mock_broker, batch_size=1)
+src\fleet_service\workers\outbox_relay.py:75: in _relay_batch
+    rows = await outbox_repo.claim_batch(session, batch_size, _now_utc())
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src\fleet_service\repositories\outbox_repo.py:84: in claim_batch
+    await session.execute(
+.venv\Lib\site-packages\sqlalchemy\ext\asyncio\session.py:449: in execute
+    result = await greenlet_spawn(
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:201: in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\sqlalchemy\orm\session.py:2351: in execute
+    return self._execute_internal(
+.venv\Lib\site-packages\sqlalchemy\orm\session.py:2249: in _execute_internal
+    result: Result[Any] = compile_state_cls.orm_execute_statement(
+.venv\Lib\site-packages\sqlalchemy\orm\bulk_persistence.py:1660: in orm_execute_statement
+    return super().orm_execute_statement(
+.venv\Lib\site-packages\sqlalchemy\orm\context.py:306: in orm_execute_statement
+    result = conn.execute(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1419: in execute
+    return meth(
+.venv\Lib\site-packages\sqlalchemy\sql\elements.py:527: in _execute_on_connection
+    return connection._execute_clauseelement(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1641: in _execute_clauseelement
+    ret = self._execute_context(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1846: in _execute_context
+    return self._exec_single_context(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1986: in _exec_single_context
+    self._handle_dbapi_exception(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:2363: in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+.venv\Lib\site-packages\sqlalchemy\engine\default.py:952: in do_execute
+    cursor.execute(statement, parameters)
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:585: in execute
+    self._adapt_connection.await_(
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:132: in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:196: in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:563: in _prepare_and_execute
+    self._handle_exception(error)
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:513: in _handle_exception
+    self._adapt_connection._handle_exception(error)
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:797: in _handle_exception
+    raise translated_error from error
+E   sqlalchemy.exc.IntegrityError: (sqlalchemy.dialects.postgresql.asyncpg.IntegrityError) <class 'asyncpg.exceptions.CheckViolationError'>: new row for relation "fleet_outbox" violates check constraint "fleet_outbox_publish_status_check"
+E   DETAIL:  Failing row contains (01H1234567890ABCDEFGHJKMN3, VEHICLE, v-3                       , test.event, 1, {"id": "v-3"}, PUBLISHING, 4, null, null, 2026-04-07 18:29:38.206404+00, 2026-04-07 18:29:23.08197+00, null, 2026-04-07 15:29:38.206404+00).
+E   [SQL: UPDATE fleet_outbox SET publish_status=$1::VARCHAR, next_attempt_at_utc=$2::TIMESTAMP WITHOUT TIME ZONE, claim_expires_at_utc=$3::TIMESTAMP WITH TIME ZONE WHERE fleet_outbox.outbox_id IN ($4::VARCHAR)]
+E   [parameters: ('PUBLISHING', datetime.datetime(2026, 4, 7, 18, 29, 38, 206404), datetime.datetime(2026, 4, 7, 18, 29, 38, 206404), '01H1234567890ABCDEFGHJKMN3')]
+E   (Background on this error at: https://sqlalche.me/e/20/gkpj)
+________________________ test_concurrent_relay_safety _________________________
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:550: in _prepare_and_execute
+    self._rows = deque(await prepared_stmt.fetch(*parameters))
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\asyncpg\prepared_stmt.py:177: in fetch
+    data = await self.__bind_execute(args, 0, timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\asyncpg\prepared_stmt.py:268: in __bind_execute
+    data, status, _ = await self.__do_execute(
+.venv\Lib\site-packages\asyncpg\prepared_stmt.py:257: in __do_execute
+    return await executor(protocol)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+asyncpg/protocol/protocol.pyx:205: in bind_execute
+    ???
+E   asyncpg.exceptions.CheckViolationError: new row for relation "fleet_outbox" violates check constraint "fleet_outbox_publish_status_check"
+E   DETAIL:  Failing row contains (01KNMK9PB84NBSZETGTKJC9MNQ, VEHICLE, v-0                       , test.event, 1, {"i": 0}, PUBLISHING, 0, null, null, 2026-04-07 18:29:39.553334+00, 2026-04-07 18:29:24.456372+00, null, 2026-04-07 15:29:39.553334+00).
+
+The above exception was the direct cause of the following exception:
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+.venv\Lib\site-packages\sqlalchemy\engine\default.py:952: in do_execute
+    cursor.execute(statement, parameters)
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:585: in execute
+    self._adapt_connection.await_(
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:132: in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:196: in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:563: in _prepare_and_execute
+    self._handle_exception(error)
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:513: in _handle_exception
+    self._adapt_connection._handle_exception(error)
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:797: in _handle_exception
+    raise translated_error from error
+E   sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.IntegrityError: <class 'asyncpg.exceptions.CheckViolationError'>: new row for relation "fleet_outbox" violates check constraint "fleet_outbox_publish_status_check"
+E   DETAIL:  Failing row contains (01KNMK9PB84NBSZETGTKJC9MNQ, VEHICLE, v-0                       , test.event, 1, {"i": 0}, PUBLISHING, 0, null, null, 2026-04-07 18:29:39.553334+00, 2026-04-07 18:29:24.456372+00, null, 2026-04-07 15:29:39.553334+00).
+
+The above exception was the direct cause of the following exception:
+tests\integration\test_worker_relay.py:194: in test_concurrent_relay_safety
+    results = await asyncio.gather(_relay_batch(mock_broker, batch_size=5), _relay_batch(mock_broker, batch_size=5))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src\fleet_service\workers\outbox_relay.py:75: in _relay_batch
+    rows = await outbox_repo.claim_batch(session, batch_size, _now_utc())
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src\fleet_service\repositories\outbox_repo.py:84: in claim_batch
+    await session.execute(
+.venv\Lib\site-packages\sqlalchemy\ext\asyncio\session.py:449: in execute
+    result = await greenlet_spawn(
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:201: in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\sqlalchemy\orm\session.py:2351: in execute
+    return self._execute_internal(
+.venv\Lib\site-packages\sqlalchemy\orm\session.py:2249: in _execute_internal
+    result: Result[Any] = compile_state_cls.orm_execute_statement(
+.venv\Lib\site-packages\sqlalchemy\orm\bulk_persistence.py:1660: in orm_execute_statement
+    return super().orm_execute_statement(
+.venv\Lib\site-packages\sqlalchemy\orm\context.py:306: in orm_execute_statement
+    result = conn.execute(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1419: in execute
+    return meth(
+.venv\Lib\site-packages\sqlalchemy\sql\elements.py:527: in _execute_on_connection
+    return connection._execute_clauseelement(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1641: in _execute_clauseelement
+    ret = self._execute_context(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1846: in _execute_context
+    return self._exec_single_context(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1986: in _exec_single_context
+    self._handle_dbapi_exception(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:2363: in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+.venv\Lib\site-packages\sqlalchemy\engine\default.py:952: in do_execute
+    cursor.execute(statement, parameters)
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:585: in execute
+    self._adapt_connection.await_(
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:132: in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:196: in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:563: in _prepare_and_execute
+    self._handle_exception(error)
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:513: in _handle_exception
+    self._adapt_connection._handle_exception(error)
+.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:797: in _handle_exception
+    raise translated_error from error
+E   sqlalchemy.exc.IntegrityError: (sqlalchemy.dialects.postgresql.asyncpg.IntegrityError) <class 'asyncpg.exceptions.CheckViolationError'>: new row for relation "fleet_outbox" violates check constraint "fleet_outbox_publish_status_check"
+E   DETAIL:  Failing row contains (01KNMK9PB84NBSZETGTKJC9MNQ, VEHICLE, v-0                       , test.event, 1, {"i": 0}, PUBLISHING, 0, null, null, 2026-04-07 18:29:39.553334+00, 2026-04-07 18:29:24.456372+00, null, 2026-04-07 15:29:39.553334+00).
+E   [SQL: UPDATE fleet_outbox SET publish_status=$1::VARCHAR, next_attempt_at_utc=$2::TIMESTAMP WITHOUT TIME ZONE, claim_expires_at_utc=$3::TIMESTAMP WITH TIME ZONE WHERE fleet_outbox.outbox_id IN ($4::VARCHAR, $5::VARCHAR, $6::VARCHAR, $7::VARCHAR, $8::VARCHAR)]
+E   [parameters: ('PUBLISHING', datetime.datetime(2026, 4, 7, 18, 29, 39, 553334), datetime.datetime(2026, 4, 7, 18, 29, 39, 553334), '01KNMK9PB84NBSZETGTKJC9MNQ', '01KNMK9PB84NBSZETGTKJC9MNR', '01KNMK9PB84NBSZETGTKJC9MNS', '01KNMK9PB84NBSZETGTKJC9MNT', '01KNMK9PB84NBSZETGTKJC9MNV')]
+E   (Background on this error at: https://sqlalche.me/e/20/gkpj)
+============================== warnings summary ===============================
+tests/integration/test_worker_relay.py::test_relay_batch_success
+  D:\PROJECT\LOJINEXTv2\services\fleet-service\.venv\Lib\site-packages\alembic\config.py:612: DeprecationWarning: No path_separator found in configuration; falling back to legacy splitting on spaces, commas, and colons for prepend_sys_path.  Consider adding path_separator=os to Alembic config.
+    util.warn_deprecated(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/integration/test_worker_relay.py::test_relay_batch_success - sql...
+FAILED tests/integration/test_worker_relay.py::test_relay_publish_failure_and_retry
+FAILED tests/integration/test_worker_relay.py::test_relay_dead_letter_after_max_retries
+FAILED tests/integration/test_worker_relay.py::test_concurrent_relay_safety
+======================== 4 failed, 1 warning in 13.31s ========================

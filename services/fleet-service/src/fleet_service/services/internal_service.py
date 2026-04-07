@@ -68,18 +68,18 @@ async def validate_single(
         )
 
     # TRAILER
-    stmt = select(FleetTrailer).where(FleetTrailer.trailer_id == asset_id)
-    result = await session.execute(stmt)
-    trailer = result.scalar_one_or_none()
-    if not trailer:
+    t_stmt = select(FleetTrailer).where(FleetTrailer.trailer_id == asset_id)
+    t_result = await session.execute(t_stmt)
+    trailer_obj = t_result.scalar_one_or_none()
+    if not trailer_obj:
         return ValidateResponse(exists=False)
     return ValidateResponse(
         exists=True,
-        status=trailer.status,
-        lifecycle_state=trailer.lifecycle_state,
-        is_selectable=trailer.is_selectable,
-        is_usable_for_new_operation=trailer.is_selectable,
-        reason_code=_reason_code(trailer.status, trailer.soft_deleted_at_utc),
+        status=trailer_obj.status,
+        lifecycle_state=trailer_obj.lifecycle_state,
+        is_selectable=trailer_obj.is_selectable,
+        is_usable_for_new_operation=trailer_obj.is_selectable,
+        reason_code=_reason_code(trailer_obj.status, trailer_obj.soft_deleted_at_utc),
     )
 
 
@@ -117,12 +117,12 @@ async def validate_bulk(
                 )
 
     if trailer_ids:
-        stmt = select(FleetTrailer).where(FleetTrailer.trailer_id.in_(trailer_ids))
-        rows = await session.execute(stmt)
-        found = {t.trailer_id: t for t in rows.scalars()}
+        t_stmt = select(FleetTrailer).where(FleetTrailer.trailer_id.in_(trailer_ids))
+        t_rows = await session.execute(t_stmt)
+        found_trailers = {t.trailer_id: t for t in t_rows.scalars()}
         for tid in trailer_ids:
-            t = found.get(tid)
-            if not t:
+            t_obj = found_trailers.get(tid)
+            if not t_obj:
                 results.append(ValidateBulkItemResponse(asset_id=tid, asset_type="TRAILER", exists=False))
             else:
                 results.append(
@@ -130,11 +130,11 @@ async def validate_bulk(
                         asset_id=tid,
                         asset_type="TRAILER",
                         exists=True,
-                        status=t.status,
-                        lifecycle_state=t.lifecycle_state,
-                        is_selectable=t.is_selectable,
-                        is_usable_for_new_operation=t.is_selectable,
-                        reason_code=_reason_code(t.status, t.soft_deleted_at_utc),
+                        status=t_obj.status,
+                        lifecycle_state=t_obj.lifecycle_state,
+                        is_selectable=t_obj.is_selectable,
+                        is_usable_for_new_operation=t_obj.is_selectable,
+                        reason_code=_reason_code(t_obj.status, t_obj.soft_deleted_at_utc),
                     )
                 )
 

@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     auth_service_token_url: str = ""
     auth_service_client_id: str = "fleet-service"
     auth_service_client_secret: str = ""
+    platform_jwt_secret: str | None = None
 
     # --- Feature flags ---
     enable_hard_delete: bool = False

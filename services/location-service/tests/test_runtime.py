@@ -45,6 +45,7 @@ def test_project_scripts_expose_split_runtime_commands() -> None:
     assert pyproject["project"]["scripts"] == {
         "location-api": "location_service.entrypoints.api:main",
         "location-processing-worker": "location_service.entrypoints.processing_worker:main",
+        "location-outbox-worker": "location_service.entrypoints.outbox_worker:main",
     }
 
 

@@ -2,24 +2,12 @@
 
 from __future__ import annotations
 
-import uuid
 from datetime import date
 from typing import Any
 
-import httpx
-
-from telegram_service.auth import issue_service_token
 from telegram_service.config import settings
+from telegram_service.http_clients import get_headers, http_manager
 from telegram_service.schemas import SlipFields, StatementRow, TripIngestResult
-
-
-async def _headers() -> dict[str, str]:
-    token = await issue_service_token()
-    return {
-        "Authorization": f"Bearer {token}",
-        "X-Correlation-ID": str(uuid.uuid4()),
-        "Content-Type": "application/json",
-    }
 
 
 async def ingest_slip(
@@ -60,14 +48,14 @@ async def ingest_slip(
         "normalized_trailer_plate": fields.trailer_plate,
     }
 
-    async with httpx.AsyncClient(timeout=settings.dependency_timeout_seconds) as client:
-        resp = await client.post(
-            f"{settings.trip_service_url}/internal/v1/trips/slips/ingest",
-            json=payload,
-            headers=await _headers(),
-        )
-        resp.raise_for_status()
-        return TripIngestResult.model_validate(resp.json())
+    client = http_manager.get_client()
+    resp = await client.post(
+        f"{settings.trip_service_url}/internal/v1/trips/slips/ingest",
+        json=payload,
+        headers=await get_headers(),
+    )
+    resp.raise_for_status()
+    return TripIngestResult.model_validate(resp.json())
 
 
 async def ingest_fallback(
@@ -85,14 +73,14 @@ async def ingest_fallback(
         "fallback_reason": fallback_reason,
     }
 
-    async with httpx.AsyncClient(timeout=settings.dependency_timeout_seconds) as client:
-        resp = await client.post(
-            f"{settings.trip_service_url}/internal/v1/trips/slips/ingest-fallback",
-            json=payload,
-            headers=await _headers(),
-        )
-        resp.raise_for_status()
-        return TripIngestResult.model_validate(resp.json())
+    client = http_manager.get_client()
+    resp = await client.post(
+        f"{settings.trip_service_url}/internal/v1/trips/slips/ingest-fallback",
+        json=payload,
+        headers=await get_headers(),
+    )
+    resp.raise_for_status()
+    return TripIngestResult.model_validate(resp.json())
 
 
 async def get_driver_statement(
@@ -106,30 +94,30 @@ async def get_driver_statement(
     rows: list[StatementRow] = []
     page = 1
 
-    async with httpx.AsyncClient(timeout=settings.dependency_timeout_seconds) as client:
-        headers = await _headers()
-        while True:
-            resp = await client.get(
-                f"{settings.trip_service_url}/internal/v1/driver/trips",
-                params={
-                    "driver_id": driver_id,
-                    "date_from": date_from.isoformat(),
-                    "date_to": date_to.isoformat(),
-                    "timezone": timezone,
-                    "page": page,
-                    "per_page": 100,
-                },
-                headers=headers,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            items: list[dict[str, Any]] = data.get("items", [])
-            rows.extend(StatementRow.from_trip_service_row(item) for item in items)
+    client = http_manager.get_client()
+    headers = await get_headers()
+    while True:
+        resp = await client.get(
+            f"{settings.trip_service_url}/internal/v1/driver/trips",
+            params={
+                "driver_id": driver_id,
+                "date_from": date_from.isoformat(),
+                "date_to": date_to.isoformat(),
+                "timezone": timezone,
+                "page": page,
+                "per_page": 100,
+            },
+            headers=headers,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        items: list[dict[str, Any]] = data.get("items", [])
+        rows.extend(StatementRow.from_trip_service_row(item) for item in items)
 
-            meta = data.get("meta", {})
-            if page >= meta.get("total_pages", 1):
-                break
-            page += 1
+        meta = data.get("meta", {})
+        if page >= meta.get("total_pages", 1):
+            break
+        page += 1
 
     return rows
 

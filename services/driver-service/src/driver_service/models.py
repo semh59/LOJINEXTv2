@@ -24,6 +24,7 @@ from sqlalchemy import (
     Text,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -125,12 +126,12 @@ class DriverModel(Base):
             postgresql_where=text("telegram_user_id IS NOT NULL AND status <> 'CANCELLED'"),
         ),
         # Performance indexes
-        Index("idx_driver_status", "status"),
-        Index("idx_driver_phone_e164", "phone_e164"),
-        Index("idx_driver_telegram_user_id", "telegram_user_id"),
-        Index("idx_driver_company_code", "company_driver_code"),
-        Index("idx_driver_created_at", "created_at_utc"),
-        Index("idx_driver_updated_at", "updated_at_utc"),
+        Index("ix_driver_drivers_status", "status"),
+        Index("ix_driver_drivers_phone_e164", "phone_e164"),
+        Index("ix_driver_drivers_telegram_user_id", "telegram_user_id"),
+        Index("ix_driver_drivers_company_code", "company_driver_code"),
+        Index("ix_driver_drivers_created_at", "created_at_utc"),
+        Index("ix_driver_drivers_updated_at", "updated_at_utc"),
     )
 
 
@@ -149,9 +150,9 @@ class DriverAuditLogModel(Base):
         String(26), ForeignKey("driver_drivers.driver_id", ondelete="SET NULL"), nullable=True
     )
     action_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    changed_fields_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    old_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    new_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    changed_fields_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    old_snapshot_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    new_snapshot_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     actor_id: Mapped[str] = mapped_column(String(64), nullable=False)
     actor_role: Mapped[str] = mapped_column(String(32), nullable=False)
     reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -164,8 +165,8 @@ class DriverAuditLogModel(Base):
             "'HARD_DELETE','MERGE','IMPORT_CREATE','IMPORT_UPDATE')",
             name="ck_driver_audit_action_type_valid",
         ),
-        Index("idx_driver_audit_driver_created", "driver_id", "created_at_utc"),
-        Index("idx_driver_audit_actor_created", "actor_id", "created_at_utc"),
+        Index("ix_driver_audit_log_driver_created", "driver_id", "created_at_utc"),
+        Index("ix_driver_audit_log_actor_created", "actor_id", "created_at_utc"),
     )
 
 
@@ -185,22 +186,24 @@ class DriverOutboxModel(Base):
     )
     event_name: Mapped[str] = mapped_column(String(128), nullable=False)
     event_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    payload_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     partition_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     publish_status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING")
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     published_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     next_attempt_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    claim_expires_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
-            "publish_status IN ('PENDING', 'PUBLISHED', 'FAILED', 'DEAD_LETTER')",
+            "publish_status IN ('PENDING', 'PUBLISHING', 'PUBLISHED', 'FAILED', 'DEAD_LETTER')",
             name="ck_driver_outbox_status_valid",
         ),
-        Index("idx_driver_outbox_pending", "publish_status", "next_attempt_at_utc", "created_at_utc"),
-        Index("idx_driver_outbox_driver_id", "driver_id", "created_at_utc"),
+        Index("ix_driver_outbox_pending", "publish_status", "next_attempt_at_utc", "created_at_utc"),
+        Index("ix_driver_outbox_driver_id", "driver_id", "created_at_utc"),
     )
 
 
@@ -228,8 +231,8 @@ class DriverMergeHistoryModel(Base):
             "source_driver_id <> target_driver_id",
             name="ck_driver_merge_different_ids",
         ),
-        Index("idx_driver_merge_source", "source_driver_id"),
-        Index("idx_driver_merge_target", "target_driver_id"),
+        Index("ix_driver_merge_history_source", "source_driver_id"),
+        Index("ix_driver_merge_history_target", "target_driver_id"),
     )
 
 
@@ -254,15 +257,15 @@ class DriverImportJobModel(Base):
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     started_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    error_summary_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_summary_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     __table_args__ = (
         CheckConstraint(
             "status IN ('PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'PARTIAL_SUCCESS', 'CANCELLED')",
             name="ck_driver_import_job_status_valid",
         ),
-        Index("idx_driver_import_jobs_status_created", "status", "created_at_utc"),
-        Index("idx_driver_import_jobs_actor_created", "created_by_actor_id", "created_at_utc"),
+        Index("ix_driver_import_jobs_status_created", "status", "created_at_utc"),
+        Index("ix_driver_import_jobs_actor_created", "created_by_actor_id", "created_at_utc"),
     )
 
 
@@ -279,7 +282,7 @@ class DriverImportJobRowModel(Base):
     import_row_id: Mapped[str] = mapped_column(String(26), primary_key=True)
     import_job_id: Mapped[str] = mapped_column(String(26), nullable=False)
     row_no: Mapped[int] = mapped_column(Integer, nullable=False)
-    source_payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_payload_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     row_status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING")
     resolved_driver_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -291,8 +294,8 @@ class DriverImportJobRowModel(Base):
             "row_status IN ('PENDING', 'CREATED', 'UPDATED', 'SKIPPED', 'FAILED')",
             name="ck_driver_import_row_status_valid",
         ),
-        Index("idx_driver_import_rows_job_seq", "import_job_id", "row_no"),
-        Index("idx_driver_import_rows_status", "import_job_id", "row_status"),
+        Index("ix_driver_import_job_rows_job_seq", "import_job_id", "row_no"),
+        Index("ix_driver_import_job_rows_status", "import_job_id", "row_status"),
     )
 
 
@@ -307,6 +310,6 @@ class WorkerHeartbeat(Base):
     __tablename__ = "driver_worker_heartbeats"
 
     worker_name: Mapped[str] = mapped_column(String(64), primary_key=True)
-    last_heartbeat_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_heartbeat_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     worker_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    worker_metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    worker_metadata_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

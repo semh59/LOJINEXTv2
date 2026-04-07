@@ -18,6 +18,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 _COMPLETE_TRIP_SQL = """
@@ -162,13 +163,13 @@ class TripTrip(Base):
             postgresql_where=text("is_empty_return = true"),
         ),
         Index(
-            "uq_trips_source_slip_no_telegram",
+            "ix_trip_trips_source_slip_no_telegram",
             "source_slip_no",
             unique=True,
             postgresql_where=text("source_type = 'TELEGRAM_TRIP_SLIP' AND source_slip_no IS NOT NULL"),
         ),
         Index(
-            "uq_trips_source_reference_key",
+            "ix_trip_trips_source_reference_key",
             "source_reference_key",
             unique=True,
             postgresql_where=text("source_reference_key IS NOT NULL"),
@@ -195,16 +196,16 @@ class TripTripEvidence(Base):
     normalized_trailer_plate: Mapped[str | None] = mapped_column(String(50), nullable=True)
     origin_name_raw: Mapped[str | None] = mapped_column(String(200), nullable=True)
     destination_name_raw: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    raw_payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_payload_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     trip: Mapped["TripTrip"] = relationship(back_populates="evidence")
 
     __table_args__ = (
-        Index("ix_evidence_trip_id", "trip_id"),
-        Index("ix_evidence_source_slip", "evidence_source", "source_slip_no"),
-        Index("ix_evidence_telegram_msg", "telegram_message_id"),
-        Index("ix_evidence_row_number", "row_number"),
+        Index("ix_trip_evidence_trip_id", "trip_id"),
+        Index("ix_trip_evidence_source_slip", "evidence_source", "source_slip_no"),
+        Index("ix_trip_evidence_telegram_msg", "telegram_message_id"),
+        Index("ix_trip_evidence_row_number", "row_number"),
     )
 
 
@@ -235,9 +236,9 @@ class TripTripEnrichment(Base):
     trip: Mapped["TripTrip"] = relationship(back_populates="enrichment")
 
     __table_args__ = (
-        Index("ix_enrichment_status_retry", "enrichment_status", "next_retry_at_utc"),
-        Index("ix_enrichment_route", "route_status"),
-        Index("ix_enrichment_claim_exp", "claim_expires_at_utc"),
+        Index("ix_trip_enrichment_status_retry", "enrichment_status", "next_retry_at_utc"),
+        Index("ix_trip_enrichment_route", "route_status"),
+        Index("ix_trip_enrichment_claim_exp", "claim_expires_at_utc"),
     )
 
 
@@ -258,8 +259,8 @@ class TripTripTimeline(Base):
     trip: Mapped["TripTrip"] = relationship(back_populates="timeline")
 
     __table_args__ = (
-        Index("ix_timeline_trip_created", "trip_id", "created_at_utc"),
-        Index("ix_timeline_event_created", "event_type", "created_at_utc"),
+        Index("ix_trip_timeline_trip_created", "trip_id", "created_at_utc"),
+        Index("ix_trip_timeline_event_created", "event_type", "created_at_utc"),
     )
 
 
@@ -274,7 +275,7 @@ class TripTripDeleteAudit(Base):
     actor_id: Mapped[str] = mapped_column(String(26), nullable=False)
     actor_role: Mapped[str] = mapped_column(String(32), nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
-    snapshot_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    snapshot_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     deleted_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -292,16 +293,16 @@ class TripAuditLogModel(Base):
     audit_id: Mapped[str] = mapped_column(String(26), primary_key=True)
     trip_id: Mapped[str] = mapped_column(String(26), nullable=False)
     action_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    changed_fields_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    old_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    new_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    changed_fields_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    old_snapshot_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    new_snapshot_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     actor_id: Mapped[str] = mapped_column(String(26), nullable=False)
     actor_role: Mapped[str] = mapped_column(String(32), nullable=False)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     request_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    __table_args__ = (Index("idx_trip_audit_trip_created", "trip_id", "created_at_utc"),)
+    __table_args__ = (Index("ix_trip_audit_log_trip_created", "trip_id", "created_at_utc"),)
 
 
 class TripOutbox(Base):
@@ -315,7 +316,7 @@ class TripOutbox(Base):
     aggregate_version: Mapped[int] = mapped_column(Integer, nullable=False)
     event_name: Mapped[str] = mapped_column(String(50), nullable=False)
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    payload_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     partition_key: Mapped[str] = mapped_column(String(100), nullable=False)
     publish_status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING")
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -328,10 +329,10 @@ class TripOutbox(Base):
     published_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
-        Index("ix_outbox_status_attempt_created", "publish_status", "next_attempt_at_utc", "created_at_utc"),
-        Index("ix_outbox_aggregate", "aggregate_type", "aggregate_id", "created_at_utc"),
-        Index("ix_outbox_event_name", "event_name", "created_at_utc"),
-        Index("ix_outbox_claim_exp", "claim_expires_at_utc"),
+        Index("ix_trip_outbox_status_attempt_created", "publish_status", "next_attempt_at_utc", "created_at_utc"),
+        Index("ix_trip_outbox_aggregate", "aggregate_type", "aggregate_id", "created_at_utc"),
+        Index("ix_trip_outbox_event_name", "event_name", "created_at_utc"),
+        Index("ix_trip_outbox_claim_exp", "claim_expires_at_utc"),
     )
 
 
@@ -344,12 +345,12 @@ class TripIdempotencyRecord(Base):
     endpoint_fingerprint: Mapped[str] = mapped_column(Text, primary_key=True)
     request_hash: Mapped[str] = mapped_column(Text, nullable=False)
     response_status: Mapped[int] = mapped_column(Integer, nullable=False)
-    response_headers_json: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
-    response_body_json: Mapped[str] = mapped_column(Text, nullable=False)
+    response_headers_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    response_body_json: Mapped[dict | str] = mapped_column(JSONB, nullable=False)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    __table_args__ = (Index("ix_idempotency_expires", "expires_at_utc"),)
+    __table_args__ = (Index("ix_trip_idempotency_expires", "expires_at_utc"),)
 
 
 class WorkerHeartbeat(Base):
@@ -358,4 +359,4 @@ class WorkerHeartbeat(Base):
     __tablename__ = "worker_heartbeats"
 
     worker_name: Mapped[str] = mapped_column(String(100), primary_key=True)
-    recorded_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    recorded_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)

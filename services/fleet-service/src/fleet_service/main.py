@@ -23,9 +23,9 @@ logger = logging.getLogger("fleet_service")
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: startup and shutdown hooks."""
-    from fleet_service.observability import setup_structured_logging
+    from fleet_service.observability import setup_logging
 
-    setup_structured_logging(logging.INFO)
+    setup_logging(logging.INFO)
     validate_prod_settings(settings)
 
     logger.info(

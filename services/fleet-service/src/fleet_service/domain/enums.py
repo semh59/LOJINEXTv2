@@ -180,9 +180,10 @@ class ReeferPowerSource(StrEnum):
 
 
 class PublishStatus(StrEnum):
-    """Outbox publish status (no PUBLISHING intermediate state)."""
+    """Outbox publish status (includes PUBLISHING atomic state)."""
 
     PENDING = "PENDING"
+    PUBLISHING = "PUBLISHING"
     PUBLISHED = "PUBLISHED"
     FAILED = "FAILED"
     DEAD_LETTER = "DEAD_LETTER"

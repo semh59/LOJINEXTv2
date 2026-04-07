@@ -403,3 +403,48 @@ async def test_readiness_fails_when_location_probe_is_unavailable(
 
     assert response.status_code == 503
     assert response.json()["checks"]["location_service"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_cors_preflight_returns_allowed_origin(client: AsyncClient) -> None:
+    """Browser OPTIONS preflight must receive Access-Control-Allow-Origin."""
+    response = await client.options(
+        "/api/v1/trips",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "Authorization",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == "http://localhost:3000"
+    assert "GET" in response.headers.get("access-control-allow-methods", "")
+
+
+@pytest.mark.asyncio
+async def test_cors_unknown_origin_is_not_reflected(client: AsyncClient) -> None:
+    """Origins not in the allowed list must not receive ACAO header."""
+    response = await client.options(
+        "/api/v1/trips",
+        headers={
+            "Origin": "https://evil.example.com",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.headers.get("access-control-allow-origin") != "https://evil.example.com"
+
+
+@pytest.mark.asyncio
+async def test_cors_etag_header_is_exposed(client: AsyncClient) -> None:
+    """ETag must be in Access-Control-Expose-Headers on actual responses so JS can read it.
+
+    Note: access-control-expose-headers is only sent on non-preflight responses,
+    not on OPTIONS preflight (which only sets access-control-allow-headers).
+    """
+    response = await client.get(
+        "/api/v1/trips",
+        headers={"Origin": "http://localhost:3000", **ADMIN_HEADERS},
+    )
+    assert response.status_code == 200
+    expose = response.headers.get("access-control-expose-headers", "")
+    assert "ETag" in expose

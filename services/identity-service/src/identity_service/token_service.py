@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import logging
 import secrets
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from uuid import uuid4
 
 import jwt
@@ -16,6 +20,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from identity_service.config import settings
+from identity_service.constants import (
+    ALL_CORE_PERMISSIONS,
+    ROLE_PRIORITY,
+    USER_ROLE_NAMES,
+)
 from identity_service.crypto import (
     decrypt_private_key,
     encrypt_private_key,
@@ -27,6 +36,7 @@ from identity_service.models import (
     IdentityGroupModel,
     IdentityGroupPermissionModel,
     IdentityOutboxModel,
+    IdentityPermissionModel,
     IdentityRefreshTokenModel,
     IdentityServiceClientModel,
     IdentitySigningKeyModel,
@@ -35,16 +45,29 @@ from identity_service.models import (
 )
 from identity_service.password import hash_secret, verify_secret
 
-ROLE_PRIORITY = {
-    str(PlatformRole.SUPER_ADMIN): 3,
-    str(PlatformRole.MANAGER): 2,
-    str(PlatformRole.OPERATOR): 1,
-}
-USER_ROLE_NAMES = set(ROLE_PRIORITY)
+logger = logging.getLogger("identity_service.token_service")
+_executor = ThreadPoolExecutor(max_workers=10)
 
 
 class InvalidUserRoleAssignmentsError(ValueError):
     """Raised when a human user carries SERVICE or unknown group assignments."""
+
+
+async def _run_blocking(func, *args, **kwargs):
+    """Run a blocking function in the background executor to keep event loop responsive."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_executor, partial(func, *args, **kwargs))
+
+
+def _mask_email(email: str) -> str:
+    """Standardized PII masking for emails."""
+    if "@" not in email:
+        return "***"
+    parts = email.split("@")
+    name = parts[0]
+    domain = parts[1]
+    mask = name[0] + "***" + (name[-1] if len(name) > 1 else "")
+    return f"{mask}@{domain}"
 
 
 def _now_utc() -> datetime:
@@ -102,10 +125,10 @@ def _bootstrap_service_clients() -> list[dict[str, str]]:
     return [item for item in client_defs if isinstance(item, dict)]
 
 
-def _signing_private_key(signing_key: IdentitySigningKeyModel) -> str:
-    """Decrypt the persisted signing key into PEM for short-lived signing operations."""
-    return decrypt_private_key(
-        signing_key.private_key_ciphertext_b64, aad=signing_key.kid
+async def _signing_private_key(signing_key: IdentitySigningKeyModel) -> str:
+    """Decrypt the persisted signing key into PEM using background executor."""
+    return await _run_blocking(
+        decrypt_private_key, signing_key.private_key_ciphertext_b64, aad=signing_key.kid
     )
 
 
@@ -140,11 +163,14 @@ async def ensure_active_signing_key(session: AsyncSession) -> IdentitySigningKey
 
     private_key, public_key = generate_rsa_keypair()
     kid = _new_ulid()
+    private_key_ciphertext = await _run_blocking(
+        encrypt_private_key, private_key, aad=kid
+    )
     key = IdentitySigningKeyModel(
         kid=kid,
         algorithm=settings.auth_jwt_algorithm,
         public_key_pem=public_key,
-        private_key_ciphertext_b64=encrypt_private_key(private_key, aad=kid),
+        private_key_ciphertext_b64=private_key_ciphertext,
         private_key_kek_version=require_kek_version(),
         is_active=True,
         created_at_utc=_now_utc(),
@@ -216,7 +242,30 @@ async def seed_bootstrap_state(session: AsyncSession) -> None:
                 )
             )
 
-    await ensure_active_signing_key(session)
+    # 4. Ensure Permissions exist (Ultra-Deep Bootstrap)
+    for p_key in ALL_CORE_PERMISSIONS:
+        perm = await session.get(IdentityPermissionModel, p_key)
+        if not perm:
+            perm = IdentityPermissionModel(
+                permission_key=p_key, description=f"Core permission: {p_key}"
+            )
+            session.add(perm)
+
+    # 5. Map SUPER_ADMIN to all permissions
+    sa_group = await session.get(IdentityGroupModel, str(PlatformRole.SUPER_ADMIN))
+    if sa_group:
+        for p_key in ALL_CORE_PERMISSIONS:
+            gp = await session.get(
+                IdentityGroupPermissionModel, (sa_group.group_id, p_key)
+            )
+            if not gp:
+                gp = IdentityGroupPermissionModel(
+                    group_id=sa_group.group_id, permission_key=p_key
+                )
+                session.add(gp)
+
+    await session.commit()
+    logger.info("Bootstrap state synchronized (Users, Groups, Permissions).")
 
 
 async def validate_bootstrap_state(session: AsyncSession) -> None:
@@ -329,17 +378,17 @@ async def _write_outbox(
 
 
 def serialize_user(
-    user: IdentityUserModel, *, mask_pii: bool = False
+    user: IdentityUserModel,
+    *,
+    mask_pii: bool = False,
+    groups: list[str] | None = None,
+    permissions: list[str] | None = None,
 ) -> dict[str, object]:
     email = user.email
-    if mask_pii and "@" in email:
-        parts = email.split("@")
-        name = parts[0]
-        domain = parts[1]
-        mask = name[0] + "***" + (name[-1] if len(name) > 1 else "")
-        email = f"{mask}@{domain}"
+    if mask_pii:
+        email = _mask_email(email)
 
-    return {
+    data: dict[str, object] = {
         "user_id": user.user_id,
         "username": user.username,
         "email": email,
@@ -351,6 +400,11 @@ def serialize_user(
         if user.updated_at_utc
         else None,
     }
+    if groups is not None:
+        data["groups"] = sorted(groups)
+    if permissions is not None:
+        data["permissions"] = sorted(permissions)
+    return data
 
 
 async def build_user_profile(
@@ -387,7 +441,7 @@ async def authenticate_user(
     return user
 
 
-def _issue_user_access_token(
+async def _issue_user_access_token(
     signing_key: IdentitySigningKeyModel,
     private_key_pem: str,
     *,
@@ -408,14 +462,15 @@ def _issue_user_access_token(
         "exp": now + settings.access_token_ttl_seconds,
         "jti": uuid4().hex,
     }
-    return issue_token(
+    return await _run_blocking(
+        issue_token,
         payload,
         _signing_auth_settings(private_key_pem, signing_key.public_key_pem),
         headers={"kid": signing_key.kid},
     )
 
 
-def _issue_service_access_token(
+async def _issue_service_access_token(
     signing_key: IdentitySigningKeyModel,
     private_key_pem: str,
     *,
@@ -435,7 +490,8 @@ def _issue_service_access_token(
         "jti": uuid4().hex,  # Guaranteed uniqueness
         "typ": "S2S",  # Explicitly mark as Service-to-Service
     }
-    return issue_token(
+    return await _run_blocking(
+        issue_token,
         payload,
         _signing_auth_settings(private_key_pem, signing_key.public_key_pem),
         headers={"kid": signing_key.kid},
@@ -448,8 +504,8 @@ async def issue_token_pair(
     """Issue and persist an access/refresh token pair for a user."""
     profile = await build_user_profile(session, user)
     signing_key = await ensure_active_signing_key(session)
-    private_key_pem = _signing_private_key(signing_key)
-    access_token = _issue_user_access_token(
+    private_key_pem = await _signing_private_key(signing_key)
+    access_token = await _issue_user_access_token(
         signing_key,
         private_key_pem=private_key_pem,
         user_id=user.user_id,
@@ -542,9 +598,9 @@ async def issue_service_token(
                 "Service token audience must match the platform audience or a registered service."
             )
     signing_key = await ensure_active_signing_key(session)
-    access_token = _issue_service_access_token(
+    access_token = await _issue_service_access_token(
         signing_key,
-        private_key_pem=_signing_private_key(signing_key),
+        private_key_pem=await _signing_private_key(signing_key),
         service_name=client.service_name,
         audience=audience or settings.auth_audience,
     )

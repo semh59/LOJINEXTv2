@@ -37,6 +37,7 @@ import pytest_asyncio  # noqa: E402
 from alembic.config import Config  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
 from fastapi.exceptions import RequestValidationError  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
 from platform_auth_testing import install_jwks_urlopen_mock  # noqa: E402
 from sqlalchemy import text  # noqa: E402
@@ -261,8 +262,16 @@ async def client(db_engine, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[A
         return True
 
     test_app = FastAPI(lifespan=noop_lifespan)
-    test_app.add_middleware(RequestIdMiddleware)
     test_app.add_middleware(PrometheusMiddleware)
+    test_app.add_middleware(RequestIdMiddleware)
+    test_app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000", "http://localhost:5173"],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "If-Match", "Idempotency-Key", "X-Idempotency-Key"],
+        expose_headers=["ETag", "X-Correlation-ID"],
+    )
     test_app.add_exception_handler(ProblemDetailError, problem_detail_handler)  # type: ignore[arg-type]
     test_app.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore[arg-type]
     test_app.include_router(health.router)

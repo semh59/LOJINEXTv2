@@ -115,6 +115,9 @@ def _decode_claims(authorization: str | None):
     except TokenInvalidError as exc:
         detail = str(exc).strip() or None
         raise driver_auth_invalid(detail) from exc
+    except Exception as exc:
+        # Fallback for unexpected JWT errors (e.g. InvalidKeyError from PyJWT)
+        raise driver_auth_invalid(str(exc)) from exc
 
 
 async def issue_internal_service_token(*, audience: str | None = None) -> str:

@@ -233,6 +233,7 @@ async def create_trailer(
         payload_json={
             "event_id": event_id,
             "event_name": "fleet.trailer.created.v1",
+            "event_version": 1,
             "occurred_at_utc": now.isoformat(),
             "aggregate_type": "TRAILER",
             "aggregate_id": trailer_id,
@@ -1065,7 +1066,7 @@ async def _audit_hard_delete(
     reason: str,
     request_id: str | None = None,
     ref_check_status: str = ReferenceCheckStatus.NOT_ATTEMPTED,
-    ref_check_json: dict | None = None,
+    ref_check_json: dict[str, Any] | None = None,
 ) -> None:
     """Write a delete audit row for any rejection/success path."""
     snapshot = _build_trailer_snapshot(trailer) if trailer else {}

@@ -45,7 +45,7 @@ def _bearer_headers(payload: dict[str, str]) -> dict[str, str]:
     return {"Authorization": f"Bearer {_token(payload)}"}
 
 
-ADMIN_HEADERS: dict[str, str] = _bearer_headers({"sub": "admin-test-001", "role": "ADMIN"})
+ADMIN_HEADERS: dict[str, str] = _bearer_headers({"sub": "admin-test-001", "role": "MANAGER"})
 SUPER_ADMIN_HEADERS: dict[str, str] = _bearer_headers({"sub": "super-admin-001", "role": "SUPER_ADMIN"})
 INTERNAL_SERVICE_HEADERS: dict[str, str] = _bearer_headers(
     {"sub": "trip-service", "role": "SERVICE", "service": "trip-service"}

@@ -70,8 +70,22 @@ class AuthContext:
 
 
 def _platform_auth_settings(*, audience: str | None = None) -> AuthSettings:
-    """Build shared auth settings for inbound verification and outbound tokens."""
+    """Build shared auth settings for inbound verification and outbound tokens.
+
+    Implements [2026-04-05] Recovery auth bridge fallback to PLATFORM_JWT_SECRET.
+    """
     effective_audience = audience or settings.auth_audience or None
+
+    fallback_secret = getattr(settings, "platform_jwt_secret", None)
+    if fallback_secret and settings.environment != "prod":
+        return AuthSettings(
+            algorithm="HS256",
+            secret_key=fallback_secret,
+            issuer=settings.auth_issuer or None,
+            audience=effective_audience,
+            jwks_url=None,
+        )
+
     return AuthSettings(
         algorithm=settings.auth_jwt_algorithm,
         issuer=settings.auth_issuer or None,

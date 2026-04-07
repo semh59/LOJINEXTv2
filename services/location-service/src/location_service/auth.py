@@ -8,17 +8,15 @@ import urllib.request
 from dataclasses import dataclass
 
 from fastapi import Header
-from platform_auth import AuthSettings, TokenClaims, TokenInvalidError, TokenMissingError, decode_bearer_token
+from platform_auth import AuthSettings, PlatformRole, TokenClaims, TokenInvalidError, TokenMissingError, decode_bearer_token
 from platform_auth.key_provider import build_verification_provider
 
 from location_service.config import settings
 from location_service.errors import location_auth_invalid, location_auth_required, location_forbidden
 
-ROLE_ADMIN = "ADMIN"
-ROLE_MANAGER = "MANAGER"
-ROLE_SUPER_ADMIN = "SUPER_ADMIN"
-ROLE_SERVICE = "SERVICE"
 TRIP_SERVICE_NAME = "trip-service"
+
+_PUBLIC_USER_ROLES = {PlatformRole.MANAGER, PlatformRole.SUPER_ADMIN}
 
 
 @dataclass(frozen=True)
@@ -89,7 +87,7 @@ def require_public_user_token(authorization: str | None) -> AuthContext:
     claims = _decode_claims(authorization)
     role = claims.role.strip()
     actor_id = claims.sub.strip()
-    if role not in {ROLE_ADMIN, ROLE_MANAGER, ROLE_SUPER_ADMIN} or not actor_id:
+    if role not in _PUBLIC_USER_ROLES or not actor_id:
         raise location_forbidden("User token does not have an allowed admin role.")
     return AuthContext(actor_id=actor_id, role=role)
 
@@ -97,7 +95,7 @@ def require_public_user_token(authorization: str | None) -> AuthContext:
 def require_super_admin_token(authorization: str | None) -> AuthContext:
     """Validate that the caller is a SUPER_ADMIN user."""
     auth = require_public_user_token(authorization)
-    if auth.role != ROLE_SUPER_ADMIN:
+    if auth.role != PlatformRole.SUPER_ADMIN:
         raise location_forbidden("This action requires the SUPER_ADMIN role.")
     return auth
 
@@ -108,7 +106,7 @@ def require_trip_service_token(authorization: str | None) -> AuthContext:
     role = claims.role.strip()
     service_name = (claims.service or "").strip()
     actor_id = claims.sub.strip()
-    if role != ROLE_SERVICE or not service_name or not actor_id:
+    if role != PlatformRole.SERVICE or not service_name or not actor_id:
         raise location_forbidden("Token is not a valid service token.")
     if service_name != TRIP_SERVICE_NAME:
         raise location_forbidden("Service token is not allowed for this endpoint.")

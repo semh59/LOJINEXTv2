@@ -281,7 +281,7 @@ class FleetAuditLogModel(Base):
     request_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at_utc: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    __table_args__ = (Index("idx_fleet_audit_agg_created", "aggregate_type", "aggregate_id", "created_at_utc"),)
+    __table_args__ = (Index("ix_fleet_audit_log_agg_created", "aggregate_type", "aggregate_id", "created_at_utc"),)
 
 
 # === 8.8 fleet_outbox ===
@@ -303,6 +303,7 @@ class FleetOutbox(Base):
     last_error_code: Mapped[str | None] = mapped_column(String(64))
     last_error_message: Mapped[str | None] = mapped_column(Text)
     next_attempt_at_utc: Mapped[datetime.datetime] = mapped_column(nullable=False)
+    claim_expires_at_utc: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
     created_at_utc: Mapped[datetime.datetime] = mapped_column(nullable=False)
     published_at_utc: Mapped[datetime.datetime | None] = mapped_column()
 

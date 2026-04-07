@@ -96,6 +96,7 @@ async def test_trip_client_check_usage():
 @pytest.mark.asyncio
 async def test_issue_internal_service_token_uses_service_role(monkeypatch: pytest.MonkeyPatch) -> None:
     """Outbound tokens must be fetched from identity-service with SERVICE role semantics."""
+
     async def fake_get_token(**kwargs) -> str:
         return sign_test_token(
             TEST_JWKS_BUNDLE,

@@ -16,11 +16,11 @@ class LoginRequest(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str = Field(min_length=1)
+    refresh_token: str = Field(min_length=32, max_length=256)
 
 
 class LogoutRequest(BaseModel):
-    refresh_token: str = Field(min_length=1)
+    refresh_token: str = Field(min_length=32, max_length=256)
 
 
 class TokenPairResponse(BaseModel):
@@ -72,6 +72,18 @@ class AdminUpdateUserRequest(BaseModel):
     password: str | None = Field(default=None, min_length=8, max_length=512)
     groups: list[HumanGroupName] | None = None
     is_active: bool | None = None
+
+
+class AuditLogResponse(BaseModel):
+    audit_id: str
+    target_type: str
+    target_id: str
+    action_type: str
+    actor_id: str
+    actor_role: str
+    old_snapshot: str | None = None
+    new_snapshot: str | None = None
+    created_at_utc: datetime
 
 
 class JWKSResponse(BaseModel):

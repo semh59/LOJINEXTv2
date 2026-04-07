@@ -58,8 +58,8 @@ def test_alembic_upgrade_head_creates_live_pair_unique_index() -> None:
                 finally:
                     await engine.dispose()
 
-                assert "idx_route_pairs_live_unique" in route_pair_indexes
-                assert "idx_route_pairs_active_unique" not in route_pair_indexes
+                assert "ix_location_route_pairs_live_unique" in route_pair_indexes
+                assert "idx_route_pairs_live_unique" not in route_pair_indexes
 
             asyncio.run(_verify())
     finally:

@@ -19,6 +19,7 @@ from aiogram.types import (
 from telegram_service.clients import driver_client, trip_client
 from telegram_service.config import settings
 from telegram_service.ocr.extractor import extract_slip_fields
+from telegram_service.observability import BOT_OCR_REQUESTS_TOTAL, get_standard_labels
 from telegram_service.schemas import SlipFields
 
 logger = logging.getLogger(__name__)
@@ -27,8 +28,8 @@ router = Router(name="slip")
 
 
 class SlipStates(StatesGroup):
-    confirming = State()          # Waiting for confirm / edit selection
-    correcting_field = State()    # Waiting for corrected value of one field
+    confirming = State()  # Waiting for confirm / edit selection
+    correcting_field = State()  # Waiting for corrected value of one field
 
 
 # Human-readable field labels for the correction menu
@@ -79,19 +80,20 @@ def _format_confirmation(fields: SlipFields) -> str:
 
 
 def _confirmation_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✅ Onayla", callback_data="slip:confirm"),
-            InlineKeyboardButton(text="✏️ Düzenle", callback_data="slip:edit"),
-        ],
-        [InlineKeyboardButton(text="❌ İptal", callback_data="slip:cancel")],
-    ])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Onayla", callback_data="slip:confirm"),
+                InlineKeyboardButton(text="✏️ Düzenle", callback_data="slip:edit"),
+            ],
+            [InlineKeyboardButton(text="❌ İptal", callback_data="slip:cancel")],
+        ]
+    )
 
 
 def _edit_keyboard() -> InlineKeyboardMarkup:
     buttons = [
-        [InlineKeyboardButton(text=label, callback_data=f"slip:field:{key}")]
-        for key, label in _FIELD_LABELS.items()
+        [InlineKeyboardButton(text=label, callback_data=f"slip:field:{key}")] for key, label in _FIELD_LABELS.items()
     ]
     buttons.append([InlineKeyboardButton(text="◀️ Geri", callback_data="slip:back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -105,10 +107,7 @@ async def handle_photo(message: Message, state: FSMContext) -> None:
 
     driver = await driver_client.lookup_by_telegram_id(message.from_user.id)
     if driver is None:
-        await message.answer(
-            "⛔ Telegram hesabınız sisteme kayıtlı değil.\n"
-            "Lütfen yöneticinize başvurun."
-        )
+        await message.answer("⛔ Telegram hesabınız sisteme kayıtlı değil.\nLütfen yöneticinize başvurun.")
         return
 
     await message.answer("⏳ Fiş okunuyor, lütfen bekleyin...")
@@ -124,7 +123,11 @@ async def handle_photo(message: Message, state: FSMContext) -> None:
 
     try:
         fields = extract_slip_fields(image_bytes.read())
+        # Record OCR Success
+        BOT_OCR_REQUESTS_TOTAL.labels(status="success", **get_standard_labels()).inc()
     except Exception:
+        # Record OCR Failure
+        BOT_OCR_REQUESTS_TOTAL.labels(status="failure", **get_standard_labels()).inc()
         logger.exception("OCR failed for driver %s", driver.driver_id)
         await message.answer(
             "❌ Fiş okunamadı. Lütfen daha net bir fotoğraf çekerek tekrar deneyin.\n"
@@ -171,18 +174,18 @@ async def handle_confirm(callback: CallbackQuery, state: FSMContext) -> None:
                 fields=fields,
             )
             await callback.message.edit_text(
-                f"✅ Seferiniz eklendi.\n"
-                f"📄 Fiş No: <b>{result.trip_no}</b>\n"
-                f"Durum: <b>İnceleme Bekliyor</b>"
+                f"✅ Seferiniz eklendi.\n📄 Fiş No: <b>{result.trip_no}</b>\nDurum: <b>İnceleme Bekliyor</b>"
             )
         except Exception:
             logger.exception("Slip ingest failed for driver %s", driver_id)
-            await callback.message.edit_text(
-                "❌ Sefer eklenirken hata oluştu. Lütfen tekrar deneyin."
-            )
+            await callback.message.edit_text("❌ Sefer eklenirken hata oluştu. Lütfen tekrar deneyin.")
     else:
         # Low confidence or missing required fields → fallback
-        reason = "OCR confidence below threshold" if fields.ocr_confidence < settings.ocr_confidence_threshold else "Missing required fields"
+        reason = (
+            "OCR confidence below threshold"
+            if fields.ocr_confidence < settings.ocr_confidence_threshold
+            else "Missing required fields"
+        )
         try:
             result = await trip_client.ingest_fallback(
                 driver_id=driver_id,
@@ -197,9 +200,7 @@ async def handle_confirm(callback: CallbackQuery, state: FSMContext) -> None:
             )
         except Exception:
             logger.exception("Fallback ingest failed for driver %s", driver_id)
-            await callback.message.edit_text(
-                "❌ Sefer eklenirken hata oluştu. Lütfen tekrar deneyin."
-            )
+            await callback.message.edit_text("❌ Sefer eklenirken hata oluştu. Lütfen tekrar deneyin.")
 
 
 @router.callback_query(SlipStates.confirming, F.data == "slip:edit")
@@ -275,12 +276,14 @@ async def handle_cancel(callback: CallbackQuery, state: FSMContext) -> None:
 
 def _is_full_slip(fields: SlipFields) -> bool:
     """Return True if all fields required for full ingest are present."""
-    return all([
-        fields.truck_plate,
-        fields.origin,
-        fields.destination,
-        fields.trip_date,
-        fields.tare_kg is not None,
-        fields.gross_kg is not None,
-        fields.net_kg is not None,
-    ])
+    return all(
+        [
+            fields.truck_plate,
+            fields.origin,
+            fields.destination,
+            fields.trip_date,
+            fields.tare_kg is not None,
+            fields.gross_kg is not None,
+            fields.net_kg is not None,
+        ]
+    )

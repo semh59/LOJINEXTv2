@@ -1,20 +1,17 @@
-"""FastAPI application entry point for telegram-service."""
-
-from __future__ import annotations
-
 import asyncio
 import logging
+import uuid
 from contextlib import asynccontextmanager
-from typing import Any
 
-import httpx
 from aiogram.types import Update
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
 from telegram_service.bot import build_bot, build_dispatcher
 from telegram_service.config import settings, validate_prod_settings
+from telegram_service.http_clients import http_manager
+from telegram_service.middleware import PrometheusMiddleware, RequestIdMiddleware
+from telegram_service.observability import setup_logging
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +23,9 @@ _polling_task: asyncio.Task[None] | None = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # type: ignore[type-arg]
     global _polling_task
+    setup_logging(settings.log_level)
     validate_prod_settings(settings)
+    await http_manager.start()
 
     if settings.webhook_url:
         await _bot.set_webhook(
@@ -52,11 +51,15 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
     if settings.webhook_url:
         await _bot.delete_webhook()
 
+    await http_manager.stop()
     await _bot.session.close()
     logger.info("Telegram-service shutdown complete")
 
 
 async def _run_polling() -> None:
+    from telegram_service.observability import correlation_id
+
+    correlation_id.set(f"polling-{uuid.uuid4().hex[:8]}")
     await _dp.start_polling(_bot, handle_signals=False)
 
 
@@ -65,6 +68,8 @@ app = FastAPI(
     version=settings.service_version,
     lifespan=lifespan,
 )
+app.add_middleware(RequestIdMiddleware)
+app.add_middleware(PrometheusMiddleware)
 
 
 @app.get("/health")
@@ -77,14 +82,14 @@ async def ready() -> Response:
     """Readiness probe — checks trip-service and driver-service reachability."""
     checks: dict[str, str] = {}
     all_ok = True
+    client = http_manager.get_client()
 
     for name, url in [
         ("trip_service", settings.trip_service_url),
         ("driver_service", settings.driver_service_url),
     ]:
         try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                resp = await client.get(f"{url}/health")
+            resp = await client.get(f"{url}/health", timeout=2.0)
             checks[name] = "ok" if resp.status_code == 200 else "fail"
         except Exception:
             checks[name] = "fail"
@@ -115,6 +120,9 @@ async def webhook(request: Request) -> Response:
 
 def run() -> None:
     import uvicorn
+
+    setup_logging(settings.log_level)
+
     uvicorn.run(
         "telegram_service.main:app",
         host="0.0.0.0",

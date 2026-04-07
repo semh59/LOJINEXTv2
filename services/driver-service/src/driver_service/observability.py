@@ -6,7 +6,6 @@ import sys
 from contextvars import ContextVar
 from datetime import UTC, datetime
 
-
 from prometheus_client import Counter, Histogram
 
 from driver_service.config import settings

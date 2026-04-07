@@ -6,6 +6,8 @@ from aiogram import Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 
+from telegram_service.observability import BOT_COMMANDS_TOTAL, get_standard_labels
+
 router = Router(name="common")
 
 _WELCOME = (
@@ -35,11 +37,13 @@ _HELP = (
 
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
+    BOT_COMMANDS_TOTAL.labels(command="/start", **get_standard_labels()).inc()
     await message.answer(_WELCOME)
 
 
 @router.message(Command("yardim"))
 async def cmd_yardim(message: Message) -> None:
+    BOT_COMMANDS_TOTAL.labels(command="/yardim", **get_standard_labels()).inc()
     await message.answer(_HELP)
 
 
@@ -47,7 +51,5 @@ async def cmd_yardim(message: Message) -> None:
 async def handle_unknown(message: Message) -> None:
     """Catch-all for unrecognized messages."""
     await message.answer(
-        "❓ Anlamadım.\n"
-        "Sefer fişi eklemek için fotoğraf gönderin.\n"
-        "/yardim yazarak komutları görebilirsiniz."
+        "❓ Anlamadım.\nSefer fişi eklemek için fotoğraf gönderin.\n/yardim yazarak komutları görebilirsiniz."
     )

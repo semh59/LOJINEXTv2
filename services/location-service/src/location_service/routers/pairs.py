@@ -66,7 +66,7 @@ def _constraint_name(exc: IntegrityError) -> str:
 
 def _map_integrity_error(exc: IntegrityError) -> ProblemDetailError:
     name = _constraint_name(exc)
-    if "idx_route_pairs_live_unique" in name:
+    if "ix_location_route_pairs_live_unique" in name:
         return route_pair_already_exists_active()
     return internal_error()
 

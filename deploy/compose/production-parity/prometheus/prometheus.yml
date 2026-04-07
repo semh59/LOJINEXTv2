@@ -8,6 +8,11 @@ scrape_configs:
       - targets: ["identity-api:8105"]
     metrics_path: /metrics
 
+  - job_name: "telegram-service"
+    static_configs:
+      - targets: ["telegram-service:8106"]
+    metrics_path: /metrics
+
   - job_name: "trip-api"
     static_configs:
       - targets: ["trip-api:8101"]

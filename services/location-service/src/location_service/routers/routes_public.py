@@ -97,6 +97,13 @@ async def get_route_version_geometry(
     if not segments:
         raise internal_error("Route version geometry is incomplete.")
 
+    # Validate that segment_no is contiguous 1..N before reconstructing coordinates.
+    # A gap would silently produce incorrect geometry.
+    expected_nos = list(range(1, len(segments) + 1))
+    actual_nos = [s.segment_no for s in segments]
+    if actual_nos != expected_nos:
+        raise internal_error("Route version geometry is corrupt: non-contiguous segment numbers.")
+
     coordinates: list[list[float]] = [[float(segments[0].start_longitude_6dp), float(segments[0].start_latitude_6dp)]]
     coordinates.extend([float(segment.end_longitude_6dp), float(segment.end_latitude_6dp)] for segment in segments)
 

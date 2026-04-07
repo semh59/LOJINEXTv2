@@ -1,11 +1,6 @@
-"""Statement FSM handler: /seferlerim → date range → PDF → send."""
-
-from __future__ import annotations
-
-import io
 import logging
 import re
-from datetime import date, timedelta
+from datetime import date
 
 from aiogram import Router
 from aiogram.filters import Command
@@ -15,6 +10,11 @@ from aiogram.types import BufferedInputFile, Message
 
 from telegram_service.clients import driver_client, trip_client
 from telegram_service.config import settings
+from telegram_service.observability import (
+    BOT_COMMANDS_TOTAL,
+    BOT_PDF_GENERATED_TOTAL,
+    get_standard_labels,
+)
 from telegram_service.pdf.generator import generate_statement_pdf
 
 logger = logging.getLogger(__name__)
@@ -43,41 +43,30 @@ def _parse_date(text: str) -> date | None:
 @router.message(Command("seferlerim"))
 async def cmd_seferlerim(message: Message, state: FSMContext) -> None:
     """Entry point: driver requests their trip statement."""
+    BOT_COMMANDS_TOTAL.labels(command="/seferlerim", **get_standard_labels()).inc()
     if message.from_user is None:
         return
 
     driver = await driver_client.lookup_by_telegram_id(message.from_user.id)
     if driver is None:
-        await message.answer(
-            "⛔ Telegram hesabınız sisteme kayıtlı değil.\n"
-            "Lütfen yöneticinize başvurun."
-        )
+        await message.answer("⛔ Telegram hesabınız sisteme kayıtlı değil.\nLütfen yöneticinize başvurun.")
         return
 
     await state.set_state(StatementStates.waiting_date_from)
     await state.update_data(driver_id=driver.driver_id, driver_name=driver.full_name)
-    await message.answer(
-        "📅 Başlangıç tarihini girin:\n"
-        "<i>Örnek: 01.03.2026</i>"
-    )
+    await message.answer("📅 Başlangıç tarihini girin:\n<i>Örnek: 01.03.2026</i>")
 
 
 @router.message(StatementStates.waiting_date_from)
 async def handle_date_from(message: Message, state: FSMContext) -> None:
     date_from = _parse_date(message.text or "")
     if date_from is None:
-        await message.answer(
-            "❗ Geçersiz tarih. Lütfen GG.AA.YYYY formatında girin:\n"
-            "<i>Örnek: 01.03.2026</i>"
-        )
+        await message.answer("❗ Geçersiz tarih. Lütfen GG.AA.YYYY formatında girin:\n<i>Örnek: 01.03.2026</i>")
         return
 
     await state.update_data(date_from=date_from.isoformat())
     await state.set_state(StatementStates.waiting_date_to)
-    await message.answer(
-        "📅 Bitiş tarihini girin:\n"
-        "<i>Örnek: 31.03.2026</i>"
-    )
+    await message.answer("📅 Bitiş tarihini girin:\n<i>Örnek: 31.03.2026</i>")
 
 
 @router.message(StatementStates.waiting_date_to)
@@ -89,10 +78,7 @@ async def handle_date_to(message: Message, state: FSMContext) -> None:
 
     date_to = _parse_date(message.text or "")
     if date_to is None:
-        await message.answer(
-            "❗ Geçersiz tarih. Lütfen GG.AA.YYYY formatında girin:\n"
-            "<i>Örnek: 31.03.2026</i>"
-        )
+        await message.answer("❗ Geçersiz tarih. Lütfen GG.AA.YYYY formatında girin:\n<i>Örnek: 31.03.2026</i>")
         return
 
     if date_to < date_from:
@@ -100,9 +86,7 @@ async def handle_date_to(message: Message, state: FSMContext) -> None:
         return
 
     if (date_to - date_from).days >= settings.max_date_range_days:
-        await message.answer(
-            f"❗ Tarih aralığı en fazla {settings.max_date_range_days} gün olabilir."
-        )
+        await message.answer(f"❗ Tarih aralığı en fazla {settings.max_date_range_days} gün olabilir.")
         return
 
     await state.clear()
@@ -133,6 +117,7 @@ async def handle_date_to(message: Message, state: FSMContext) -> None:
             date_from=date_from,
             date_to=date_to,
         )
+        BOT_PDF_GENERATED_TOTAL.labels(**get_standard_labels()).inc()
     except Exception:
         logger.exception("PDF generation failed for driver %s", driver_id)
         await message.answer("❌ PDF oluşturulurken hata oluştu. Lütfen tekrar deneyin.")

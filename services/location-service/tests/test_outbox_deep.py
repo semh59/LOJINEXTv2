@@ -59,103 +59,109 @@ async def test_outbox_deep_concurrency_isolation(db_engine, override_outbox_sett
 
 
 @pytest.mark.asyncio
-async def test_outbox_deep_stale_claim_recovery(test_session, override_outbox_settings) -> None:
-    # Row that crashed mid-publish an hour ago
-    stale_row = LocationOutboxModel(
-        event_name="test.event.stale",
-        payload_json={"target_id": "123"},
-        partition_key="key",
-        publish_status="PUBLISHING",
-        claim_expires_at_utc=datetime.now(UTC) - timedelta(minutes=60),
-        created_at_utc=datetime.now(UTC) - timedelta(hours=2),
-        next_attempt_at_utc=datetime.now(UTC),
-    )
-    test_session.add(stale_row)
-    await test_session.commit()
-
-    broker = AsyncMock()
-    processed = await _process_batch(test_session, broker)
-
-    # Should have reclaimed the stale row
-    assert processed == 1
-    assert broker.publish.call_count == 1
-
-    await test_session.refresh(stale_row)
-    assert stale_row.publish_status == "PUBLISHED"
-
-
-@pytest.mark.asyncio
-async def test_outbox_deep_broker_fault_dlq_backoff(test_session, override_outbox_settings) -> None:
-    row = LocationOutboxModel(
-        event_name="test.event.dlq",
-        payload_json={"target_id": "dlq_test"},
-        partition_key="key",
-        created_at_utc=datetime.now(UTC),
-        next_attempt_at_utc=datetime.now(UTC),
-    )
-    test_session.add(row)
-    await test_session.commit()
-
-    class FailingBroker:
-        async def publish(self, *args, **kwargs) -> None:
-            raise ConnectionError("Kafka is down")
-
-    broker = FailingBroker()
-
-    for i in range(settings.outbox_retry_max):
-        # Force eligible for retry
-        row.next_attempt_at_utc = datetime.now(UTC) - timedelta(seconds=1)
-        test_session.add(row)
-        await test_session.commit()
-
-        await _process_batch(test_session, broker)
-        await test_session.refresh(row)
-
-        if i < settings.outbox_retry_max - 1:
-            assert row.publish_status == "FAILED"
-            assert row.retry_count == i + 1
-            assert row.last_error_code == "ConnectionError"
-            assert row.next_attempt_at_utc > datetime.now(UTC)  # Backoff
-        else:
-            assert row.publish_status == "DEAD_LETTER"
-            assert row.retry_count == settings.outbox_retry_max
-
-
-@pytest.mark.asyncio
-async def test_outbox_deep_partial_batch_isolation(test_session, override_outbox_settings) -> None:
-    for i in range(3):
-        test_session.add(
-            LocationOutboxModel(
-                event_name=f"test.event.{i}",
-                payload_json={"target_id": f"id_{i}"},
-                partition_key="key",
-                created_at_utc=datetime.now(UTC),
-                next_attempt_at_utc=datetime.now(UTC),
-            )
+async def test_outbox_deep_stale_claim_recovery(db_engine, override_outbox_settings) -> None:
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with session_factory() as session:
+        # Row that crashed mid-publish an hour ago
+        stale_row = LocationOutboxModel(
+            event_name="test.event.stale",
+            payload_json={"target_id": "123"},
+            partition_key="key",
+            publish_status="PUBLISHING",
+            claim_expires_at_utc=datetime.now(UTC) - timedelta(minutes=60),
+            created_at_utc=datetime.now(UTC) - timedelta(hours=2),
+            next_attempt_at_utc=datetime.now(UTC),
         )
-    await test_session.commit()
+        session.add(stale_row)
+        await session.commit()
 
-    class PartialFailingBroker:
-        def __init__(self):
-            self.successes = 0
+        broker = AsyncMock()
+        processed = await _process_batch(session, broker)
 
-        async def publish(self, payload, **kwargs) -> None:
-            if payload["aggregate_id"] == "id_1":
-                raise ValueError("Bad payload schema")
-            self.successes += 1
+        # Should have reclaimed the stale row
+        assert processed == 1
+        assert broker.publish.call_count == 1
 
-    broker = PartialFailingBroker()
-    processed = await _process_batch(test_session, broker)
+        await session.refresh(stale_row)
+        assert stale_row.publish_status == "PUBLISHED"
 
-    # Returns 2 successfully published out of the claimed batch
-    assert processed == 2
-    assert broker.successes == 2
 
-    result = await test_session.execute(select(LocationOutboxModel).order_by(LocationOutboxModel.event_name))
-    rows = result.scalars().all()
+@pytest.mark.asyncio
+async def test_outbox_deep_broker_fault_dlq_backoff(db_engine, override_outbox_settings) -> None:
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with session_factory() as session:
+        row = LocationOutboxModel(
+            event_name="test.event.dlq",
+            payload_json={"target_id": "dlq_test"},
+            partition_key="key",
+            created_at_utc=datetime.now(UTC),
+            next_attempt_at_utc=datetime.now(UTC),
+        )
+        session.add(row)
+        await session.commit()
 
-    # Isolation asserts: failure in middle row didn't block or rollback surrounding rows
-    assert rows[0].publish_status == "PUBLISHED"
-    assert rows[1].publish_status == "FAILED"
-    assert rows[1].last_error_code == "ValueError"
-    assert rows[2].publish_status == "PUBLISHED"
+        class FailingBroker:
+            async def publish(self, *args, **kwargs) -> None:
+                raise ConnectionError("Kafka is down")
+
+        broker = FailingBroker()
+
+        for i in range(settings.outbox_retry_max):
+            # Force eligible for retry
+            row.next_attempt_at_utc = datetime.now(UTC) - timedelta(seconds=1)
+            session.add(row)
+            await session.commit()
+
+            await _process_batch(session, broker)
+            await session.refresh(row)
+
+            if i < settings.outbox_retry_max - 1:
+                assert row.publish_status == "FAILED"
+                assert row.retry_count == i + 1
+                assert row.last_error_code == "ConnectionError"
+                assert row.next_attempt_at_utc > datetime.now(UTC)  # Backoff
+            else:
+                assert row.publish_status == "DEAD_LETTER"
+                assert row.retry_count == settings.outbox_retry_max
+
+
+@pytest.mark.asyncio
+async def test_outbox_deep_partial_batch_isolation(db_engine, override_outbox_settings) -> None:
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with session_factory() as session:
+        for i in range(3):
+            session.add(
+                LocationOutboxModel(
+                    event_name=f"test.event.{i}",
+                    payload_json={"target_id": f"id_{i}"},
+                    partition_key="key",
+                    created_at_utc=datetime.now(UTC),
+                    next_attempt_at_utc=datetime.now(UTC),
+                )
+            )
+        await session.commit()
+
+        class PartialFailingBroker:
+            def __init__(self):
+                self.successes = 0
+
+            async def publish(self, payload, **kwargs) -> None:
+                if payload["aggregate_id"] == "id_1":
+                    raise ValueError("Bad payload schema")
+                self.successes += 1
+
+        broker = PartialFailingBroker()
+        processed = await _process_batch(session, broker)
+
+        # Returns 2 successfully published out of the claimed batch
+        assert processed == 2
+        assert broker.successes == 2
+
+        result = await session.execute(select(LocationOutboxModel).order_by(LocationOutboxModel.event_name))
+        rows = result.scalars().all()
+
+        # Isolation asserts: failure in middle row didn't block or rollback surrounding rows
+        assert rows[0].publish_status == "PUBLISHED"
+        assert rows[1].publish_status == "FAILED"
+        assert rows[1].last_error_code == "ValueError"
+        assert rows[2].publish_status == "PUBLISHED"

@@ -231,6 +231,7 @@ async def create_vehicle(
         payload_json={
             "event_id": event_id,
             "event_name": "fleet.vehicle.created.v1",
+            "event_version": 1,
             "occurred_at_utc": now.isoformat(),
             "aggregate_type": "VEHICLE",
             "aggregate_id": vehicle_id,
@@ -457,6 +458,7 @@ async def patch_vehicle(
             payload_json={
                 "event_id": event_id,
                 "event_name": "fleet.vehicle.updated.v1",
+                "event_version": 1,
                 "occurred_at_utc": now.isoformat(),
                 "aggregate_type": "VEHICLE",
                 "aggregate_id": vehicle_id,
@@ -598,6 +600,7 @@ async def soft_delete_vehicle(
             payload_json={
                 "event_id": event_id,
                 "event_name": "fleet.vehicle.soft_deleted.v1",
+                "event_version": 1,
                 "occurred_at_utc": now.isoformat(),
                 "aggregate_type": "VEHICLE",
                 "aggregate_id": vehicle_id,
@@ -799,6 +802,7 @@ async def hard_delete_vehicle(
             payload_json={
                 "event_id": event_id,
                 "event_name": "fleet.vehicle.hard_deleted.v1",
+                "event_version": 1,
                 "occurred_at_utc": now.isoformat(),
                 "aggregate_type": "VEHICLE",
                 "aggregate_id": vehicle_id,
@@ -934,6 +938,7 @@ async def _lifecycle_transition(
             payload_json={
                 "event_id": event_id,
                 "event_name": event_name,
+                "event_version": 1,
                 "occurred_at_utc": now.isoformat(),
                 "aggregate_type": "VEHICLE",
                 "aggregate_id": vehicle_id,
@@ -963,7 +968,7 @@ async def _audit_hard_delete(
     reason: str,
     request_id: str | None = None,
     ref_check_status: str = ReferenceCheckStatus.NOT_ATTEMPTED,
-    ref_check_json: dict | None = None,
+    ref_check_json: dict[str, Any] | None = None,
 ) -> None:
     """Write a delete audit row for any rejection/success path."""
     snapshot = _build_vehicle_snapshot(vehicle) if vehicle else {}

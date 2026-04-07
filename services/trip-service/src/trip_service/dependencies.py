@@ -68,7 +68,7 @@ def _location_trip_context_url(pair_id: str) -> str:
 
 
 async def _fleet_service_headers() -> dict[str, str]:
-    token = await issue_internal_service_token(audience="fleet-service")
+    token = await issue_internal_service_token()
     headers = {"Authorization": f"Bearer {token}"}
     if c_id := correlation_id.get():
         headers["X-Correlation-ID"] = c_id
@@ -76,7 +76,7 @@ async def _fleet_service_headers() -> dict[str, str]:
 
 
 async def _location_service_headers() -> dict[str, str]:
-    token = await issue_internal_service_token(audience="location-service")
+    token = await issue_internal_service_token()
     headers = {"Authorization": f"Bearer {token}"}
     if c_id := correlation_id.get():
         headers["X-Correlation-ID"] = c_id

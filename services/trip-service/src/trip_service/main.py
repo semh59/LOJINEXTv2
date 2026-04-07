@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 
 from trip_service.broker import create_broker
 from trip_service.config import settings, validate_prod_settings
@@ -51,8 +52,18 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    app.add_middleware(RequestIdMiddleware)
+    # Middleware is applied in reverse add order (last added = outermost = first to receive request).
+    # CORSMiddleware must be outermost so it can intercept OPTIONS preflight before the router.
     app.add_middleware(PrometheusMiddleware)
+    app.add_middleware(RequestIdMiddleware)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_allowed_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "If-Match", "Idempotency-Key", "X-Idempotency-Key"],
+        expose_headers=["ETag", "X-Correlation-ID"],
+    )
 
     app.add_exception_handler(ProblemDetailError, problem_detail_handler)  # type: ignore[arg-type]
     app.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore[arg-type]

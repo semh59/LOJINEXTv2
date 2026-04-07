@@ -1,68 +1,80 @@
-"""Admin endpoints for user management."""
+"""Administrative endpoints for user and audit management."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
-from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import or_, select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from ulid import ULID
 
-from identity_service.auth import require_super_admin
+from identity_service.auth import require_role
 from identity_service.database import get_session
-from identity_service.models import IdentityUserModel
+from identity_service.models import IdentityAuditLogModel, IdentityUserModel
 from identity_service.password import hash_secret
 from identity_service.schemas import (
     AdminCreateUserRequest,
     AdminUpdateUserRequest,
+    AuditLogResponse,
     UserResponse,
 )
 from identity_service.token_service import (
-    InvalidUserRoleAssignmentsError,
+    _now_utc,
+    _new_ulid,
     _write_audit,
-    _write_outbox,
     assign_groups,
     build_user_profile,
     serialize_user,
 )
 
-router = APIRouter(prefix="/admin/v1/users", tags=["identity-admin"])
+router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-def _new_ulid() -> str:
-    return str(ULID())
+@router.get("/v1/users", response_model=list[UserResponse])
+async def list_users(
+    username: str | None = None,
+    session: AsyncSession = Depends(get_session),
+    _admin=Depends(require_role("SUPER_ADMIN")),
+) -> list[UserResponse]:
+    """List and filter users."""
+    query = select(IdentityUserModel)
+    if username:
+        safe_username = username.replace("%", "\\%").replace("_", "\\_")
+        query = query.where(IdentityUserModel.username.ilike(f"%{safe_username}%"))
+
+    result = await session.execute(query)
+    users = result.scalars().all()
+
+    response = []
+    for user in users:
+        profile = await build_user_profile(session, user)
+        response.append(UserResponse(**profile))
+    return response
 
 
-def _now_utc() -> datetime:
-    return datetime.now(UTC)
-
-
-@router.post("", response_model=UserResponse, status_code=201)
+@router.post("/v1/users", response_model=UserResponse, status_code=201)
 async def create_user(
     body: AdminCreateUserRequest,
-    request: Request,
     session: AsyncSession = Depends(get_session),
-    admin: dict[str, object] = Depends(require_super_admin),
+    admin=Depends(require_role("SUPER_ADMIN")),
 ) -> UserResponse:
-    """Create a new managed user."""
+    """Create a new user with group assignments."""
+    # Check if username exists
     existing = await session.execute(
-        select(IdentityUserModel).where(
-            or_(
-                IdentityUserModel.username == body.username,
-                IdentityUserModel.email == str(body.email),
-            )
-        )
+        select(IdentityUserModel).where(IdentityUserModel.username == body.username)
     )
-    if existing.scalar_one_or_none() is not None:
-        raise HTTPException(
-            status_code=409, detail="User with same username or email already exists."
-        )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Username already exists.")
+
+    # Check if email exists
+    existing_email = await session.execute(
+        select(IdentityUserModel).where(IdentityUserModel.email == body.email)
+    )
+    if existing_email.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Email already exists.")
 
     user = IdentityUserModel(
         user_id=_new_ulid(),
         username=body.username,
-        email=str(body.email),
+        email=body.email,
         password_hash=hash_secret(body.password),
         is_active=body.is_active,
         created_at_utc=_now_utc(),
@@ -70,105 +82,112 @@ async def create_user(
     )
     session.add(user)
     await session.flush()
-    await assign_groups(session, user, body.groups)
 
-    admin_actor_id = str(admin.get("user_id", "SYSTEM"))
-    admin_role = str(admin.get("role", "SUPER_ADMIN"))
-    request_id = getattr(request.state, "request_id", None)
+    if body.groups:
+        await assign_groups(session, user, [str(g) for g in body.groups])
 
     await _write_audit(
         session,
         "USER",
         user.user_id,
         "CREATE",
-        admin_actor_id,
-        admin_role,
-        new_snapshot=serialize_user(user, mask_pii=True),
-        request_id=request_id,
-    )
-    await _write_outbox(
-        session,
-        "identity.user.created.v1",
-        {
-            "user_id": user.user_id,
-            "username": user.username,
-            "email": user.email,
-            "occurred_at_utc": _now_utc().isoformat(),
-        },
-        aggregate_id=user.user_id,
+        admin["user_id"],
+        admin["role"],
+        new_snapshot=serialize_user(
+            user, mask_pii=True, groups=[str(g) for g in body.groups]
+        ),
     )
 
     await session.commit()
-    try:
-        return UserResponse(**(await build_user_profile(session, user)))
-    except InvalidUserRoleAssignmentsError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    profile = await build_user_profile(session, user)
+    return UserResponse(**profile)
 
 
-@router.patch("/{user_id}", response_model=UserResponse)
+@router.patch("/v1/users/{user_id}", response_model=UserResponse)
 async def update_user(
     user_id: str,
     body: AdminUpdateUserRequest,
-    request: Request,
     session: AsyncSession = Depends(get_session),
-    admin: dict[str, object] = Depends(require_super_admin),
+    admin=Depends(require_role("SUPER_ADMIN")),
 ) -> UserResponse:
-    """Update a managed user."""
+    """Update user attributes and group memberships."""
     user = await session.get(IdentityUserModel, user_id)
-    if user is None:
+    if not user:
         raise HTTPException(status_code=404, detail="User not found.")
 
-    old_snapshot = serialize_user(user)
+    old_profile = await build_user_profile(session, user)
+    old_snapshot = serialize_user(
+        user,
+        mask_pii=True,
+        groups=old_profile["groups"],
+        permissions=old_profile["permissions"],
+    )
 
-    if body.email is not None:
-        user.email = str(body.email)
-    if body.password is not None:
+    if body.email:
+        user.email = body.email
+    if body.password:
         user.password_hash = hash_secret(body.password)
     if body.is_active is not None:
         user.is_active = body.is_active
-    user.updated_at_utc = _now_utc()
-    if body.groups is not None:
-        await assign_groups(session, user, body.groups)
 
-    # Extract actor info from admin dependency
-    admin_actor_id = str(admin.get("user_id", "SYSTEM"))
-    admin_role = str(admin.get("role", "SUPER_ADMIN"))
-    request_id = getattr(request.state, "request_id", None)
+    user.updated_at_utc = _now_utc()
+
+    if body.groups is not None:
+        await assign_groups(session, user, [str(g) for g in body.groups])
+
+    new_profile = await build_user_profile(session, user)
+    new_snapshot = serialize_user(
+        user,
+        mask_pii=True,
+        groups=new_profile["groups"],
+        permissions=new_profile["permissions"],
+    )
 
     await _write_audit(
         session,
         "USER",
         user.user_id,
         "UPDATE",
-        admin_actor_id,
-        admin_role,
+        admin["user_id"],
+        admin["role"],
         old_snapshot=old_snapshot,
-        new_snapshot=serialize_user(user, mask_pii=True),
-        request_id=request_id,
-    )
-    await _write_outbox(
-        session,
-        "identity.user.updated.v1",
-        {
-            "user_id": user.user_id,
-            "username": user.username,
-            "occurred_at_utc": _now_utc().isoformat(),
-        },
-        aggregate_id=user.user_id,
+        new_snapshot=new_snapshot,
     )
 
-    try:
-        await session.commit()
-    except Exception:
-        await session.rollback()
-        # Check if it's a uniqueness conflict (email)
-        # Note: In a real production app, we'd use a more specific check for the constraint name,
-        # but for this pass, mapping all IntegrityErrors on update to 409 is the target hardening.
-        raise HTTPException(
-            status_code=409, detail="User with same email already exists."
+    await session.commit()
+    return UserResponse(**new_profile)
+
+
+@router.get("/v1/audit", response_model=list[AuditLogResponse])
+async def list_audit_logs(
+    target_id: str | None = None,
+    limit: int = Query(100, le=1000),
+    session: AsyncSession = Depends(get_session),
+    _admin=Depends(require_role("SUPER_ADMIN")),
+) -> list[AuditLogResponse]:
+    """Retrieve audit logs with optional filtering."""
+    query = (
+        select(IdentityAuditLogModel)
+        .order_by(IdentityAuditLogModel.created_at_utc.desc())
+        .limit(limit)
+    )
+    if target_id:
+        query = query.where(IdentityAuditLogModel.target_id == target_id)
+
+    result = await session.execute(query)
+    logs = result.scalars().all()
+
+    return [
+        AuditLogResponse(
+            audit_id=log.audit_id,
+            target_type=log.target_type,
+            target_id=log.target_id,
+            action_type=log.action_type,
+            actor_id=log.actor_id,
+            actor_role=log.actor_role,
+            old_snapshot=log.old_snapshot_json,
+            new_snapshot=log.new_snapshot_json,
+            created_at_utc=log.created_at_utc,
         )
-
-    try:
-        return UserResponse(**(await build_user_profile(session, user)))
-    except InvalidUserRoleAssignmentsError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        for log in logs
+    ]

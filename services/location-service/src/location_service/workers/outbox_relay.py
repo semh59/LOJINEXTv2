@@ -88,7 +88,13 @@ async def _process_batch(session: AsyncSession, broker: EventBroker) -> int:
 
             # V2.1 Standard: Payload must contain aggregate metadata
             # For Location, we use target_id as aggregate_id
-            target_id = row.payload_json.get("target_id") or row.payload_json.get("location_id") or row.outbox_id
+            target_id = (
+                row.payload_json.get("target_id")
+                or row.payload_json.get("location_id")
+                or row.payload_json.get("pair_id")
+                or row.payload_json.get("route_pair_id")
+                or row.outbox_id
+            )
             target_type = row.payload_json.get("target_type") or "LOCATION"
 
             await broker.publish(

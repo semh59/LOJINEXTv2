@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
+
 import os
 import asyncio
 
@@ -34,6 +36,7 @@ _pg_url = (
 os.environ["IDENTITY_DATABASE_URL"] = _pg_url
 
 # Now import the service modules
+from sqlalchemy.ext.asyncio import AsyncSession
 from identity_service.database import engine, async_session_factory  # noqa: E402
 from identity_service.main import app  # noqa: E402
 from identity_service.models import Base  # noqa: E402
@@ -75,3 +78,9 @@ async def client() -> httpx.AsyncClient:
         transport=transport, base_url="http://testserver"
     ) as async_client:
         yield async_client
+
+
+@pytest.fixture
+async def session() -> AsyncGenerator[AsyncSession, None]:
+    async with async_session_factory() as session:
+        yield session
