@@ -52,3 +52,7 @@ wheels/
 .DS_Store
 Thumbs.db
 services/identity-service/tests/identity_test.db
+
+# Local UI Tools
+.claude/
+check_runs.json
