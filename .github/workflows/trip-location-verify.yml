@@ -334,31 +334,35 @@ jobs:
           docker compose -f docker-compose.prod.yml -f docker-compose.ci.yml exec -T fleet-api alembic upgrade head
       - name: Wait for readiness
         run: |
-          python - <<'PY'
-import sys
-import time
-import urllib.request
+          wait_ready() {
+            local name="$1"
+            local url="$2"
+            for i in $(seq 1 24); do
+              code=$(curl -s -o /dev/null -w '%{http_code}' "$url" || true)
+              if [ "$code" = "200" ]; then
+                echo "$name ready after $((i * 5))s"
+                return 0
+              fi
+              sleep 5
+            done
+            echo "::error::$name readiness did not converge"
+            return 1
+          }
 
-targets = {
-    "identity": "http://localhost:8105/ready",
-    "trip": "http://localhost:8101/ready",
-    "location": "http://localhost:8103/ready",
-    "driver": "http://localhost:8104/ready",
-    "fleet": "http://localhost:8102/ready",
-}
-for name, url in targets.items():
-    for _ in range(24):
-        try:
-            with urllib.request.urlopen(url, timeout=5) as response:
-                if response.status == 200:
-                    break
-        except Exception:
-            pass
-        time.sleep(5)
-    else:
-        print(f"{name} readiness did not converge", file=sys.stderr)
-        sys.exit(1)
-PY
+          wait_ready identity http://localhost:8105/ready || exit 1
+
+          wait_ready trip http://localhost:8101/ready &
+          trip_pid=$!
+          wait_ready location http://localhost:8103/ready &
+          loc_pid=$!
+          wait_ready driver http://localhost:8104/ready &
+          dr_pid=$!
+          wait_ready fleet http://localhost:8102/ready &
+          fl_pid=$!
+
+          for pid in $trip_pid $loc_pid $dr_pid $fl_pid; do
+            wait $pid || exit 1
+          done
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
