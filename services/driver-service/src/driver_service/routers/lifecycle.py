@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from sqlalchemy import func, select
@@ -56,9 +57,9 @@ async def _write_audit(
     actor_id: str,
     actor_role: str,
     *,
-    changed_fields: dict | None = None,
-    old_snapshot: dict | None = None,
-    new_snapshot: dict | None = None,
+    changed_fields: dict[str, Any] | None = None,
+    old_snapshot: dict[str, Any] | None = None,
+    new_snapshot: dict[str, Any] | None = None,
     reason: str | None = None,
     request_id: str | None = None,
 ) -> None:
@@ -84,7 +85,7 @@ async def _write_audit(
     session.add(audit)
 
 
-async def _write_outbox(session: AsyncSession, driver_id: str, event_name: str, payload: dict) -> None:
+async def _write_outbox(session: AsyncSession, driver_id: str, event_name: str, payload: dict[str, Any]) -> None:
     outbox = DriverOutboxModel(
         outbox_id=_new_ulid(),
         driver_id=driver_id,
@@ -146,7 +147,7 @@ async def inactivate_driver(
     auth: AuthContext = Depends(admin_auth_dependency),
     session: AsyncSession = Depends(get_session),
     if_match: str | None = Header(None, alias="If-Match"),
-) -> dict:
+) -> dict[str, Any]:
     """Deactivate a driver (spec §3.5).
     State transitions: ACTIVE → INACTIVE.
     """
@@ -234,7 +235,7 @@ async def reactivate_driver(
     auth: AuthContext = Depends(admin_auth_dependency),
     session: AsyncSession = Depends(get_session),
     if_match: str | None = Header(None, alias="If-Match"),
-) -> dict:
+) -> dict[str, Any]:
     """Reactivate a driver (spec §3.6).
     Transitions: INACTIVE → ACTIVE, SUSPENDED → ACTIVE.
     """
@@ -311,7 +312,7 @@ async def soft_delete_driver(
     auth: AuthContext = Depends(admin_auth_dependency),
     session: AsyncSession = Depends(get_session),
     if_match: str | None = Header(None, alias="If-Match"),
-) -> dict:
+) -> dict[str, Any]:
     """Cancel/Decommission a driver (spec §3.7).
     Any status → CANCELLED.
     """
@@ -397,7 +398,7 @@ async def get_audit_trail(
     session: AsyncSession = Depends(get_session),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
-) -> dict:
+) -> dict[str, Any]:
     """Fetch paginated audit trail for a driver (spec §3.8)."""
     # BUG-2 Fix: Do not check DriverModel existence, as hard-deleted drivers should still have audit logs.
     # The audit logs are immutable and stored with the driver_id as a plain string.

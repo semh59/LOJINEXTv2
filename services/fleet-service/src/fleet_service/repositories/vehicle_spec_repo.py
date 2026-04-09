@@ -79,4 +79,4 @@ async def close_current_spec(
         .values(is_current=False, effective_to_utc=effective_to_utc)
     )
     result = await session.execute(stmt)
-    return result.rowcount  # type: ignore[return-value]
+    return result.rowcount or 0

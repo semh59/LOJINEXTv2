@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from fastapi import Header
 from platform_auth import (
@@ -106,7 +107,7 @@ async def auth_outbound_status(*, audience: str | None = None) -> str:
     return "ok"
 
 
-def _decode_claims(authorization: str | None):
+def _decode_claims(authorization: str | None) -> Any:
     """Decode Authorization header into normalized claims."""
     try:
         return decode_bearer_token(authorization, _verification_auth_settings())

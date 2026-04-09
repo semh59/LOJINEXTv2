@@ -18,7 +18,7 @@ from fleet_service.observability import correlation_id
 try:
     from confluent_kafka.admin import AdminClient
 except ImportError:  # pragma: no cover
-    AdminClient = None
+    AdminClient = None  # type: ignore
 
 try:
     from confluent_kafka.aio import AIOProducer
@@ -26,7 +26,7 @@ except ImportError:  # pragma: no cover
     try:
         from confluent_kafka.experimental.aio import AIOProducer
     except ImportError:  # pragma: no cover
-        AIOProducer = None
+        AIOProducer = None  # type: ignore
 
 logger = logging.getLogger("fleet_service.broker")
 
@@ -141,7 +141,7 @@ class KafkaBroker(MessageBroker):
 
     def _list_topics(self) -> Any:
         """Synchronously fetch metadata from Kafka for health checks."""
-        return self._admin.list_topics(timeout=5)
+        return self._admin.list_topics(timeout=5)  # type: ignore
 
 
 def _kafka_config() -> dict[str, str]:

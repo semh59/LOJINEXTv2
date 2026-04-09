@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import (
     BigInteger,
@@ -239,7 +240,7 @@ class FleetAssetTimelineEvent(Base):
     request_id: Mapped[str | None] = mapped_column(String(64))
     correlation_id: Mapped[str | None] = mapped_column(String(64))
     occurred_at_utc: Mapped[datetime.datetime] = mapped_column(nullable=False)
-    payload_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
 
 # === 8.7 fleet_asset_delete_audit ===
@@ -253,8 +254,8 @@ class FleetAssetDeleteAudit(Base):
     delete_audit_id: Mapped[str] = mapped_column(String(26), primary_key=True)
     aggregate_type: Mapped[str] = mapped_column(String(16), nullable=False)
     aggregate_id: Mapped[str] = mapped_column(String(26), nullable=False)
-    snapshot_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    reference_check_json: Mapped[dict | None] = mapped_column(JSONB)
+    snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    reference_check_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     reference_check_status: Mapped[str] = mapped_column(String(32), nullable=False)
     delete_attempted_by_actor_type: Mapped[str] = mapped_column(String(20), nullable=False)
     delete_attempted_by_actor_id: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -272,9 +273,9 @@ class FleetAuditLogModel(Base):
     aggregate_type: Mapped[str] = mapped_column(String(16), nullable=False)
     aggregate_id: Mapped[str] = mapped_column(String(26), nullable=False)
     action_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    changed_fields_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    old_snapshot_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    new_snapshot_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    changed_fields_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    old_snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    new_snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     actor_id: Mapped[str] = mapped_column(String(64), nullable=False)
     actor_role: Mapped[str] = mapped_column(String(32), nullable=False)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -328,7 +329,7 @@ class FleetIdempotencyRecord(Base):
     endpoint_fingerprint: Mapped[str] = mapped_column(String(64), primary_key=True)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     response_status_code: Mapped[int] = mapped_column(Integer, nullable=False)
-    response_body_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    response_body_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     resource_type: Mapped[str] = mapped_column(String(16), nullable=False)
     resource_id: Mapped[str] = mapped_column(String(26), nullable=False)
     created_at_utc: Mapped[datetime.datetime] = mapped_column(nullable=False)
@@ -345,4 +346,4 @@ class FleetWorkerHeartbeat(Base):
 
     worker_name: Mapped[str] = mapped_column(String(64), primary_key=True)
     recorded_at_utc: Mapped[datetime.datetime] = mapped_column(nullable=False)
-    details_json: Mapped[dict | None] = mapped_column(JSONB)
+    details_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)

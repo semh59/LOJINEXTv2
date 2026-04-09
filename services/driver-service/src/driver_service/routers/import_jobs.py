@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
@@ -52,7 +53,7 @@ async def create_import_job(
     body: CreateImportJobRequest,
     auth: AuthContext = Depends(internal_service_auth_dependency),
     session: AsyncSession = Depends(get_session),
-) -> dict:
+) -> dict[str, Any]:
     """Create and asynchronously process a driver import job (spec §3.12).
 
     Durable Worker Pattern:
@@ -112,7 +113,7 @@ async def get_import_job(
     import_job_id: str,
     auth: AuthContext = Depends(internal_service_auth_dependency),
     session: AsyncSession = Depends(get_session),
-) -> dict:
+) -> dict[str, Any]:
     """Get import job detail with row-level results (spec §3.13)."""
     result = await session.execute(
         select(DriverImportJobModel).where(DriverImportJobModel.import_job_id == import_job_id)

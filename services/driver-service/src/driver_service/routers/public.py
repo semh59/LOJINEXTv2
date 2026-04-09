@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from sqlalchemy import Select, func, or_, select
@@ -66,9 +67,9 @@ async def _write_audit(
     actor_id: str,
     actor_role: str,
     *,
-    changed_fields: dict | None = None,
-    old_snapshot: dict | None = None,
-    new_snapshot: dict | None = None,
+    changed_fields: dict[str, Any] | None = None,
+    old_snapshot: dict[str, Any] | None = None,
+    new_snapshot: dict[str, Any] | None = None,
     reason: str | None = None,
     request_id: str | None = None,
 ) -> None:
@@ -99,7 +100,7 @@ async def _write_outbox(
     session: AsyncSession,
     driver_id: str,
     event_name: str,
-    payload: dict,
+    payload: dict[str, Any],
 ) -> None:
     """Write an outbox row for reliable event publishing."""
     outbox = DriverOutboxModel(
@@ -239,7 +240,7 @@ async def get_driver(
     response: Response,
     auth: AuthContext = Depends(admin_or_manager_auth_dependency),
     session: AsyncSession = Depends(get_session),
-) -> dict:
+) -> dict[str, Any]:
     """Fetch full driver detail (spec §3.2)."""
     result = await session.execute(select(DriverModel).where(DriverModel.driver_id == driver_id))
     driver = result.scalar_one_or_none()
@@ -271,7 +272,7 @@ async def list_drivers(
     updated_to: str | None = Query(None),
     sort_by: str = Query("updated_at", pattern="^(full_name|created_at|updated_at|employment_start_date)$"),
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
-) -> dict:
+) -> dict[str, Any]:
     """List and search drivers with pagination (spec §3.3)."""
     from driver_service.config import settings as cfg
 
@@ -371,7 +372,7 @@ async def patch_driver(
     auth: AuthContext = Depends(admin_auth_dependency),
     session: AsyncSession = Depends(get_session),
     if_match: str | None = Header(None, alias="If-Match"),
-) -> dict:
+) -> dict[str, Any]:
     """Update mutable driver fields (spec §3.4).
 
     Requires If-Match header for optimistic concurrency.
@@ -396,7 +397,7 @@ async def patch_driver(
         raise driver_version_mismatch()
 
     # Track old values for audit
-    changed_fields: dict[str, list] = {}
+    changed_fields: dict[str, list[Any]] = {}
     old_telegram = driver.telegram_user_id
 
     # Apply patch fields

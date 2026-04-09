@@ -10,6 +10,7 @@ Tables:
 """
 
 from datetime import date, datetime
+from typing import Any
 
 from sqlalchemy import (
     Boolean,
@@ -149,9 +150,9 @@ class DriverAuditLogModel(Base):
     # Audit log should NOT have a FK to the driver table to ensure visibility after hard-delete
     driver_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     action_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    changed_fields_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    old_snapshot_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    new_snapshot_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    changed_fields_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    old_snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    new_snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     actor_id: Mapped[str] = mapped_column(String(64), nullable=False)
     actor_role: Mapped[str] = mapped_column(String(32), nullable=False)
     reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -257,7 +258,7 @@ class DriverImportJobModel(Base):
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     started_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    error_summary_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    error_summary_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -282,7 +283,7 @@ class DriverImportJobRowModel(Base):
     import_row_id: Mapped[str] = mapped_column(String(26), primary_key=True)
     import_job_id: Mapped[str] = mapped_column(String(26), nullable=False)
     row_no: Mapped[int] = mapped_column(Integer, nullable=False)
-    source_payload_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    source_payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     row_status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING")
     resolved_driver_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -312,4 +313,4 @@ class WorkerHeartbeat(Base):
     worker_name: Mapped[str] = mapped_column(String(64), primary_key=True)
     last_heartbeat_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     worker_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    worker_metadata_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    worker_metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)

@@ -13,6 +13,7 @@ import json
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from typing import Any
 
 from fastapi import Header
 
@@ -143,7 +144,7 @@ async def auth_outbound_status(*, audience: str | None = None) -> str:
     return "ok"
 
 
-def _decode_claims(authorization: str | None):
+def _decode_claims(authorization: str | None) -> Any:
     """Decode Authorization header into normalized claims."""
     try:
         return decode_bearer_token(authorization, _platform_auth_settings())

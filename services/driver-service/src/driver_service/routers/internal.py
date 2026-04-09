@@ -9,6 +9,7 @@ Endpoints:
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
@@ -40,7 +41,7 @@ async def resolve_driver(
     driver_id: str,
     auth: AuthContext = Depends(internal_service_auth_dependency),
     session: AsyncSession = Depends(get_session),
-) -> dict:
+) -> dict[str, Any]:
     """Resolve driver for service-to-service enrichment (spec §3.9).
 
     Returns minimal fields needed by calling services.
@@ -76,7 +77,7 @@ async def lookup_driver(
     phone_e164: str | None = Query(None),
     telegram_user_id: str | None = Query(None),
     company_driver_code: str | None = Query(None),
-) -> dict:
+) -> dict[str, Any]:
     """Exact-match driver lookup (spec §3.10).
 
     Exactly ONE lookup key must be provided.
@@ -130,7 +131,7 @@ async def check_eligibility(
     body: EligibilityCheckRequest,
     auth: AuthContext = Depends(internal_service_auth_dependency),
     session: AsyncSession = Depends(get_session),
-) -> dict:
+) -> dict[str, Any]:
     """Bulk eligibility check for driver IDs (spec §3.11).
 
     Max 200 IDs per request. Returns existence, status, and assignability for each ID.
@@ -147,7 +148,7 @@ async def check_eligibility(
     result = await session.execute(select(DriverModel).where(DriverModel.driver_id.in_(unique_ids)))
     found_drivers = {d.driver_id: d for d in result.scalars().all()}
 
-    items: list[dict] = []
+    items: list[dict[str, Any]] = []
     for driver_id in unique_ids:
         driver = found_drivers.get(driver_id)
         if driver:

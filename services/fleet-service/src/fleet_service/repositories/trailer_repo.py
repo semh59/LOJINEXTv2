@@ -117,7 +117,7 @@ async def delete_trailer_spec_versions(session: AsyncSession, trailer_id: str) -
     """
     stmt = delete(FleetTrailerSpecVersion).where(FleetTrailerSpecVersion.trailer_id == trailer_id)
     result = await session.execute(stmt)
-    return result.rowcount  # type: ignore[return-value]
+    return result.rowcount or 0
 
 
 async def get_current_trailer_spec(session: AsyncSession, trailer_id: str) -> FleetTrailerSpecVersion | None:

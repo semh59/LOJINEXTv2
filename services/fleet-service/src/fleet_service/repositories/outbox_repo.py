@@ -48,7 +48,7 @@ async def dead_letter_by_aggregate(session: AsyncSession, aggregate_type: str, a
         )
     )
     result = await session.execute(stmt)
-    return result.rowcount  # type: ignore[return-value]
+    return result.rowcount or 0
 
 
 async def claim_batch(

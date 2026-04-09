@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, Request
@@ -56,7 +57,7 @@ def _new_ulid() -> str:
     return str(ULID())
 
 
-async def _write_outbox(session: AsyncSession, driver_id: str, event_name: str, payload: dict) -> None:
+async def _write_outbox(session: AsyncSession, driver_id: str, event_name: str, payload: dict[str, Any]) -> None:
     outbox = DriverOutboxModel(
         outbox_id=_new_ulid(),
         driver_id=driver_id,
@@ -111,7 +112,7 @@ async def hard_delete_driver(
     request: Request,
     auth: AuthContext = Depends(internal_service_auth_dependency),
     session: AsyncSession = Depends(get_session),
-) -> dict:
+) -> dict[str, Any]:
     """Permanently delete a driver record (spec §3.14).
 
     Feature-flagged. Must be soft-deleted first. Checks Trip Service for references.
@@ -182,7 +183,7 @@ async def merge_drivers(
     request: Request,
     auth: AuthContext = Depends(internal_service_auth_dependency),
     session: AsyncSession = Depends(get_session),
-) -> dict:
+) -> dict[str, Any]:
     """Merge a source driver into a target driver (spec §3.15).
 
     Feature-flagged. Source is soft-deleted after merge. Deterministic lock order.

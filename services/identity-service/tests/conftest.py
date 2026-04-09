@@ -27,19 +27,21 @@ os.environ["IDENTITY_KEY_ENCRYPTION_KEY_VERSION"] = os.getenv(
 # Use a fake Redis in tests — no real Redis required
 os.environ["IDENTITY_REDIS_URL"] = "redis://localhost:6379/0"  # overridden below
 
-# ---- Start PostgresContainer early to inject its URL ----
-_pg = PostgresContainer("postgres:16-alpine")
-_pg.start()
-_pg_url = (
-    _pg.get_connection_url()
-    .replace("postgresql+psycopg2://", "postgresql+asyncpg://")
-    .replace("postgresql://", "postgresql+asyncpg://")
-)
-os.environ["IDENTITY_DATABASE_URL"] = _pg_url
+# ---- Start PostgresContainer early if no URL is provided ----
+_pg_container = None
+if not os.getenv("IDENTITY_DATABASE_URL"):
+    _pg_container = PostgresContainer("postgres:16-alpine")
+    _pg_container.start()
+    _pg_url = (
+        _pg_container.get_connection_url()
+        .replace("postgresql+psycopg2://", "postgresql+asyncpg://")
+        .replace("postgresql://", "postgresql+asyncpg://")
+    )
+    os.environ["IDENTITY_DATABASE_URL"] = _pg_url
 
 # Now import the service modules
 import fakeredis.aioredis as fakeredis_aio  # noqa: E402
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 from identity_service.database import engine, async_session_factory  # noqa: E402
 from identity_service.main import app  # noqa: E402
 from identity_service.models import Base  # noqa: E402
@@ -52,7 +54,8 @@ override_redis(_fake_redis)
 
 
 def pytest_sessionfinish(session, exitstatus):
-    _pg.stop()
+    if _pg_container:
+        _pg_container.stop()
 
 
 @pytest.fixture(scope="session")

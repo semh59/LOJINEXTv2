@@ -124,7 +124,7 @@ async def delete_vehicle_spec_versions(session: AsyncSession, vehicle_id: str) -
     """
     stmt = delete(FleetVehicleSpecVersion).where(FleetVehicleSpecVersion.vehicle_id == vehicle_id)
     result = await session.execute(stmt)
-    return result.rowcount  # type: ignore[return-value]
+    return result.rowcount or 0
 
 
 async def get_current_vehicle_spec(session: AsyncSession, vehicle_id: str) -> FleetVehicleSpecVersion | None:

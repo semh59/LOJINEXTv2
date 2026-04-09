@@ -12,7 +12,7 @@ from driver_service.observability import correlation_id
 try:
     from confluent_kafka.admin import AdminClient
 except ImportError:
-    AdminClient = None
+    AdminClient = None  # type: ignore
 
 try:
     from confluent_kafka.aio import AIOProducer
@@ -20,7 +20,7 @@ except ImportError:
     try:
         from confluent_kafka.experimental.aio import AIOProducer
     except ImportError:
-        AIOProducer = None
+        AIOProducer = None  # type: ignore
 
 logger = logging.getLogger("driver_service.broker")
 

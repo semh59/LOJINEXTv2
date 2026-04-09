@@ -7,10 +7,12 @@ Each claimed row is finalized individually so one publish outcome doesn't roll b
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timedelta
 
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from fleet_service.broker import MessageBroker, OutboxMessage
 from fleet_service.config import settings
@@ -55,7 +57,7 @@ def _build_message(row: FleetOutbox) -> OutboxMessage:
         event_id=row.outbox_id,
         event_name=row.event_name,
         partition_key=row.aggregate_id,
-        payload=row.payload_json,
+        payload=json.loads(row.payload_json),
         event_version=row.event_version,
         aggregate_type=row.aggregate_type,
         aggregate_id=row.aggregate_id,
@@ -156,7 +158,7 @@ async def _publish_single(broker: MessageBroker, outbox_id: str) -> bool:
         correlation_id.reset(token)
 
 
-async def _reload_row(session, outbox_id: str) -> FleetOutbox | None:  # type: ignore[type-arg]
+async def _reload_row(session: AsyncSession, outbox_id: str) -> FleetOutbox | None:
     """Reload a single outbox row by ID (within an open session)."""
     from sqlalchemy import select
 
