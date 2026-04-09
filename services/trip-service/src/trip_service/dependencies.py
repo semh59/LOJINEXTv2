@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 import httpx
+from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from tenacity import (
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
 
-from trip_service.auth import issue_internal_service_token
+from trip_service.auth import AuthContext, issue_internal_service_token, user_auth_dependency
 from trip_service.config import settings
+from trip_service.database import get_session
 from trip_service.errors import (
     trip_dependency_unavailable,
     trip_invalid_route_pair,
@@ -15,6 +25,22 @@ from trip_service.errors import (
 )
 from trip_service.http_clients import get_dependency_client
 from trip_service.observability import correlation_id
+from trip_service.resiliency import CircuitBreakerError, CircuitState, fleet_breaker, location_breaker
+
+logger = logging.getLogger("trip_service.dependencies")
+
+
+def _is_retryable(exc: BaseException) -> bool:
+    """Return True for transient errors that are safe to retry."""
+    return isinstance(exc, httpx.TransportError)
+
+
+_retry_transient = retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=0.5, max=4),
+    retry=retry_if_exception(_is_retryable),
+    reraise=True,
+)
 
 
 @dataclass(frozen=True)
@@ -68,7 +94,7 @@ def _location_trip_context_url(pair_id: str) -> str:
 
 
 async def _fleet_service_headers() -> dict[str, str]:
-    token = await issue_internal_service_token()
+    token = await issue_internal_service_token(audience="fleet-service")
     headers = {"Authorization": f"Bearer {token}"}
     if c_id := correlation_id.get():
         headers["X-Correlation-ID"] = c_id
@@ -76,7 +102,7 @@ async def _fleet_service_headers() -> dict[str, str]:
 
 
 async def _location_service_headers() -> dict[str, str]:
-    token = await issue_internal_service_token()
+    token = await issue_internal_service_token(audience="location-service")
     headers = {"Authorization": f"Bearer {token}"}
     if c_id := correlation_id.get():
         headers["X-Correlation-ID"] = c_id
@@ -149,6 +175,14 @@ def _resolve_trip_compat_flag(
     return None
 
 
+@_retry_transient
+@fleet_breaker
+async def _fleet_validate_raw(payload: dict) -> httpx.Response:
+    """Thin HTTP POST to Fleet validation; TransportError propagates for tenacity retry."""
+    client = await get_dependency_client()
+    return await client.post(_fleet_validation_url(), json=payload, headers=await _fleet_service_headers())
+
+
 async def validate_trip_references(
     driver_id: str,
     vehicle_id: str | None,
@@ -161,8 +195,9 @@ async def validate_trip_references(
         "trailer_id": trailer_id,
     }
     try:
-        client = await get_dependency_client()
-        response = await client.post(_fleet_validation_url(), json=payload, headers=await _fleet_service_headers())
+        response = await _fleet_validate_raw(payload)
+    except CircuitBreakerError as exc:
+        raise trip_dependency_unavailable("Fleet Service is currently isolated due to failure threshold.") from exc
     except httpx.HTTPError as exc:
         raise trip_dependency_unavailable("Fleet Service validation is unavailable.") from exc
 
@@ -225,6 +260,14 @@ async def ensure_trip_references_valid(
         raise trip_validation_error("Trip references are invalid.", errors=errors)
 
 
+@_retry_transient
+@location_breaker
+async def _location_resolve_raw(payload: dict) -> httpx.Response:
+    """Thin HTTP POST to Location resolve; TransportError propagates for tenacity retry."""
+    client = await get_dependency_client()
+    return await client.post(_location_resolve_url(), json=payload, headers=await _location_service_headers())
+
+
 async def resolve_route_by_names(
     *,
     origin_name: str,
@@ -240,8 +283,9 @@ async def resolve_route_by_names(
         "language_hint": language_hint,
     }
     try:
-        client = await get_dependency_client()
-        response = await client.post(_location_resolve_url(), json=payload, headers=await _location_service_headers())
+        response = await _location_resolve_raw(payload)
+    except CircuitBreakerError as exc:
+        raise trip_dependency_unavailable("Location Service is currently isolated due to failure threshold.") from exc
     except httpx.HTTPError as exc:
         raise trip_dependency_unavailable("Location Service route resolution is unavailable.") from exc
 
@@ -274,12 +318,21 @@ async def resolve_route_by_names(
     )
 
 
+@_retry_transient
+@location_breaker
+async def _location_context_raw(pair_id: str) -> httpx.Response:
+    """Thin HTTP GET to Location trip-context; TransportError propagates for tenacity retry."""
+    client = await get_dependency_client()
+    return await client.get(_location_trip_context_url(pair_id), headers=await _location_service_headers())
+
+
 async def fetch_trip_context(pair_id: str, *, field_name: str = "body.route_pair_id") -> LocationTripContext:
     """Fetch forward and reverse trip context for a route pair."""
     del field_name
     try:
-        client = await get_dependency_client()
-        response = await client.get(_location_trip_context_url(pair_id), headers=await _location_service_headers())
+        response = await _location_context_raw(pair_id)
+    except CircuitBreakerError as exc:
+        raise trip_dependency_unavailable("Location Service is currently isolated due to failure threshold.") from exc
     except httpx.HTTPError as exc:
         raise trip_dependency_unavailable("Location Service trip context is unavailable.") from exc
 
@@ -334,7 +387,9 @@ async def fetch_trip_context(pair_id: str, *, field_name: str = "body.route_pair
 
 
 async def probe_fleet_service() -> bool:
-    """Check that Fleet Service accepts the validation contract."""
+    """Check that Fleet Service accepts the validation contract. respects breaker state."""
+    if fleet_breaker.state == CircuitState.OPEN:
+        return False
     payload = {"driver_id": "healthcheck-driver", "vehicle_id": None, "trailer_id": None}
     try:
         client = await get_dependency_client()
@@ -345,7 +400,9 @@ async def probe_fleet_service() -> bool:
 
 
 async def probe_location_service() -> bool:
-    """Check that Location Service serves both resolve and trip-context contracts."""
+    """Check that Location Service serves contracts; respects breaker state."""
+    if location_breaker.state == CircuitState.OPEN:
+        return False
     resolve_payload = {
         "origin_name": "healthcheck-origin",
         "destination_name": "healthcheck-destination",
@@ -363,3 +420,14 @@ async def probe_location_service() -> bool:
     except httpx.HTTPError:
         return False
     return resolve_response.status_code in {200, 404, 422} and context_response.status_code in {200, 404, 409}
+
+
+async def get_trip_service(
+    session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(user_auth_dependency),
+):
+    """Dependency to provide a TripService instance."""
+    # Lazy import to break circular dependency: dependencies → service → dependencies
+    from trip_service.service import TripService
+
+    return TripService(session, auth)

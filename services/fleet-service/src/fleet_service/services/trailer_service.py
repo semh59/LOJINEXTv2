@@ -7,6 +7,7 @@ Orchestrates repositories, writes timeline + outbox events within the same trans
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 from typing import Any
 
@@ -15,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from fleet_service.auth import AuthContext
+from fleet_service.config import settings
 from fleet_service.constraint_error_mapper import map_integrity_error
 from fleet_service.domain.enums import (
     AggregateType,
@@ -229,11 +231,12 @@ async def create_trailer(
         aggregate_type=AggregateType.TRAILER,
         aggregate_id=trailer_id,
         event_name="fleet.trailer.created.v1",
-        event_version=1,
-        payload_json={
+        event_version=settings.schema_event_version,
+        partition_key=trailer_id,
+        payload_json=json.dumps({
             "event_id": event_id,
             "event_name": "fleet.trailer.created.v1",
-            "event_version": 1,
+            "event_version": settings.schema_event_version,
             "occurred_at_utc": now.isoformat(),
             "aggregate_type": "TRAILER",
             "aggregate_id": trailer_id,
@@ -241,12 +244,13 @@ async def create_trailer(
             "request_id": request_id,
             "correlation_id": correlation_id,
             "data": trailer_snapshot,
-        },
+        }),
         publish_status=PublishStatus.PENDING,
         next_attempt_at_utc=now,
         created_at_utc=now,
     )
     await outbox_repo.insert_outbox_event(session, outbox_event)
+    await session.commit()
 
     response = _build_trailer_detail_response(trailer, current_spec=current_spec)
 
@@ -262,6 +266,7 @@ async def create_trailer(
         expires_at_utc=now + datetime.timedelta(hours=_IDEMPOTENCY_TTL_HOURS),
     )
     await idempotency_repo.insert_record(session, idem_record)
+    # committed above
 
     etag = generate_master_etag("TRAILER", trailer_id, 1)
     return response, etag, 201
@@ -319,6 +324,7 @@ async def get_trailer_detail(session: AsyncSession, trailer_id: str) -> tuple[Tr
     current_spec = await trailer_repo.get_current_trailer_spec(session, trailer_id)
     response = _build_trailer_detail_response(trailer, current_spec)
     etag = generate_master_etag("TRAILER", trailer_id, trailer.row_version)
+    await session.commit()
     return response, etag
 
 
@@ -354,6 +360,10 @@ async def patch_trailer(
         raise EtagMismatchError()
     if trailer.soft_deleted_at_utc is not None:
         raise TrailerSoftDeletedError()
+
+    from fleet_service.services.audit_helpers import _write_fleet_audit, serialize_trailer_admin
+
+    old_snapshot = serialize_trailer_admin(trailer)
 
     now = _utc_now()
     changes: dict[str, Any] = {}
@@ -416,26 +426,44 @@ async def patch_trailer(
             aggregate_type=AggregateType.TRAILER,
             aggregate_id=trailer_id,
             event_name="fleet.trailer.updated.v1",
-            event_version=1,
-            payload_json={
+            event_version=settings.schema_event_version,
+            partition_key=trailer_id,
+            payload_json=json.dumps({
                 "event_id": event_id,
                 "event_name": "fleet.trailer.updated.v1",
+                "event_version": settings.schema_event_version,
                 "occurred_at_utc": now.isoformat(),
                 "aggregate_type": "TRAILER",
                 "aggregate_id": trailer_id,
                 "row_version": trailer.row_version,
                 "request_id": request_id,
                 "correlation_id": correlation_id,
-            },
+            }),
             publish_status=PublishStatus.PENDING,
             next_attempt_at_utc=now,
             created_at_utc=now,
         ),
     )
 
+    # High-fidelity audit
+    await _write_fleet_audit(
+        session,
+        aggregate_type=AggregateType.TRAILER,
+        aggregate_id=trailer_id,
+        action_type="UPDATE",
+        actor_id=auth.actor_id,
+        actor_role=auth.actor_type,
+        old_snapshot=old_snapshot,
+        new_snapshot=serialize_trailer_admin(trailer),
+        changed_fields=changes,
+        reason=body.notes or f"Fields changed: {', '.join(changes.keys())}",
+        request_id=request_id,
+    )
+
     current_spec = await trailer_repo.get_current_trailer_spec(session, trailer_id)
     response = _build_trailer_detail_response(trailer, current_spec)
     etag = generate_master_etag("TRAILER", trailer_id, trailer.row_version)
+    await session.commit()
     return response, etag
 
 
@@ -555,17 +583,19 @@ async def soft_delete_trailer(
             aggregate_type=AggregateType.TRAILER,
             aggregate_id=trailer_id,
             event_name="fleet.trailer.soft_deleted.v1",
-            event_version=1,
-            payload_json={
+            event_version=settings.schema_event_version,
+            partition_key=trailer_id,
+            payload_json=json.dumps({
                 "event_id": event_id,
                 "event_name": "fleet.trailer.soft_deleted.v1",
+                "event_version": settings.schema_event_version,
                 "occurred_at_utc": now.isoformat(),
                 "aggregate_type": "TRAILER",
                 "aggregate_id": trailer_id,
                 "row_version": trailer.row_version,
                 "request_id": request_id,
                 "correlation_id": correlation_id,
-            },
+            }),
             publish_status=PublishStatus.PENDING,
             next_attempt_at_utc=now,
             created_at_utc=now,
@@ -575,6 +605,7 @@ async def soft_delete_trailer(
     current_spec = await trailer_repo.get_current_trailer_spec(session, trailer_id)
     response = _build_trailer_detail_response(trailer, current_spec)
     etag = generate_master_etag("TRAILER", trailer_id, trailer.row_version)
+    await session.commit()
     return response, etag
 
 
@@ -725,22 +756,26 @@ async def hard_delete_trailer(
             aggregate_type=AggregateType.TRAILER,
             aggregate_id=trailer_id,
             event_name="fleet.trailer.hard_deleted.v1",
-            event_version=1,
-            payload_json={
+            event_version=settings.schema_event_version,
+            partition_key=trailer_id,
+            payload_json=json.dumps({
                 "event_id": event_id,
                 "event_name": "fleet.trailer.hard_deleted.v1",
+                "event_version": settings.schema_event_version,
                 "occurred_at_utc": now.isoformat(),
                 "aggregate_type": "TRAILER",
                 "aggregate_id": trailer_id,
                 "snapshot_json": snapshot,
                 "request_id": request_id,
                 "correlation_id": correlation_id,
-            },
+            }),
             publish_status=PublishStatus.PENDING,
             next_attempt_at_utc=now,
             created_at_utc=now,
         ),
     )
+
+    await session.commit()
 
     return {"deleted": True, "aggregate_type": "TRAILER", "aggregate_id": trailer_id, "delete_audit_id": audit_id}
 
@@ -896,10 +931,12 @@ async def create_trailer_spec_version(
             aggregate_type=AggregateType.TRAILER,
             aggregate_id=trailer_id,
             event_name="fleet.trailer.spec_version_created.v1",
-            event_version=1,
-            payload_json={
+            event_version=settings.schema_event_version,
+            partition_key=trailer_id,
+            payload_json=json.dumps({
                 "event_id": event_id,
                 "event_name": "fleet.trailer.spec_version_created.v1",
+                "event_version": settings.schema_event_version,
                 "occurred_at_utc": now.isoformat(),
                 "aggregate_type": "TRAILER",
                 "aggregate_id": trailer_id,
@@ -908,7 +945,7 @@ async def create_trailer_spec_version(
                 "spec_stream_version": trailer.spec_stream_version,
                 "request_id": request_id,
                 "correlation_id": correlation_id,
-            },
+            }),
             publish_status=PublishStatus.PENDING,
             next_attempt_at_utc=now,
             created_at_utc=now,
@@ -917,6 +954,7 @@ async def create_trailer_spec_version(
 
     response = _build_spec_response(spec)
     etag = generate_spec_etag("TRAILER", trailer_id, trailer.spec_stream_version)
+    await session.commit()
     return response, etag, 201
 
 
@@ -938,6 +976,7 @@ async def get_current_spec(
 
     response = _build_spec_response(spec)
     etag = generate_spec_etag("TRAILER", trailer_id, trailer.spec_stream_version)
+    await session.commit()
     return response, etag
 
 
@@ -1032,10 +1071,12 @@ async def _lifecycle_transition(
             aggregate_type=AggregateType.TRAILER,
             aggregate_id=trailer_id,
             event_name=event_name,
-            event_version=1,
-            payload_json={
+            event_version=settings.schema_event_version,
+            partition_key=trailer_id,
+            payload_json=json.dumps({
                 "event_id": event_id,
                 "event_name": event_name,
+                "event_version": settings.schema_event_version,
                 "occurred_at_utc": now.isoformat(),
                 "aggregate_type": "TRAILER",
                 "aggregate_id": trailer_id,
@@ -1043,7 +1084,7 @@ async def _lifecycle_transition(
                 "row_version": trailer.row_version,
                 "request_id": request_id,
                 "correlation_id": correlation_id,
-            },
+            }),
             publish_status=PublishStatus.PENDING,
             next_attempt_at_utc=now,
             created_at_utc=now,
@@ -1053,6 +1094,7 @@ async def _lifecycle_transition(
     current_spec = await trailer_repo.get_current_trailer_spec(session, trailer_id)
     response = _build_trailer_detail_response(trailer, current_spec)
     etag = generate_master_etag("TRAILER", trailer_id, trailer.row_version)
+    await session.commit()
     return response, etag
 
 

@@ -12,11 +12,11 @@ from driver_service.workers.outbox_relay import run_outbox_relay
 logger = logging.getLogger("driver_service.workers")
 
 
-async def start_all_workers(broker: EventBroker) -> None:
+async def start_all_workers(broker: EventBroker, shutdown_event: asyncio.Event | None = None) -> None:
     """Start all background workers for the Driver Service."""
     logger.info("Starting Driver Service workers...")
 
     await asyncio.gather(
-        run_outbox_relay(broker),
-        run_import_worker(),
+        run_outbox_relay(broker, shutdown_event=shutdown_event),
+        run_import_worker(shutdown_event=shutdown_event),
     )

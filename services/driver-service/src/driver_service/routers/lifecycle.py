@@ -90,6 +90,7 @@ async def _write_outbox(session: AsyncSession, driver_id: str, event_name: str, 
         driver_id=driver_id,
         event_name=event_name,
         event_version=1,
+        # V2.1: Enforce TEXT payload per platform standard
         payload_json=json.dumps(payload),
         partition_key=driver_id,  # V2.1: Partition by driver_id
         publish_status="PENDING",
@@ -108,6 +109,8 @@ def _handle_integrity_error(exc: IntegrityError) -> None:
         raise driver_telegram_already_exists()
     if "uq_driver_company_code_live" in detail:
         raise driver_company_code_already_exists()
+    if "driver_outbox_driver_id_fkey" in detail and "RESTRICT" in detail:
+        raise driver_validation_error("Cannot hard-delete driver with pending outbox events.")
     raise driver_internal_error("Database constraint violation.")
 
 
@@ -207,7 +210,12 @@ async def inactivate_driver(
         },
     )
 
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        _handle_integrity_error(exc)
+
     await session.refresh(driver)
     response.headers["ETag"] = etag_from_row_version(driver.row_version)
     return serialize_driver_for_role(driver, auth.role)
@@ -366,7 +374,12 @@ async def soft_delete_driver(
         },
     )
 
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        _handle_integrity_error(exc)
+
     await session.refresh(driver)
     response.headers["ETag"] = etag_from_row_version(driver.row_version)
     return serialize_driver_for_role(driver, auth.role)
@@ -386,10 +399,8 @@ async def get_audit_trail(
     per_page: int = Query(50, ge=1, le=200),
 ) -> dict:
     """Fetch paginated audit trail for a driver (spec §3.8)."""
-    # Verify driver exists (even if soft-deleted)
-    result = await session.execute(select(DriverModel.driver_id).where(DriverModel.driver_id == driver_id))
-    if not result.scalar_one_or_none():
-        raise driver_not_found(driver_id)
+    # BUG-2 Fix: Do not check DriverModel existence, as hard-deleted drivers should still have audit logs.
+    # The audit logs are immutable and stored with the driver_id as a plain string.
 
     # Count
     count_query = select(func.count()).where(DriverAuditLogModel.driver_id == driver_id)

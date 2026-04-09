@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-import json
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 
+import httpx
 from fastapi import Header
-from platform_auth import AuthSettings, PlatformRole, TokenClaims, TokenInvalidError, TokenMissingError, decode_bearer_token
+from platform_auth import (
+    AuthSettings,
+    PlatformRole,
+    TokenClaims,
+    TokenInvalidError,
+    TokenMissingError,
+    decode_bearer_token,
+)
 from platform_auth.key_provider import build_verification_provider
 
 from location_service.config import settings
@@ -44,25 +49,27 @@ def _platform_auth_settings() -> AuthSettings:
     )
 
 
-def _probe_jwks_document(jwks_url: str) -> bool:
+async def _probe_jwks_document(jwks_url: str) -> bool:
     """Return whether the configured JWKS endpoint serves a usable keys array."""
-    request = urllib.request.Request(jwks_url, headers={"Accept": "application/json"})
     try:
-        with urllib.request.urlopen(request, timeout=5) as response:  # noqa: S310
-            payload = json.loads(response.read().decode("utf-8"))
-    except (OSError, ValueError, urllib.error.URLError):
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(jwks_url)
+            if response.status_code != 200:
+                return False
+            payload = response.json()
+    except (httpx.HTTPError, ValueError):
         return False
     return isinstance(payload, dict) and isinstance(payload.get("keys"), list) and bool(payload["keys"])
 
 
-def auth_verify_status() -> str:
+async def auth_verify_status() -> str:
     """Return `ok` when inbound auth config is live and coherent."""
     auth_settings = _platform_auth_settings()
     if auth_settings.algorithm.upper() != "RS256":
         return "fail"
     if not auth_settings.issuer or not auth_settings.audience or not auth_settings.jwks_url:
         return "fail"
-    if not _probe_jwks_document(auth_settings.jwks_url):
+    if not await _probe_jwks_document(auth_settings.jwks_url):
         return "fail"
     try:
         build_verification_provider(auth_settings)

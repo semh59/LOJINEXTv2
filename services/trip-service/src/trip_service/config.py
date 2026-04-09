@@ -2,6 +2,7 @@
 
 from typing import Literal
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 
 DEFAULT_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/trip_service"
@@ -73,6 +74,18 @@ class Settings(BaseSettings):
         if self.environment == "test":
             return "noop"
         return "log"
+
+    @model_validator(mode="after")
+    def _validate_timeout_vs_claim_ttl(self) -> "Settings":
+        """Ensure the enrichment claim TTL covers worst-case HTTP retry duration."""
+        worst_case_s = self.dependency_timeout_seconds * 3
+        if worst_case_s >= self.enrichment_claim_ttl_seconds:
+            raise ValueError(
+                f"enrichment_claim_ttl_seconds ({self.enrichment_claim_ttl_seconds}s) must be greater than "
+                f"dependency_timeout_seconds * 3 ({worst_case_s}s). "
+                "Otherwise a slow retry can expire the claim before the worker finishes."
+            )
+        return self
 
     model_config = {"env_prefix": "TRIP_", "env_file": ".env", "extra": "ignore"}
 

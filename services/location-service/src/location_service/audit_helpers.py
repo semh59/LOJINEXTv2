@@ -124,7 +124,13 @@ async def _write_outbox(
     payload: dict[str, Any],
     partition_key: str | None = None,
 ) -> None:
-    """Write a transactional outbox entry."""
+    """Write a transactional outbox entry with 512KB safety guard."""
+    import json
+
+    payload_str = json.dumps(payload)
+    if len(payload_str) > 512_000:
+        raise ValueError(f"Outbox payload exceeds 512KB safety limit ({len(payload_str)} bytes)")
+
     now = _now_utc()
     p_key = str(
         partition_key

@@ -302,14 +302,13 @@ async def problem_detail_handler(request: Request, exc: ProblemDetailError) -> J
     """Convert ProblemDetailError to application/problem+json response."""
     request_id = getattr(request.state, "request_id", None)
     body: dict[str, Any] = {
-        "type": f"https://fleet-service/errors/{exc.code}",
+        "type": f"https://errors.lojinext.com/{exc.code}",
         "title": exc.title,
         "status": exc.status,
         "code": exc.code,
+        "detail": exc.detail or "",
         "request_id": request_id,
     }
-    if exc.detail:
-        body["detail"] = exc.detail
     if exc.errors:
         body["errors"] = exc.errors
 

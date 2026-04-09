@@ -16,8 +16,9 @@ import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, not_, or_, select
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import aliased
 
 from trip_service.broker import MessageBroker, OutboxMessage
 from trip_service.config import settings
@@ -87,6 +88,18 @@ async def _claim_batch(worker_id: str, batch_size: int) -> tuple[str, list[str]]
     claim_token = str(uuid.uuid4())
 
     async with async_session_factory() as session:
+        # -----------------------------------------------------------------------
+        # Head-of-Line (HOL) blocking:
+        # A row is eligible ONLY IF it is the EARLIEST row for its partition_key
+        # that is not yet PUBLISHED. This ensures strict sequential processing.
+        # -----------------------------------------------------------------------
+        o2 = aliased(TripOutbox)
+        hol_subq = select(1).where(
+            o2.partition_key == TripOutbox.partition_key,
+            o2.publish_status != OutboxPublishStatus.PUBLISHED,
+            o2.created_at_utc < TripOutbox.created_at_utc,
+        )
+
         stmt = (
             select(TripOutbox)
             .where(
@@ -104,6 +117,7 @@ async def _claim_batch(worker_id: str, batch_size: int) -> tuple[str, list[str]]
                     ),
                 ),
                 TripOutbox.next_attempt_at_utc.is_(None) | (TripOutbox.next_attempt_at_utc <= now),
+                not_(hol_subq.exists()),
             )
             .order_by(TripOutbox.created_at_utc.asc())
             .with_for_update(skip_locked=True)
@@ -222,6 +236,12 @@ async def _publish_single(broker: MessageBroker, event_id: str, claim_token: str
                 message.event_id,
                 row.attempt_count,
                 publish_error,
+                extra={
+                    "alert": "DEAD_LETTER",
+                    "event_id": message.event_id,
+                    "event_name": message.event_name,
+                    "aggregate_id": message.aggregate_id,
+                },
             )
         else:
             logger.warning(
@@ -242,7 +262,9 @@ async def _publish_single(broker: MessageBroker, event_id: str, claim_token: str
 # ---------------------------------------------------------------------------
 
 
-async def run_outbox_relay(broker: MessageBroker, worker_id: str | None = None) -> None:
+async def run_outbox_relay(
+    broker: MessageBroker, worker_id: str | None = None, shutdown_event: asyncio.Event | None = None
+) -> None:
     """Main outbox relay loop.
 
     Runs indefinitely, polling for unpublished events.
@@ -255,6 +277,10 @@ async def run_outbox_relay(broker: MessageBroker, worker_id: str | None = None) 
 
     try:
         while True:
+            if shutdown_event and shutdown_event.is_set():
+                logger.info("Relay %s: shutdown signal received, exiting cleanly.", worker_id)
+                return
+
             try:
                 published = await _relay_batch(broker, worker_id)
                 if published > 0:

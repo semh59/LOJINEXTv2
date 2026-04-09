@@ -49,17 +49,35 @@ When resolved: mark resolved, write what fixed it, keep the entry.
 
 ---
 
-## [ISSUE-003] Fleet create contracts expose `initial_spec` fields that are not applied on create
+## [ISSUE-004] Redis is now a hard runtime dependency for identity-service
 
-- **Discovered:** 2026-04-05, TASK-0045
-- **Impact:** `fleet-service` request schemas allow `initial_spec` during vehicle and trailer create, but the create services currently ignore those fields. Internal fuel-metadata and spec-dependent flows cannot rely on inline spec initialization.
+- **Discovered:** 2026-04-08, TASK-0053
+- **Impact:** identity-service will not start without a reachable Redis instance in `dev` and `prod` environments. `test` environment uses fakeredis (no real Redis needed).
 - **Status:** open
-- **Workaround:** Create the asset first, then call the explicit spec-version endpoint (`POST /api/v1/vehicles/{id}/spec-versions` or trailer equivalent).
-- **Linked task:** none
-- **Resolution:** 
+- **Workaround:** Start Redis via `docker run -d -p 6379:6379 redis:7` or set `IDENTITY_REDIS_URL` to a managed Redis URL.
+- **Linked task:** TASK-0053
+- **Resolution:**
+
+---
+
+## [ISSUE-005] Access token revocation window: 15 minutes after user deactivation
+
+- **Discovered:** 2026-04-08, TASK-0053
+- **Impact:** When a user is deactivated via `PATCH /admin/v1/users/{id}`, their existing access tokens remain valid until expiry (up to 15 minutes). JTI blocklist only covers tokens presented at `/auth/v1/logout`. Deactivation does not enumerate and blocklist all live access tokens.
+- **Status:** mitigated
+- **Workaround:** Deactivation immediately revokes all refresh tokens (prevents new access token issuance). The 15-minute window is the remaining risk. `current_user` dependency re-checks `is_active` from DB on every request, so this only affects service tokens that bypass `current_user`.
+- **Linked task:** TASK-0053
+- **Resolution:**
 
 ---
 
 ## Resolved
 
-*(none yet)*
+## [ISSUE-003] Fleet create contracts expose `initial_spec` fields that are not applied on create
+
+- **Discovered:** 2026-04-05, TASK-0045
+- **Impact:** `fleet-service` request schemas allow `initial_spec` during vehicle and trailer create, but the create services currently ignore those fields. Internal fuel-metadata and spec-dependent flows cannot rely on inline spec initialization.
+- **Status:** resolved
+- **Workaround:** (resolved)
+- **Linked task:** TASK-0052
+- **Resolution:** Code audit in TASK-0052 confirmed `initial_spec` was already fully implemented in both `create_vehicle` (vehicle_service.py) and `create_trailer` (trailer_service.py) — spec version row is inserted within the same transaction and spec ETag is returned. Issue was filed against an earlier version of the code.

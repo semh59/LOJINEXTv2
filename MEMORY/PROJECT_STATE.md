@@ -10,7 +10,7 @@ Not aspirational. Not a roadmap. Current reality only.
 ## Next Task ID
 
 ```
-TASK-0052
+TASK-0054
 ```
 
 ---
@@ -24,6 +24,7 @@ TASK-0052
 | TASK-0049 | Trip-Service Production Audit         | completed | 2026-04-07 | Antigravity |
 | TASK-0050 | Identity Service Production Hardening | completed | 2026-04-07 | Antigravity |
 | TASK-0051 | Telegram Service Production Hardening | completed | 2026-04-07 | Antigravity |
+| TASK-0053 | Identity Service Full Security Hardening | completed | 2026-04-08 | Antigravity |
 
 ---
 
@@ -40,7 +41,7 @@ Status: forensic baseline achieved
 
 | Task ID   | Description                     | Status  | Last Updated | Last Agent |
 | --------- | ------------------------------- | ------- | ------------ | ---------- |
-| TASK-0052 | Final Cross-Service smoke tests             | pending   | 2026-04-07   |            |
+| TASK-0052 | Fleet Service Production Hardening          | completed | 2026-04-08   | Antigravity |
 | TASK-0048 | Location Service Production Audit + Fixes   | completed | 2026-04-07   | Antigravity |
 
 ---
@@ -49,6 +50,7 @@ Status: forensic baseline achieved
 
 | Task ID   | Description                                           | Status    | Last Updated | Last Agent  |
 | --------- | ----------------------------------------------------- | --------- | ------------ | ----------- |
+| TASK-0052 | Fleet Service Production Hardening (Bugs, ASGI, Outbox) | completed | 2026-04-08   | Antigravity |
 | TASK-0051 | Telegram Service Hardening (HTTP Pools, Truthful)     | completed | 2026-04-07   | Antigravity |
 | TASK-0050 | Identity Service Forensic Hardening (Rotation, Audit) | completed | 2026-04-07   | Antigravity |
 | TASK-0049 | Trip Service Forensic Hardening (JSONB, Idempotency)  | completed | 2026-04-07   | Antigravity |
@@ -60,6 +62,9 @@ Status: forensic baseline achieved
 ## What Comes Next
 
 ```
-Task:   TASK-0052
-Why:    Production hardening of ALL core services complete. Achieved forensic-grade structural parity and stress resilience. Ready for final DevOps handover.
+Task:   TASK-0054
+Why:    TASK-0053 completed identity-service full security hardening (Redis rate limiting,
+        JTI blocklist, token family reuse detection, audience bypass fix, retired key fix,
+        admin pagination, platform error format, executor shutdown, cleanup worker).
+        TASK-0054 should address cross-service smoke tests and DevOps handover.
 ```

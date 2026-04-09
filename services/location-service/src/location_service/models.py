@@ -413,7 +413,7 @@ class LocationOutboxModel(Base):
 
     __table_args__ = (
         Index("ix_location_outbox_pending", "publish_status", "next_attempt_at_utc", "created_at_utc"),
-        Index("ix_location_outbox_partition", "partition_key"),
+        Index("ix_location_outbox_partition_v2", "partition_key", "publish_status", "created_at_utc"),
         Index(
             "ix_location_outbox_claim",
             "claim_expires_at_utc",

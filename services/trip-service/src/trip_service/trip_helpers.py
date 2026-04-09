@@ -4,29 +4,36 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi.responses import JSONResponse
 from platform_auth import TokenClaims
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select, text
+from sqlalchemy.dialects.postgresql import INTERVAL
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
+from sqlalchemy.exc import DBAPIError, IntegrityError, NoResultFound, OperationalError
+
+if TYPE_CHECKING:
+    from trip_service.auth import AuthContext
+    from trip_service.schemas import EditTripRequest
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from ulid import ULID
 
 from trip_service.config import settings
+from trip_service.database import async_session_factory
 from trip_service.dependencies import LocationTripContext
-from trip_service.enums import ActorType, ReviewReasonCode, TripStatus
+from trip_service.enums import ActorType, ReviewReasonCode, SourceType, TripStatus
 from trip_service.errors import (
     idempotency_in_flight,
     idempotency_payload_mismatch,
     trip_completion_requirements_missing,
     trip_driver_overlap,
-    trip_invalid_date_window,
     trip_not_found,
     trip_trailer_overlap,
+    trip_validation_error,
     trip_vehicle_overlap,
 )
 from trip_service.models import (
@@ -35,14 +42,17 @@ from trip_service.models import (
     TripOutbox,
     TripTrip,
     TripTripDeleteAudit,
+    TripTripEnrichment,
     TripTripEvidence,
 )
-from trip_service.observability import get_standard_labels as get_standard_labels  # re-export for trips.py
+from trip_service.observability import get_standard_labels  # noqa: F401
 from trip_service.schemas import EnrichmentSummary, EvidenceSummary, TripResource
 from trip_service.state_machine import TripStateMachine
 
 _REFERENCE_EXCLUDED_STATUSES = (TripStatus.REJECTED.value, TripStatus.SOFT_DELETED.value)
 _MANUAL_CREATE_WINDOW_MINUTES = 30
+
+logger = logging.getLogger("trip_service.trip_helpers")
 
 
 def latest_evidence(trip: TripTrip) -> TripTripEvidence | None:
@@ -158,6 +168,13 @@ def validate_trip_transition(trip: TripTrip, next_status: TripStatus) -> None:
     TripStateMachine(current_status).transition_to(next_status)
 
 
+def _ensure_payload_size(payload: str, limit_kb: int = 512) -> str:
+    """Ensure the payload string does not exceed a safety limit for DB storage."""
+    if len(payload.encode("utf-8")) > limit_kb * 1024:
+        raise trip_validation_error(f"Evidence payload exceeds {limit_kb}KB limit.")
+    return payload
+
+
 def transition_trip(trip: TripTrip, next_status: TripStatus) -> None:
     """Transition the trip to the next status using the state machine."""
     validate_trip_transition(trip, next_status)
@@ -225,9 +242,12 @@ async def _find_overlap(
     conditions = [
         column == field_value,
         TripTrip.status.not_in(_REFERENCE_EXCLUDED_STATUSES),
-        TripTrip.planned_end_utc.is_not(None),
         TripTrip.trip_datetime_utc < planned_end_utc,
-        TripTrip.planned_end_utc > trip_start_utc,
+        func.coalesce(
+            TripTrip.planned_end_utc,
+            TripTrip.trip_datetime_utc + func.cast(text("'24 hours'"), INTERVAL),
+        )
+        > trip_start_utc,
     ]
     if exclude_trip_id is not None:
         conditions.append(TripTrip.id != exclude_trip_id)
@@ -474,27 +494,31 @@ async def _check_idempotency_key(
     idempotency_key: str | None,
     endpoint_fingerprint: str,
     request_hash: str,
+    _depth: int = 0,
 ) -> JSONResponse | None:
     """Replay a stored idempotent response when the same key is reused."""
     if not idempotency_key:
         return None
 
     now = utc_now()
-    claim_stmt = (
-        pg_insert(TripIdempotencyRecord)
-        .values(
-            idempotency_key=idempotency_key,
-            endpoint_fingerprint=endpoint_fingerprint,
-            request_hash=request_hash,
-            response_status=0,
-            response_headers_json={},
-            response_body_json="{}",
-            created_at_utc=now,
-            expires_at_utc=now + timedelta(hours=settings.idempotency_retention_hours),
+    async with async_session_factory() as secondary_session:
+        claim_stmt = (
+            pg_insert(TripIdempotencyRecord)
+            .values(
+                idempotency_key=idempotency_key,
+                endpoint_fingerprint=endpoint_fingerprint,
+                request_hash=request_hash,
+                response_status=0,
+                response_headers_json={},
+                response_body_json="{}",
+                created_at_utc=now,
+                expires_at_utc=now + timedelta(hours=settings.idempotency_retention_hours),
+            )
+            .on_conflict_do_nothing(index_elements=["idempotency_key", "endpoint_fingerprint"])
         )
-        .on_conflict_do_nothing(index_elements=["idempotency_key", "endpoint_fingerprint"])
-    )
-    claim_result = await session.execute(claim_stmt)
+        claim_result = await secondary_session.execute(claim_stmt)
+        await secondary_session.commit()
+
     if claim_result.rowcount == 1:
         return None
 
@@ -509,12 +533,29 @@ async def _check_idempotency_key(
                 .with_for_update(nowait=True)
             )
         ).scalar_one()
-    except (IntegrityError, OperationalError, DBAPIError):
+    except (NoResultFound, IntegrityError, OperationalError, DBAPIError):
+        # If we can't lock it or it's gone, it's either in-flight elsewhere or a race.
         raise idempotency_in_flight()
 
     if record.request_hash != request_hash:
         raise idempotency_payload_mismatch()
+
     if record.response_status == 0:
+        # BUG-1 Fix: If the placeholder is stale (> 60s), allow reclamation.
+        # This handles cases where the main transaction crashed before saving a response.
+        if (datetime.now(UTC) - record.created_at_utc).total_seconds() > 60:
+            logger.warning(
+                "Idempotency %s: Clearing stale in-flight record (created at %s)",
+                idempotency_key,
+                record.created_at_utc,
+            )
+            await session.delete(record)
+            await session.commit()
+            # Recurse with depth guard to prevent infinite loops
+            if _depth >= 2:
+                raise idempotency_in_flight()
+            return await _check_idempotency_key(session, idempotency_key, endpoint_fingerprint, request_hash, _depth + 1)
+
         raise idempotency_in_flight()
 
     response = JSONResponse(status_code=record.response_status, content=json.loads(record.response_body_json))
@@ -524,28 +565,32 @@ async def _check_idempotency_key(
 
 
 async def _save_idempotency_response(
-    session: AsyncSession,
-    *,
     idempotency_key: str,
     endpoint_fingerprint: str,
     request_payload: dict[str, Any],
     response_body: dict[str, Any],
     status_code: int,
 ) -> None:
-    """Persist the response for an idempotency key."""
+    """Persist the response for an idempotency key using a dedicated connection.
+    This ensures that even if the main trip transaction fails, the successful
+    outcome (e.g. 200 OK from previously created trip) is recorded.
+    """
     payload_hash = hashlib.sha256(json.dumps(request_payload, sort_keys=True).encode()).hexdigest()
-    session.add(
-        TripIdempotencyRecord(
-            idempotency_key=idempotency_key,
-            endpoint_fingerprint=endpoint_fingerprint,
-            request_hash=payload_hash,
-            response_status=status_code,
-            response_headers_json={},
-            response_body_json=json.dumps(response_body),
-            created_at_utc=utc_now(),
-            expires_at_utc=utc_now() + timedelta(hours=24),
+    now = utc_now()
+    async with async_session_factory() as session:
+        session.add(
+            TripIdempotencyRecord(
+                idempotency_key=idempotency_key,
+                endpoint_fingerprint=endpoint_fingerprint,
+                request_hash=payload_hash,
+                response_status=status_code,
+                response_headers_json={},
+                response_body_json=json.dumps(response_body),
+                created_at_utc=now,
+                expires_at_utc=now + timedelta(hours=settings.idempotency_retention_hours),
+            )
         )
-    )
+        await session.commit()
 
 
 def get_actor_actor_role(claims: TokenClaims) -> tuple[str, str]:
@@ -571,20 +616,127 @@ async def _get_trip_or_404(session: AsyncSession, trip_id: str) -> TripTrip:
     return trip
 
 
+def _constraint_name(exc: IntegrityError) -> str:
+    """Extract a stable constraint/index name from an IntegrityError."""
+    original = getattr(exc, "orig", None)
+    if original is None:
+        return str(exc)
+    if getattr(original, "constraint_name", None):
+        return str(original.constraint_name)
+    if getattr(getattr(original, "diag", None), "constraint_name", None):
+        return str(original.diag.constraint_name)
+    return str(original)
+
+
+def _map_integrity_error(
+    exc: IntegrityError,
+    *,
+    trip_no: str | None = None,
+    source_slip_no: str | None = None,
+    source_reference_key: str | None = None,
+) -> Exception:
+    """Map database integrity errors to stable problem responses."""
+    from trip_service.errors import (
+        empty_return_already_exists,
+        internal_error,
+        source_slip_conflict,
+        trip_no_conflict,
+        trip_source_reference_conflict,
+    )
+
+    name = _constraint_name(exc)
+    if "uq_trip_trips_trip_no" in name:
+        return trip_no_conflict(trip_no or "unknown")
+    if "uq_trips_source_slip_no_telegram" in name:
+        return source_slip_conflict(source_slip_no or "unknown")
+    if "uq_trips_source_reference_key" in name:
+        return trip_source_reference_conflict(source_reference_key or "unknown")
+    if "uq_trips_empty_return_base_trip" in name:
+        return empty_return_already_exists()
+    return internal_error(f"Database integrity error: {name}")
+
+
 def _event_payload(trip: TripTrip) -> dict[str, Any]:
-    """Generate a standard event payload for a trip."""
+    """Generate a standard event payload for a trip.
+
+    Includes all fields downstream consumers need to avoid a fan-out GET /trips/{id}.
+    """
     return {
         "trip_id": trip.id,
         "trip_no": trip.trip_no,
         "status": normalize_trip_status(trip.status),
         "version": trip.version,
+        "driver_id": trip.driver_id,
+        "vehicle_id": trip.vehicle_id,
+        "trailer_id": trip.trailer_id,
+        "route_id": trip.route_id,
+        "route_pair_id": trip.route_pair_id,
+        "origin_location_id": trip.origin_location_id,
+        "destination_location_id": trip.destination_location_id,
+        "trip_datetime_utc": trip.trip_datetime_utc.isoformat() if trip.trip_datetime_utc else None,
+        "planned_end_utc": trip.planned_end_utc.isoformat() if trip.planned_end_utc else None,
+        "source_type": trip.source_type,
         "updated_at_utc": trip.updated_at_utc.isoformat() if trip.updated_at_utc else utc_now().isoformat(),
     }
 
 
-async def _classify_manual_status(auth: Any, trip_datetime_utc: datetime) -> tuple[TripStatus, str | None]:
+def _validate_trip_weights(tare_weight_kg: int | None, gross_weight_kg: int | None, net_weight_kg: int | None) -> None:
+    """Validate weight invariants before hitting database constraints."""
+    from trip_service.errors import trip_validation_error
+
+    if tare_weight_kg is None or gross_weight_kg is None or net_weight_kg is None:
+        return
+    errors: list[dict[str, str]] = []
+    if gross_weight_kg < tare_weight_kg:
+        errors.append({"field": "body.gross_weight_kg", "message": "gross_weight_kg must be >= tare_weight_kg."})
+    if net_weight_kg != gross_weight_kg - tare_weight_kg:
+        errors.append(
+            {"field": "body.net_weight_kg", "message": "net_weight_kg must equal gross_weight_kg - tare_weight_kg."}
+        )
+    if errors:
+        raise trip_validation_error("Trip weights are inconsistent.", errors=errors)
+
+
+def _compute_data_quality_flag(source_type: str, ocr_confidence: float | None, route_resolved: bool) -> str:
+    """Compute the trip data-quality flag using the locked source contract."""
+    from trip_service.enums import DataQualityFlag
+
+    if source_type in (SourceType.ADMIN_MANUAL, SourceType.EMPTY_RETURN_ADMIN, SourceType.EXCEL_IMPORT):
+        return DataQualityFlag.HIGH
+    if ocr_confidence is not None and ocr_confidence >= 0.90 and route_resolved:
+        return DataQualityFlag.HIGH
+    if ocr_confidence is not None and ocr_confidence >= 0.70:
+        return DataQualityFlag.MEDIUM
+    if not route_resolved:
+        return DataQualityFlag.MEDIUM
+    return DataQualityFlag.LOW
+
+
+def _maybe_require_change_reason(
+    auth: AuthContext,
+    body: EditTripRequest,
+    trip: TripTrip,
+    new_driver_id: str | None,
+) -> None:
+    """Enforce source-aware driver edit rules for imported trips."""
+    if new_driver_id is None or new_driver_id == trip.driver_id:
+        return
+    if trip.source_type not in {SourceType.TELEGRAM_TRIP_SLIP, SourceType.EXCEL_IMPORT}:
+        return
+    if auth.is_super_admin:
+        if not body.change_reason or not body.change_reason.strip():
+            from trip_service.errors import trip_change_reason_required
+
+            raise trip_change_reason_required("SUPER_ADMIN must provide change_reason to reassign imported driver.")
+        return
+    from trip_service.errors import trip_source_locked_field
+
+    raise trip_source_locked_field("ADMIN cannot change driver_id on imported trips.")
+
+
+async def _classify_manual_status(auth: AuthContext, trip_datetime_utc: datetime) -> tuple[TripStatus, str | None]:
     """Determine initial status and review reason for a manually created trip."""
-    now = utc_now()
+    now = datetime.now(UTC)
     if auth.role == ActorType.SUPER_ADMIN.value:
         if trip_datetime_utc > now:
             return TripStatus.PENDING_REVIEW, ReviewReasonCode.FUTURE_MANUAL
@@ -592,6 +744,8 @@ async def _classify_manual_status(auth: Any, trip_datetime_utc: datetime) -> tup
 
     grace_start = now - timedelta(minutes=_MANUAL_CREATE_WINDOW_MINUTES)
     if trip_datetime_utc < grace_start or trip_datetime_utc > now:
+        from trip_service.errors import trip_invalid_date_window
+
         raise trip_invalid_date_window(
             "ADMIN may only create manual trips in the last 30 minutes and may not create future trips."
         )
@@ -606,6 +760,81 @@ def _ensure_complete_for_completion(trip: TripTrip) -> None:
     raise trip_completion_requirements_missing(f"Trip is missing required fields: {missing}.")
 
 
+def _set_enrichment_state(
+    trip: TripTrip,
+    enrichment: TripTripEnrichment,
+    *,
+    source_type: str,
+    route_ready: bool,
+    ocr_confidence: float | None = None,
+) -> None:
+    """Synchronize enrichment fields with the current trip payload completeness."""
+    from trip_service.enums import EnrichmentStatus, RouteStatus
+
+    enrichment.route_status = RouteStatus.READY if route_ready else RouteStatus.PENDING
+    enrichment.enrichment_status = EnrichmentStatus.READY if route_ready else EnrichmentStatus.PENDING
+    enrichment.data_quality_flag = _compute_data_quality_flag(source_type, ocr_confidence, route_resolved=route_ready)
+    enrichment.claim_token = None
+    enrichment.claim_expires_at_utc = None
+    enrichment.claimed_by_worker = None
+    enrichment.last_enrichment_error_code = None
+    enrichment.next_retry_at_utc = None
+    enrichment.updated_at_utc = utc_now()
+
+
 def _merged_payload_hash(payload: dict[str, Any]) -> str:
     """Generate a stable hash for a request payload."""
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def _generate_id() -> str:
+    """Generate a ULID string for primary keys."""
+    return str(ULID())
+
+
+def _coerce_actor_type(role: str) -> str:
+    """Normalize role strings for persistence/audit fields."""
+    return str(role)
+
+
+def _resolve_idempotency_key(canonical_key: str | None, legacy_key: str | None) -> str | None:
+    """Prefer the canonical idempotency header while still accepting the legacy alias."""
+    return canonical_key or legacy_key
+
+
+async def _save_idempotency_record(
+    session: AsyncSession,
+    *,
+    idempotency_key: str,
+    endpoint_fingerprint: str,
+    request_hash: str,
+    response_status: int,
+    response_body: dict[str, Any],
+    response_headers: dict[str, str],
+) -> None:
+    """Persist idempotency replay material for later requests."""
+    now = utc_now()
+    stmt = (
+        pg_insert(TripIdempotencyRecord)
+        .values(
+            idempotency_key=idempotency_key,
+            endpoint_fingerprint=endpoint_fingerprint,
+            request_hash=request_hash,
+            response_status=response_status,
+            response_headers_json=response_headers,
+            response_body_json=json.dumps(response_body, default=str),
+            created_at_utc=now,
+            expires_at_utc=now + timedelta(hours=settings.idempotency_retention_hours),
+        )
+        .on_conflict_do_update(
+            index_elements=["idempotency_key", "endpoint_fingerprint"],
+            set_={
+                "request_hash": request_hash,
+                "response_status": response_status,
+                "response_headers_json": response_headers,
+                "response_body_json": json.dumps(response_body, default=str),
+                "expires_at_utc": now + timedelta(hours=settings.idempotency_retention_hours),
+            },
+        )
+    )
+    await session.execute(stmt)

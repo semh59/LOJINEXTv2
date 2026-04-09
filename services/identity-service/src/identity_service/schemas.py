@@ -86,5 +86,15 @@ class AuditLogResponse(BaseModel):
     created_at_utc: datetime
 
 
+class UserListResponse(BaseModel):
+    items: list[UserResponse]
+    next_cursor: str | None = None
+
+
+class AuditListResponse(BaseModel):
+    items: list[AuditLogResponse]
+    next_cursor: str | None = None
+
+
 class JWKSResponse(BaseModel):
     keys: list[dict[str, object]]

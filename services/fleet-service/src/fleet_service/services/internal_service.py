@@ -228,19 +228,23 @@ async def validate_trip_compat_contract(
     vehicle_valid: bool | None = None
     trailer_valid: bool | None = None
 
-    driver_result = await driver_client.validate_driver(driver_id)
-    if not driver_result.get("exists", False):
-        errors.append({"field": "driver_id", "code": "DRIVER_NOT_FOUND"})
-    elif not driver_result.get("is_assignable", False):
-        errors.append(
-            {
-                "field": "driver_id",
-                "code": "DRIVER_NOT_ASSIGNABLE",
-                "reason": str(driver_result.get("status") or "UNKNOWN"),
-            }
-        )
-    else:
-        driver_valid = True
+    try:
+        driver_result = await driver_client.validate_driver(driver_id)
+        if not driver_result.get("exists", False):
+            errors.append({"field": "driver_id", "code": "DRIVER_NOT_FOUND"})
+        elif not driver_result.get("is_assignable", False):
+            errors.append(
+                {
+                    "field": "driver_id",
+                    "code": "DRIVER_NOT_ASSIGNABLE",
+                    "reason": str(driver_result.get("status") or "UNKNOWN"),
+                }
+            )
+        else:
+            driver_valid = True
+    except DependencyUnavailableError:
+        warnings.append({"field": "driver_id", "code": "DRIVER_SERVICE_UNAVAILABLE"})
+        driver_valid = True  # Optimistic fallback consistent with validate_trip_compat
 
     if vehicle_id is not None:
         vehicle_resp = await validate_single(session, "VEHICLE", vehicle_id)

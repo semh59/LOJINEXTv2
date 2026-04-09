@@ -15,7 +15,7 @@ from uuid import uuid4
 import jwt
 from platform_auth import AuthSettings, PlatformRole, verify_token
 from platform_auth.jwt_codec import issue_token
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
@@ -70,23 +70,34 @@ def _mask_email(email: str) -> str:
     return f"{mask}@{domain}"
 
 
-def _now_utc() -> datetime:
+# ---------------------------------------------------------------------------
+# Public utility helpers (promoted from private — used by admin router too)
+# ---------------------------------------------------------------------------
+
+def now_utc() -> datetime:
     return datetime.now(UTC)
 
 
-def _new_ulid() -> str:
+def new_ulid() -> str:
     return str(ULID())
 
 
-def _hash_token(raw_token: str) -> str:
+def hash_token(raw_token: str) -> str:
     return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
 
 
-def _as_utc(value: datetime) -> datetime:
+def as_utc(value: datetime) -> datetime:
     """Normalize DB-loaded datetimes to timezone-aware UTC."""
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+# Keep underscore aliases so any remaining internal callers don't break
+_now_utc = now_utc
+_new_ulid = new_ulid
+_hash_token = hash_token
+_as_utc = as_utc
 
 
 def _signing_auth_settings(private_key: str, public_key: str) -> AuthSettings:
@@ -141,7 +152,7 @@ async def ensure_group(session: AsyncSession, group_name: str) -> IdentityGroupM
     if group is not None:
         return group
     group = IdentityGroupModel(
-        group_id=_new_ulid(),
+        group_id=new_ulid(),
         group_name=group_name,
         description=f"Auto-managed group {group_name}",
     )
@@ -151,18 +162,23 @@ async def ensure_group(session: AsyncSession, group_name: str) -> IdentityGroupM
 
 
 async def ensure_active_signing_key(session: AsyncSession) -> IdentitySigningKeyModel:
-    """Return the active signing key, creating one if none exist."""
+    """Return the active signing key, creating one if none exist.
+
+    Uses SELECT FOR UPDATE to serialize concurrent key creation across pods,
+    preventing duplicate key generation when the active key slot is empty.
+    """
     result = await session.execute(
         select(IdentitySigningKeyModel)
         .where(IdentitySigningKeyModel.is_active.is_(True))
         .order_by(IdentitySigningKeyModel.created_at_utc.desc())
+        .with_for_update()
     )
     key = result.scalars().first()
     if key is not None:
         return key
 
     private_key, public_key = generate_rsa_keypair()
-    kid = _new_ulid()
+    kid = new_ulid()
     private_key_ciphertext = await _run_blocking(
         encrypt_private_key, private_key, aad=kid
     )
@@ -173,7 +189,7 @@ async def ensure_active_signing_key(session: AsyncSession) -> IdentitySigningKey
         private_key_ciphertext_b64=private_key_ciphertext,
         private_key_kek_version=require_kek_version(),
         is_active=True,
-        created_at_utc=_now_utc(),
+        created_at_utc=now_utc(),
         retired_at_utc=None,
     )
     session.add(key)
@@ -195,13 +211,13 @@ async def seed_bootstrap_state(session: AsyncSession) -> None:
     )
     if not user_count:
         super_admin = IdentityUserModel(
-            user_id=_new_ulid(),
+            user_id=new_ulid(),
             username=settings.bootstrap_superadmin_username,
             email=settings.bootstrap_superadmin_email,
             password_hash=hash_secret(settings.bootstrap_superadmin_password),
             is_active=True,
-            created_at_utc=_now_utc(),
-            updated_at_utc=_now_utc(),
+            created_at_utc=now_utc(),
+            updated_at_utc=now_utc(),
         )
         session.add(super_admin)
         await session.flush()
@@ -210,10 +226,10 @@ async def seed_bootstrap_state(session: AsyncSession) -> None:
             IdentityUserGroupModel(
                 user_id=super_admin.user_id,
                 group_id=super_admin_group.group_id,
-                assigned_at=_now_utc(),
+                assigned_at=now_utc(),
             )
         )
-        await _write_audit(
+        await write_audit(
             session,
             "USER",
             super_admin.user_id,
@@ -237,12 +253,11 @@ async def seed_bootstrap_state(session: AsyncSession) -> None:
                     service_name=service_name,
                     client_secret_hash=hash_secret(client_secret),
                     is_active=True,
-                    created_at_utc=_now_utc(),
+                    created_at_utc=now_utc(),
                     rotated_at_utc=None,
                 )
             )
 
-    # 4. Ensure Permissions exist (Ultra-Deep Bootstrap)
     for p_key in ALL_CORE_PERMISSIONS:
         perm = await session.get(IdentityPermissionModel, p_key)
         if not perm:
@@ -251,7 +266,6 @@ async def seed_bootstrap_state(session: AsyncSession) -> None:
             )
             session.add(perm)
 
-    # 5. Map SUPER_ADMIN to all permissions
     sa_group = await session.get(IdentityGroupModel, str(PlatformRole.SUPER_ADMIN))
     if sa_group:
         for p_key in ALL_CORE_PERMISSIONS:
@@ -325,7 +339,7 @@ def _role_for_groups(group_names: list[str]) -> str:
     return max(group_names, key=lambda item: ROLE_PRIORITY.get(item, 0))
 
 
-async def _write_audit(
+async def write_audit(
     session: AsyncSession,
     target_type: str,
     target_id: str,
@@ -338,7 +352,7 @@ async def _write_audit(
     request_id: str | None = None,
 ) -> None:
     audit = IdentityAuditLogModel(
-        audit_id=_new_ulid(),
+        audit_id=new_ulid(),
         target_type=target_type,
         target_id=target_id,
         action_type=action_type,
@@ -347,9 +361,13 @@ async def _write_audit(
         old_snapshot_json=json.dumps(old_snapshot) if old_snapshot else None,
         new_snapshot_json=json.dumps(new_snapshot) if new_snapshot else None,
         request_id=request_id,
-        created_at_utc=_now_utc(),
+        created_at_utc=now_utc(),
     )
     session.add(audit)
+
+
+# Keep underscore alias for any remaining callers
+_write_audit = write_audit
 
 
 async def _write_outbox(
@@ -361,7 +379,7 @@ async def _write_outbox(
     aggregate_type: str = "USER",
 ) -> None:
     outbox = IdentityOutboxModel(
-        outbox_id=_new_ulid(),
+        outbox_id=new_ulid(),
         aggregate_type=aggregate_type,
         aggregate_id=aggregate_id,
         event_name=event_name,
@@ -370,8 +388,8 @@ async def _write_outbox(
         publish_status="PENDING",
         retry_count=0,
         last_error=None,
-        created_at_utc=_now_utc(),
-        next_attempt_at_utc=_now_utc(),
+        created_at_utc=now_utc(),
+        next_attempt_at_utc=now_utc(),
         claim_expires_at_utc=None,
     )
     session.add(outbox)
@@ -450,7 +468,7 @@ async def _issue_user_access_token(
     groups: list[str],
     permissions: list[str],
 ) -> str:
-    now = int(_now_utc().timestamp())
+    ts = int(now_utc().timestamp())
     payload = {
         "sub": user_id,
         "role": role,
@@ -458,8 +476,8 @@ async def _issue_user_access_token(
         "permissions": permissions,
         "iss": settings.auth_issuer,
         "aud": settings.auth_audience,
-        "iat": now,
-        "exp": now + settings.access_token_ttl_seconds,
+        "iat": ts,
+        "exp": ts + settings.access_token_ttl_seconds,
         "jti": uuid4().hex,
     }
     return await _run_blocking(
@@ -477,18 +495,17 @@ async def _issue_service_access_token(
     service_name: str,
     audience: str | None = None,
 ) -> str:
-    now = int(_now_utc().timestamp())
-    # V2.1 Hardening: Ensure jti is unique and sub matches service name for S2S
+    ts = int(now_utc().timestamp())
     payload = {
         "sub": service_name,
         "role": str(PlatformRole.SERVICE),
         "service": service_name,
         "iss": settings.auth_issuer,
         "aud": audience or settings.auth_audience,
-        "iat": now,
-        "exp": now + settings.service_token_ttl_seconds,
-        "jti": uuid4().hex,  # Guaranteed uniqueness
-        "typ": "S2S",  # Explicitly mark as Service-to-Service
+        "iat": ts,
+        "exp": ts + settings.service_token_ttl_seconds,
+        "jti": uuid4().hex,
+        "typ": "S2S",
     }
     return await _run_blocking(
         issue_token,
@@ -499,9 +516,16 @@ async def _issue_service_access_token(
 
 
 async def issue_token_pair(
-    session: AsyncSession, user: IdentityUserModel
+    session: AsyncSession,
+    user: IdentityUserModel,
+    *,
+    family_id: str | None = None,
 ) -> dict[str, object]:
-    """Issue and persist an access/refresh token pair for a user."""
+    """Issue and persist an access/refresh token pair for a user.
+
+    If family_id is provided the new refresh token continues that family chain.
+    If None a new family is started (first login or explicit new session).
+    """
     profile = await build_user_profile(session, user)
     signing_key = await ensure_active_signing_key(session)
     private_key_pem = await _signing_private_key(signing_key)
@@ -515,13 +539,13 @@ async def issue_token_pair(
     )
     refresh_token = secrets.token_urlsafe(48)
     refresh_row = IdentityRefreshTokenModel(
-        token_id=_new_ulid(),
+        token_id=new_ulid(),
         user_id=user.user_id,
-        token_hash=_hash_token(refresh_token),
-        expires_at_utc=_now_utc()
-        + timedelta(seconds=settings.refresh_token_ttl_seconds),
+        token_hash=hash_token(refresh_token),
+        family_id=family_id or new_ulid(),
+        expires_at_utc=now_utc() + timedelta(seconds=settings.refresh_token_ttl_seconds),
         revoked_at_utc=None,
-        created_at_utc=_now_utc(),
+        created_at_utc=now_utc(),
     )
     session.add(refresh_row)
     await session.flush()
@@ -536,18 +560,47 @@ async def issue_token_pair(
 async def rotate_refresh_token(
     session: AsyncSession, raw_refresh_token: str
 ) -> dict[str, object]:
-    """Consume a refresh token and issue a replacement pair."""
-    token_hash = _hash_token(raw_refresh_token)
+    """Consume a refresh token and issue a replacement pair.
+
+    Stolen token detection: if the presented token is already revoked,
+    all tokens in its family are immediately revoked (RFC 6749 §10.4).
+    """
+    token_hash = hash_token(raw_refresh_token)
     result = await session.execute(
         select(IdentityRefreshTokenModel).where(
             IdentityRefreshTokenModel.token_hash == token_hash
         )
     )
     refresh_row = result.scalar_one_or_none()
+
+    # Stolen token detection: revoked token reused → nuke the entire family.
+    # The nuke must be committed in its own session because the caller will
+    # rollback the outer session after we raise ValueError.
+    if refresh_row is not None and refresh_row.revoked_at_utc is not None:
+        if refresh_row.family_id:
+            family_id = refresh_row.family_id
+            user_id_for_log = refresh_row.user_id
+            from identity_service.database import async_session_factory
+            async with async_session_factory() as nuke_session:
+                await nuke_session.execute(
+                    update(IdentityRefreshTokenModel)
+                    .where(
+                        IdentityRefreshTokenModel.family_id == family_id,
+                        IdentityRefreshTokenModel.revoked_at_utc.is_(None),
+                    )
+                    .values(revoked_at_utc=now_utc())
+                )
+                await nuke_session.commit()
+            logger.warning(
+                "Stolen token detected — revoked entire family %s for user %s",
+                family_id,
+                user_id_for_log,
+            )
+        raise ValueError("Token reuse detected. All sessions for this family have been invalidated.")
+
     if (
         refresh_row is None
-        or refresh_row.revoked_at_utc is not None
-        or _as_utc(refresh_row.expires_at_utc) <= _now_utc()
+        or as_utc(refresh_row.expires_at_utc) <= now_utc()
     ):
         raise ValueError("Refresh token is invalid or expired.")
 
@@ -555,15 +608,15 @@ async def rotate_refresh_token(
     if user is None or not user.is_active:
         raise ValueError("Refresh token owner is inactive.")
 
-    refresh_row.revoked_at_utc = _now_utc()
-    token_pair = await issue_token_pair(session, user)
+    refresh_row.revoked_at_utc = now_utc()
+    token_pair = await issue_token_pair(session, user, family_id=refresh_row.family_id)
     await session.flush()
     return token_pair
 
 
 async def revoke_refresh_token(session: AsyncSession, raw_refresh_token: str) -> None:
     """Revoke a refresh token if it exists."""
-    token_hash = _hash_token(raw_refresh_token)
+    token_hash = hash_token(raw_refresh_token)
     result = await session.execute(
         select(IdentityRefreshTokenModel).where(
             IdentityRefreshTokenModel.token_hash == token_hash
@@ -571,7 +624,7 @@ async def revoke_refresh_token(session: AsyncSession, raw_refresh_token: str) ->
     )
     refresh_row = result.scalar_one_or_none()
     if refresh_row is not None and refresh_row.revoked_at_utc is None:
-        refresh_row.revoked_at_utc = _now_utc()
+        refresh_row.revoked_at_utc = now_utc()
 
 
 async def issue_service_token(
@@ -580,7 +633,12 @@ async def issue_service_token(
     client_secret: str,
     audience: str | None,
 ) -> dict[str, object]:
-    """Issue a service token after validating client credentials."""
+    """Issue a service token after validating client credentials.
+
+    Cross-audience tokens (audience != platform audience) are only permitted
+    when auth_strict_audience_check=True and the audience is a registered service.
+    With the default (strict=False) only same-platform-audience tokens are issued.
+    """
     client = await session.get(IdentityServiceClientModel, client_id)
     if (
         client is None
@@ -588,15 +646,18 @@ async def issue_service_token(
         or not verify_secret(client_secret, client.client_secret_hash)
     ):
         raise ValueError("Service client credentials are invalid.")
+
     if audience and audience != settings.auth_audience:
-        if settings.auth_strict_audience_check:
+        if not settings.auth_strict_audience_check:
             raise ValueError(
-                "Strict Mode: Service token audience must match the platform audience."
+                "Cross-service audience tokens are disabled. "
+                "Set IDENTITY_AUTH_STRICT_AUDIENCE_CHECK=true to enable."
             )
         if audience not in settings.bootstrap_service_names:
             raise ValueError(
-                "Service token audience must match the platform audience or a registered service."
+                "Requested audience is not a registered service."
             )
+
     signing_key = await ensure_active_signing_key(session)
     access_token = await _issue_service_access_token(
         signing_key,
@@ -612,7 +673,11 @@ async def issue_service_token(
 
 
 async def decode_access_token(session: AsyncSession, token: str):
-    """Verify an access token against the persisted signing keys."""
+    """Verify an access token against the persisted signing keys.
+
+    Rejects tokens signed with retired keys and tokens whose jti is blocklisted
+    (e.g. after explicit logout).
+    """
     header = jwt.get_unverified_header(token)
     kid = str(header.get("kid", "")).strip()
     if not kid:
@@ -620,13 +685,35 @@ async def decode_access_token(session: AsyncSession, token: str):
     signing_key = await session.get(IdentitySigningKeyModel, kid)
     if signing_key is None:
         raise ValueError("Signing key not found.")
+    if signing_key.retired_at_utc is not None:
+        raise ValueError("Token was signed with a retired key.")
     auth_settings = AuthSettings(
         algorithm=signing_key.algorithm,
         public_key=signing_key.public_key_pem,
         issuer=settings.auth_issuer,
         audience=settings.auth_audience,
     )
-    return verify_token(token, auth_settings)
+    claims = verify_token(token, auth_settings)
+
+    # JTI blocklist check (post-logout / post-deactivation revocation)
+    from identity_service.blocklist import is_token_blocked
+    jti = _extract_jti(claims)
+    if jti and await is_token_blocked(jti):
+        raise ValueError("Token has been revoked.")
+
+    return claims
+
+
+def _extract_jti(claims) -> str | None:
+    """Extract jti from a claims object regardless of its concrete type."""
+    try:
+        return str(claims.jti) if hasattr(claims, "jti") and claims.jti else None
+    except Exception:
+        pass
+    try:
+        return str(claims["jti"]) if claims.get("jti") else None
+    except Exception:
+        return None
 
 
 async def assign_groups(
@@ -644,24 +731,23 @@ async def assign_groups(
             IdentityUserGroupModel(
                 user_id=user.user_id,
                 group_id=group.group_id,
-                assigned_at=_now_utc(),
+                assigned_at=now_utc(),
             )
         )
-    # Ensure atomicity within the session
     await _write_outbox(
         session,
         "identity.user.groups_assigned.v1",
         {
             "user_id": user.user_id,
             "groups": sorted(group_names),
-            "occurred_at_utc": _now_utc().isoformat(),
+            "occurred_at_utc": now_utc().isoformat(),
         },
         aggregate_id=user.user_id,
     )
 
 
 async def jwks_document(session: AsyncSession) -> dict[str, object]:
-    """Return the published JWKS document."""
+    """Return the published JWKS document (active, non-retired keys only)."""
     result = await session.execute(
         select(IdentitySigningKeyModel).where(
             IdentitySigningKeyModel.retired_at_utc.is_(None)

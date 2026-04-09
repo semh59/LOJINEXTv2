@@ -1,4 +1,4 @@
-"""Trailer API router — 12 endpoints (Phase E — mirrors vehicle + spec).
+﻿"""Trailer API router â€” 12 endpoints (Phase E â€” mirrors vehicle + spec).
 
 All endpoints produce application/json, errors produce application/problem+json.
 """
@@ -48,7 +48,7 @@ async def create_trailer(
         request_id=x_request_id,
         correlation_id=x_correlation_id,
     )
-    await session.commit()
+
     response.status_code = status_code
     response.headers["ETag"] = etag
     return result
@@ -124,7 +124,7 @@ async def patch_trailer(
         request_id=x_request_id,
         correlation_id=x_correlation_id,
     )
-    await session.commit()
+
     response.headers["ETag"] = etag
     return result
 
@@ -143,7 +143,7 @@ async def deactivate_trailer(
     x_request_id: str | None = Header(None, alias="X-Request-ID"),
     x_correlation_id: str | None = Header(None, alias="X-Correlation-ID"),
 ) -> TrailerDetailResponse:
-    """ACTIVE → INACTIVE."""
+    """ACTIVE â†’ INACTIVE."""
     result, etag = await trailer_service.deactivate_trailer(
         session,
         trailer_id,
@@ -153,7 +153,7 @@ async def deactivate_trailer(
         request_id=x_request_id,
         correlation_id=x_correlation_id,
     )
-    await session.commit()
+
     response.headers["ETag"] = etag
     return result
 
@@ -172,7 +172,7 @@ async def reactivate_trailer(
     x_request_id: str | None = Header(None, alias="X-Request-ID"),
     x_correlation_id: str | None = Header(None, alias="X-Correlation-ID"),
 ) -> TrailerDetailResponse:
-    """INACTIVE → ACTIVE."""
+    """INACTIVE â†’ ACTIVE."""
     result, etag = await trailer_service.reactivate_trailer(
         session,
         trailer_id,
@@ -182,7 +182,7 @@ async def reactivate_trailer(
         request_id=x_request_id,
         correlation_id=x_correlation_id,
     )
-    await session.commit()
+
     response.headers["ETag"] = etag
     return result
 
@@ -211,7 +211,7 @@ async def soft_delete_trailer(
         request_id=x_request_id,
         correlation_id=x_correlation_id,
     )
-    await session.commit()
+
     response.headers["ETag"] = etag
     return result
 
@@ -240,7 +240,7 @@ async def hard_delete_trailer(
         correlation_id=x_correlation_id,
         trip_reference_checker=trip_client.check_asset_references,
     )
-    await session.commit()
+
     return HardDeleteResponse(**result)
 
 
@@ -283,7 +283,7 @@ async def create_trailer_spec_version(
         request_id=x_request_id,
         correlation_id=x_correlation_id,
     )
-    await session.commit()
+
     response.status_code = status_code
     response.headers["ETag"] = etag
     return result

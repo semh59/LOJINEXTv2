@@ -6,6 +6,7 @@ Implements: httpx + signed JWT + simple circuit breaker.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -24,43 +25,49 @@ logger = logging.getLogger("fleet_service.clients.driver_client")
 _failure_count: int = 0
 _last_failure_time: float = 0.0
 _state: str = "CLOSED"  # CLOSED | OPEN | HALF_OPEN
+_lock = asyncio.Lock()
 
 
-def _check_breaker() -> None:
+async def _check_breaker() -> None:
     """Raise immediately if circuit is OPEN and cooldown hasn't elapsed."""
     global _state  # noqa: PLW0603
-    if _state == "CLOSED":
-        return
-    if _state == "OPEN":
-        elapsed = time.monotonic() - _last_failure_time
-        if elapsed >= settings.breaker_half_open_after_seconds:
-            _state = "HALF_OPEN"
-            logger.info("driver-client circuit breaker → HALF_OPEN")
+    async with _lock:
+        if _state == "CLOSED":
             return
-        raise DependencyUnavailableError("driver-service")
-    # HALF_OPEN → allow the request through
+        if _state == "OPEN":
+            elapsed = time.monotonic() - _last_failure_time
+            if elapsed >= settings.breaker_half_open_after_seconds:
+                _state = "HALF_OPEN"
+                logger.info("driver-client circuit breaker → HALF_OPEN")
+                return
+            raise DependencyUnavailableError("driver-service")
+        # HALF_OPEN → allow the request through
 
 
-def _record_success() -> None:
+async def _record_success() -> None:
     global _failure_count, _state  # noqa: PLW0603
-    if _state == "HALF_OPEN":
-        _failure_count = 0
-        _state = "CLOSED"
-        logger.info("driver-client circuit breaker → CLOSED")
-    elif _state == "CLOSED":
-        _failure_count = 0
+    async with _lock:
+        if _state == "HALF_OPEN":
+            _failure_count = 0
+            _state = "CLOSED"
+            logger.info("driver-client circuit breaker → CLOSED")
+        elif _state == "CLOSED":
+            _failure_count = 0
 
 
-def _record_failure() -> None:
+async def _record_failure() -> None:
     global _failure_count, _last_failure_time, _state  # noqa: PLW0603
-    _failure_count += 1
-    _last_failure_time = time.monotonic()
-    if _state == "HALF_OPEN":
-        _state = "OPEN"
-        logger.warning("driver-client circuit breaker → OPEN (half-open probe failed)")
-    elif _failure_count >= settings.breaker_open_threshold:
-        _state = "OPEN"
-        logger.warning("driver-client circuit breaker → OPEN (threshold=%d reached)", settings.breaker_open_threshold)
+    async with _lock:
+        _failure_count += 1
+        _last_failure_time = time.monotonic()
+        if _state == "HALF_OPEN":
+            _state = "OPEN"
+            logger.warning("driver-client circuit breaker → OPEN (half-open probe failed)")
+        elif _failure_count >= settings.breaker_open_threshold:
+            _state = "OPEN"
+            logger.warning(
+                "driver-client circuit breaker → OPEN (threshold=%d reached)", settings.breaker_open_threshold
+            )
 
 
 # --- Public API ---
@@ -72,7 +79,7 @@ async def validate_driver(driver_id: str) -> dict[str, Any]:
     Returns a normalized single-driver result payload.
     Raises DependencyUnavailableError on failure or circuit-open.
     """
-    _check_breaker()
+    await _check_breaker()
 
     url = f"{settings.driver_service_base_url}/internal/v1/drivers/eligibility/check"
     token = await issue_service_token()
@@ -100,7 +107,7 @@ async def validate_driver(driver_id: str) -> dict[str, Any]:
             item = items[0]
             if not isinstance(item, dict):
                 raise ValueError("Driver eligibility response item was not an object.")
-            _record_success()
+            await _record_success()
             return {
                 "driver_id": driver_id,
                 "exists": bool(item.get("exists", False)),
@@ -109,6 +116,6 @@ async def validate_driver(driver_id: str) -> dict[str, Any]:
                 "is_assignable": bool(item.get("is_assignable", False)),
             }
     except Exception as exc:
-        _record_failure()
+        await _record_failure()
         logger.error("driver-client validate_driver(%s) failed: %s", driver_id, exc)
         raise DependencyUnavailableError("driver-service") from exc

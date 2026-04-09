@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     kafka_bootstrap_servers: str = "localhost:9092"
     kafka_client_id: str = "identity-service"
 
+    redis_url: str = "redis://localhost:6379/0"
+    rate_limit_login_per_minute: int = 10
+    rate_limit_login_failures_before_lockout: int = 5
+    rate_limit_login_lockout_seconds: int = 900
+    rate_limit_service_token_per_minute: int = 30
+    access_token_blocklist_ttl_seconds: int = 950
+
     bootstrap_superadmin_username: str = "superadmin"
     bootstrap_superadmin_email: str = "superadmin@example.com"
     bootstrap_superadmin_password: str = "change-me-now"
@@ -123,6 +130,10 @@ def validate_prod_settings(current: Settings) -> None:
         errors.append("IDENTITY_KEY_ENCRYPTION_KEY_VERSION must be set in prod.")
     if current.bootstrap_service_clients_json:
         errors.append("IDENTITY_BOOTSTRAP_SERVICE_CLIENTS_JSON is not allowed in prod.")
+    if current.redis_url == "redis://localhost:6379/0":
+        errors.append(
+            "IDENTITY_REDIS_URL must be set to a non-default value in prod."
+        )
     if not current.bootstrap_service_names:
         errors.append(
             "IDENTITY_SERVICE_CLIENTS must list bootstrap service clients in prod."

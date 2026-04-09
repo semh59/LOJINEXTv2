@@ -16,10 +16,28 @@ from aiogram.types import (
     PhotoSize,
 )
 
-from telegram_service.clients import driver_client, trip_client
+from telegram_service.clients import driver_client, fleet_client, trip_client
 from telegram_service.config import settings
-from telegram_service.ocr.extractor import extract_slip_fields
+from telegram_service.i18n import (
+    BTN_BACK,
+    BTN_CANCEL,
+    BTN_CONFIRM,
+    BTN_EDIT,
+    FIELD_LABELS,
+    MSG_INVALID_NUMBER,
+    MSG_NOT_REGISTERED,
+    MSG_SLIP_CANCELLED,
+    MSG_SLIP_CONFIRM,
+    MSG_SLIP_INGEST_ERROR,
+    MSG_SLIP_INGEST_FALLBACK,
+    MSG_SLIP_INGESTED,
+    MSG_SLIP_OCR_FAILED,
+    MSG_SLIP_PROMPT_EDIT,
+    MSG_SLIP_READ_SUCCESS,
+    MSG_SLIP_READING,
+)
 from telegram_service.observability import BOT_OCR_REQUESTS_TOTAL, get_standard_labels
+from telegram_service.ocr.extractor import extract_slip_fields
 from telegram_service.schemas import SlipFields
 
 logger = logging.getLogger(__name__)
@@ -32,18 +50,7 @@ class SlipStates(StatesGroup):
     correcting_field = State()  # Waiting for corrected value of one field
 
 
-# Human-readable field labels for the correction menu
-_FIELD_LABELS: dict[str, str] = {
-    "truck_plate": "Araç Plakası",
-    "trailer_plate": "Dorse Plakası",
-    "origin": "Kalkış Yeri",
-    "destination": "Varış Yeri",
-    "trip_date": "Tarih (GG.AA.YYYY)",
-    "trip_time": "Saat (SS:DD)",
-    "tare_kg": "Dara Ağırlık (kg)",
-    "gross_kg": "Brüt Ağırlık (kg)",
-    "net_kg": "Net Ağırlık (kg)",
-}
+# Human-readable field labels for the correction menu are now in i18n.FIELD_LABELS
 
 
 def _format_confirmation(fields: SlipFields) -> str:
@@ -51,51 +58,52 @@ def _format_confirmation(fields: SlipFields) -> str:
         return str(val) if val is not None else "—"
 
     weight_line = ""
-    if fields.tare_kg is not None and fields.gross_kg is not None and fields.net_kg is not None:
-        weight_line = (
-            f"⚖️ Dara: <b>{v(fields.tare_kg)}</b> kg\n"
-            f"⚖️ Brüt: <b>{v(fields.gross_kg)}</b> kg\n"
-            f"⚖️ Net: <b>{v(fields.net_kg)}</b> kg\n"
-        )
-    else:
-        weight_line = (
-            f"⚖️ Dara: <b>{v(fields.tare_kg)}</b> kg\n"
-            f"⚖️ Brüt: <b>{v(fields.gross_kg)}</b> kg\n"
-            f"⚖️ Net: <b>{v(fields.net_kg)}</b> kg\n"
-        )
+
+    def _format_weight(label_key: str, val: object) -> str:
+        label = FIELD_LABELS[label_key].split(" / ")[0]  # Use Turkish label for weight line summary
+        return f"⚖️ {label}: <b>{v(val)}</b> kg\n"
+
+    weight_line = (
+        _format_weight("tare_kg", fields.tare_kg)
+        + _format_weight("gross_kg", fields.gross_kg)
+        + _format_weight("net_kg", fields.net_kg)
+    )
 
     confidence_pct = int(fields.ocr_confidence * 100)
     quality = "🟢" if confidence_pct >= 70 else "🟡" if confidence_pct >= 40 else "🔴"
 
     return (
-        f"📋 <b>Fiş bilgileri okundu</b> {quality} ({confidence_pct}%)\n\n"
-        f"🚛 Araç plakası: <b>{v(fields.truck_plate)}</b>\n"
-        f"🚌 Dorse plakası: <b>{v(fields.trailer_plate)}</b>\n"
-        f"📍 Kalkış: <b>{v(fields.origin)}</b>\n"
-        f"📍 Varış: <b>{v(fields.destination)}</b>\n"
-        f"📅 Tarih: <b>{v(fields.trip_date)}</b>  Saat: <b>{v(fields.trip_time)}</b>\n"
+        f"{MSG_SLIP_READ_SUCCESS} {quality} ({confidence_pct}%)\n\n"
+        f"🚛 {FIELD_LABELS['truck_plate']}: <b>{v(fields.truck_plate)}</b>\n"
+        f"🚌 {FIELD_LABELS['trailer_plate']}: <b>{v(fields.trailer_plate)}</b>\n"
+        f"📍 {FIELD_LABELS['origin']}: <b>{v(fields.origin)}</b>\n"
+        f"📍 {FIELD_LABELS['destination']}: <b>{v(fields.destination)}</b>\n"
+        f"📅 {FIELD_LABELS['trip_date']}: <b>{v(fields.trip_date)}</b>  "
+        f"Saat: <b>{v(fields.trip_time)}</b>\n"
         f"{weight_line}\n"
-        "Bilgiler doğru mu?"
+        f"{MSG_SLIP_CONFIRM}"
     )
 
 
 def _confirmation_keyboard() -> InlineKeyboardMarkup:
+    """Build the main confirmation keyboard."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅ Onayla", callback_data="slip:confirm"),
-                InlineKeyboardButton(text="✏️ Düzenle", callback_data="slip:edit"),
+                InlineKeyboardButton(text=BTN_CONFIRM, callback_data="slip:confirm"),
+                InlineKeyboardButton(text=BTN_EDIT, callback_data="slip:edit"),
             ],
-            [InlineKeyboardButton(text="❌ İptal", callback_data="slip:cancel")],
+            [InlineKeyboardButton(text=BTN_CANCEL, callback_data="slip:cancel")],
         ]
     )
 
 
 def _edit_keyboard() -> InlineKeyboardMarkup:
+    """Build the field selection keyboard."""
     buttons = [
-        [InlineKeyboardButton(text=label, callback_data=f"slip:field:{key}")] for key, label in _FIELD_LABELS.items()
+        [InlineKeyboardButton(text=label, callback_data=f"slip:field:{key}")] for key, label in FIELD_LABELS.items()
     ]
-    buttons.append([InlineKeyboardButton(text="◀️ Geri", callback_data="slip:back")])
+    buttons.append([InlineKeyboardButton(text=BTN_BACK, callback_data="slip:back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -107,10 +115,10 @@ async def handle_photo(message: Message, state: FSMContext) -> None:
 
     driver = await driver_client.lookup_by_telegram_id(message.from_user.id)
     if driver is None:
-        await message.answer("⛔ Telegram hesabınız sisteme kayıtlı değil.\nLütfen yöneticinize başvurun.")
+        await message.answer(MSG_NOT_REGISTERED)
         return
 
-    await message.answer("⏳ Fiş okunuyor, lütfen bekleyin...")
+    await message.answer(MSG_SLIP_READING)
 
     # Download highest-resolution photo
     photo: PhotoSize = message.photo[-1]
@@ -129,10 +137,7 @@ async def handle_photo(message: Message, state: FSMContext) -> None:
         # Record OCR Failure
         BOT_OCR_REQUESTS_TOTAL.labels(status="failure", **get_standard_labels()).inc()
         logger.exception("OCR failed for driver %s", driver.driver_id)
-        await message.answer(
-            "❌ Fiş okunamadı. Lütfen daha net bir fotoğraf çekerek tekrar deneyin.\n"
-            "Ya da metni yazarak /el_ile_gir komutunu kullanın."
-        )
+        await message.answer(MSG_SLIP_OCR_FAILED)
         return
 
     # Store fields + driver context in FSM state
@@ -155,10 +160,34 @@ async def handle_confirm(callback: CallbackQuery, state: FSMContext) -> None:
     """Driver confirmed the parsed fields — submit to trip-service."""
     await callback.answer()
     data = await state.get_data()
+    if not data or "fields" not in data or "driver_id" not in data:
+        await callback.message.edit_text(MSG_SLIP_CANCELLED)
+        await state.clear()
+        return
+
     fields = SlipFields.model_validate(data["fields"])
     driver_id: str = data["driver_id"]
     message_id: str = data["message_id"]
     sent_at_utc: str = data["sent_at_utc"]
+
+    # --- BUG-1 & H-2 FIX: Resolve Plates to ULIDs ---
+    vehicle_id = await fleet_client.lookup_vehicle_by_plate(fields.truck_plate)
+    if not vehicle_id:
+        logger.warning("Vehicle not found for plate: %s", fields.truck_plate)
+        await callback.message.edit_text(f"❌ Araç bulunamadı: {fields.truck_plate}\nLütfen plakayı kontrol edin.")
+        return
+
+    trailer_id = None
+    if fields.trailer_plate:
+        trailer_id = await fleet_client.lookup_trailer_by_plate(fields.trailer_plate)
+        if not trailer_id:
+            logger.warning("Trailer not found for plate: %s", fields.trailer_plate)
+            # We treat trailer as optional if it exists in OCR but not in DB?
+            # Per H-2 audit, it should be resolved to ULID.
+            await callback.message.edit_text(
+                f"❌ Dorse bulunamadı: {fields.trailer_plate}\nLütfen plakayı kontrol edin."
+            )
+            return
 
     await state.clear()
 
@@ -168,17 +197,31 @@ async def handle_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         try:
             result = await trip_client.ingest_slip(
                 driver_id=driver_id,
-                vehicle_id=fields.truck_plate or "UNKNOWN",
+                vehicle_id=vehicle_id,  # Now a ULID
+                trailer_id=trailer_id,  # Now a ULID
                 slip_no=message_id,
                 reference_key=f"tg:{message_id}",
                 fields=fields,
             )
-            await callback.message.edit_text(
-                f"✅ Seferiniz eklendi.\n📄 Fiş No: <b>{result.trip_no}</b>\nDurum: <b>İnceleme Bekliyor</b>"
-            )
-        except Exception:
-            logger.exception("Slip ingest failed for driver %s", driver_id)
-            await callback.message.edit_text("❌ Sefer eklenirken hata oluştu. Lütfen tekrar deneyin.")
+            await callback.message.edit_text(MSG_SLIP_INGESTED.format(trip_no=result.trip_no))
+        except Exception as exc:
+            status_code = getattr(getattr(exc, "response", None), "status_code", 500)
+            logger.exception("Slip ingest failed for driver %s (status %s)", driver_id, status_code)
+
+            error_msg = MSG_SLIP_INGEST_ERROR
+            if status_code == 409:
+                error_msg = "⚠️ Bu fiş zaten sisteme girilmiş. / This slip is already in the system."
+            elif status_code == 422:
+                error_msg = (
+                    "❌ Veri doğrulama hatası. Lütfen yöneticiye başvurun. / Validation error. Please contact admin."
+                )
+            elif status_code == 404:
+                error_msg = (
+                    "❌ Kayıt bulunamadı. Lütfen araç ve dorse plakalarını kontrol edin. / "
+                    "Resource not found. Please check plates."
+                )
+
+            await callback.message.edit_text(error_msg)
     else:
         # Low confidence or missing required fields → fallback
         reason = (
@@ -193,14 +236,10 @@ async def handle_confirm(callback: CallbackQuery, state: FSMContext) -> None:
                 sent_at_utc=sent_at_utc,
                 fallback_reason=reason,
             )
-            await callback.message.edit_text(
-                f"⚠️ Fiş eksik bilgilerle kaydedildi.\n"
-                f"📄 Fiş No: <b>{result.trip_no}</b>\n"
-                "Yöneticiniz eksik bilgileri tamamlayacak."
-            )
+            await callback.message.edit_text(MSG_SLIP_INGEST_FALLBACK.format(trip_no=result.trip_no))
         except Exception:
             logger.exception("Fallback ingest failed for driver %s", driver_id)
-            await callback.message.edit_text("❌ Sefer eklenirken hata oluştu. Lütfen tekrar deneyin.")
+            await callback.message.edit_text(MSG_SLIP_INGEST_ERROR)
 
 
 @router.callback_query(SlipStates.confirming, F.data == "slip:edit")
@@ -216,13 +255,13 @@ async def handle_field_select(callback: CallbackQuery, state: FSMContext) -> Non
     """Driver selected a field to correct — ask for new value."""
     await callback.answer()
     field_key = callback.data.split("slip:field:")[1]  # type: ignore[union-attr]
-    label = _FIELD_LABELS.get(field_key, field_key)
+    label = FIELD_LABELS.get(field_key, field_key)
 
     await state.set_state(SlipStates.correcting_field)
     await state.update_data(correcting_field=field_key)
 
     assert callback.message is not None
-    await callback.message.answer(f"✏️ <b>{label}</b> için yeni değeri yazın:")
+    await callback.message.answer(MSG_SLIP_PROMPT_EDIT.format(label=label))
 
 
 @router.message(SlipStates.correcting_field)
@@ -240,9 +279,9 @@ async def handle_field_value(message: Message, state: FSMContext) -> None:
             int_val = int(raw_value.replace(".", "").replace(",", ""))
             setattr(fields, field_key, int_val)
         except ValueError:
-            await message.answer("❗ Geçersiz sayı. Lütfen sadece rakam girin:")
+            await message.answer(MSG_INVALID_NUMBER)
             return
-    elif field_key in _FIELD_LABELS:
+    elif field_key in FIELD_LABELS:
         setattr(fields, field_key, raw_value if raw_value else None)
 
     # Recalculate confidence
@@ -271,7 +310,7 @@ async def handle_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.clear()
     assert callback.message is not None
-    await callback.message.edit_text("❌ Fiş girişi iptal edildi.")
+    await callback.message.edit_text(MSG_SLIP_CANCELLED)
 
 
 def _is_full_slip(fields: SlipFields) -> bool:

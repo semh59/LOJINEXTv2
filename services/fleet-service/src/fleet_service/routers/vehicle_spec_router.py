@@ -43,7 +43,6 @@ async def create_vehicle_spec_version(
         request_id=x_request_id,
         correlation_id=x_correlation_id,
     )
-    await session.commit()
     response.status_code = status_code
     response.headers["ETag"] = etag
     return result

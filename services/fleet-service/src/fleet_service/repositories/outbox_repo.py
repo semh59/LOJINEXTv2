@@ -6,6 +6,7 @@ import datetime
 
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from ulid import ULID
 
 from fleet_service.config import settings
 from fleet_service.models import FleetOutbox
@@ -19,7 +20,9 @@ def _claim_deadline(now: datetime.datetime) -> datetime.datetime:
 
 
 async def insert_outbox_event(session: AsyncSession, event: FleetOutbox) -> None:
-    """Insert a new outbox event (within the same transaction as the domain mutation)."""
+    """Insert a new outbox event with 512KB safety guard."""
+    if event.payload_json and len(event.payload_json) > 512_000:
+        raise ValueError(f"Outbox payload exceeds 512KB safety limit ({len(event.payload_json)} bytes)")
     session.add(event)
     await session.flush()
 
@@ -37,7 +40,12 @@ async def dead_letter_by_aggregate(session: AsyncSession, aggregate_type: str, a
             FleetOutbox.aggregate_id == aggregate_id,
             FleetOutbox.publish_status.in_(["PENDING", "FAILED", "PUBLISHING"]),
         )
-        .values(publish_status="DEAD_LETTER", claim_expires_at_utc=None)
+        .values(
+            publish_status="DEAD_LETTER",
+            claim_expires_at_utc=None,
+            claim_token=None,
+            claimed_by_worker=None,
+        )
     )
     result = await session.execute(stmt)
     return result.rowcount  # type: ignore[return-value]
@@ -55,6 +63,20 @@ async def claim_batch(
         now = utc_now_naive()
     else:
         now = to_utc_naive(now)
+    # -----------------------------------------------------------------------
+    # Head-of-Line (HOL) blocking:
+    # Ensures only the earliest available event for a partition is claimed.
+    # -----------------------------------------------------------------------
+    from sqlalchemy import not_
+    from sqlalchemy.orm import aliased
+
+    o2 = aliased(FleetOutbox)
+    hol_subq = select(1).where(
+        o2.partition_key == FleetOutbox.partition_key,
+        o2.publish_status != "PUBLISHED",
+        o2.created_at_utc < FleetOutbox.created_at_utc,
+    )
+
     stmt = (
         select(FleetOutbox)
         .where(
@@ -68,7 +90,8 @@ async def claim_batch(
                     FleetOutbox.claim_expires_at_utc.is_not(None),
                     FleetOutbox.claim_expires_at_utc < now,
                 ),
-            )
+            ),
+            not_(hol_subq.exists()),
         )
         .order_by(FleetOutbox.created_at_utc)
         .limit(batch_size)
@@ -81,6 +104,7 @@ async def claim_batch(
 
     claimed_until = _claim_deadline(now)
     row_ids = [row.outbox_id for row in rows]
+    claim_token = str(ULID())
     await session.execute(
         update(FleetOutbox)
         .where(FleetOutbox.outbox_id.in_(row_ids))
@@ -88,6 +112,8 @@ async def claim_batch(
             publish_status="PUBLISHING",
             next_attempt_at_utc=claimed_until,
             claim_expires_at_utc=claimed_until,
+            claim_token=claim_token,
+            claimed_by_worker=settings.service_name,
         )
     )
     return rows
@@ -102,7 +128,13 @@ async def mark_published(session: AsyncSession, outbox_id: str, now: datetime.da
     stmt = (
         update(FleetOutbox)
         .where(FleetOutbox.outbox_id == outbox_id)
-        .values(publish_status="PUBLISHED", published_at_utc=now, claim_expires_at_utc=None)
+        .values(
+            publish_status="PUBLISHED",
+            published_at_utc=now,
+            claim_expires_at_utc=None,
+            claim_token=None,
+            claimed_by_worker=None,
+        )
     )
     await session.execute(stmt)
 
@@ -126,6 +158,8 @@ async def mark_failed(
             last_error_message=error_message,
             next_attempt_at_utc=normalized_next_attempt_at,
             claim_expires_at_utc=None,
+            claim_token=None,
+            claimed_by_worker=None,
         )
     )
     await session.execute(stmt)
@@ -136,6 +170,11 @@ async def mark_dead_letter(session: AsyncSession, outbox_id: str) -> None:
     stmt = (
         update(FleetOutbox)
         .where(FleetOutbox.outbox_id == outbox_id)
-        .values(publish_status="DEAD_LETTER", claim_expires_at_utc=None)
+        .values(
+            publish_status="DEAD_LETTER",
+            claim_expires_at_utc=None,
+            claim_token=None,
+            claimed_by_worker=None,
+        )
     )
     await session.execute(stmt)

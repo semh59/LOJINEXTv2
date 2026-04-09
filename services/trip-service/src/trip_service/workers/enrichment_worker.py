@@ -281,7 +281,7 @@ async def _process_single_enrichment(
     """
     from trip_service.observability import correlation_id
 
-    token = correlation_id.set(enrichment_id)
+    token = correlation_id.set(trip_id)
     try:
         async with async_session_factory() as session:
             # Reload enrichment row with trip

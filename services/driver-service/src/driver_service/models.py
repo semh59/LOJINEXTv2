@@ -146,9 +146,8 @@ class DriverAuditLogModel(Base):
     __tablename__ = "driver_audit_log"
 
     audit_id: Mapped[str] = mapped_column(String(26), primary_key=True)
-    driver_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("driver_drivers.driver_id", ondelete="SET NULL"), nullable=True
-    )
+    # Audit log should NOT have a FK to the driver table to ensure visibility after hard-delete
+    driver_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     action_type: Mapped[str] = mapped_column(String(32), nullable=False)
     changed_fields_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     old_snapshot_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
@@ -181,12 +180,13 @@ class DriverOutboxModel(Base):
     __tablename__ = "driver_outbox"
 
     outbox_id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    # Outbox should NOT CASCADE delete; we must handle pending events before hard-delete
     driver_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("driver_drivers.driver_id", ondelete="CASCADE"), nullable=False
+        String(26), ForeignKey("driver_drivers.driver_id", ondelete="RESTRICT"), nullable=False
     )
     event_name: Mapped[str] = mapped_column(String(128), nullable=False)
     event_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    payload_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
     partition_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     publish_status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING")
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

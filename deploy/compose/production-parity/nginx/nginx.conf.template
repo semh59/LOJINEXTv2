@@ -72,6 +72,15 @@ server {
         proxy_set_header X-Request-ID $request_id;
     }
 
+    location /admin/v1/trips {
+        proxy_pass http://trip_api;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $request_id;
+    }
+
     location = /trip/health {
         rewrite ^/trip/health$ /health break;
         proxy_pass http://trip_api;
@@ -82,8 +91,17 @@ server {
         proxy_pass http://trip_api;
     }
 
-    location /v1/ {
-        proxy_pass http://location_api;
+    location /api/v1/locations/ {
+        proxy_pass http://location_api/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $request_id;
+    }
+
+    location /admin/v1/locations/ {
+        proxy_pass http://location_api/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -110,6 +128,15 @@ server {
         proxy_set_header X-Request-ID $request_id;
     }
 
+    location /admin/v1/drivers {
+        proxy_pass http://driver_api;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $request_id;
+    }
+
     location = /driver/health {
         rewrite ^/driver/health$ /health break;
         proxy_pass http://driver_api;
@@ -120,8 +147,8 @@ server {
         proxy_pass http://driver_api;
     }
 
-    location /api/v1/vehicles {
-        proxy_pass http://fleet_api;
+    location /api/v1/fleet/ {
+        proxy_pass http://fleet_api/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -129,8 +156,8 @@ server {
         proxy_set_header X-Request-ID $request_id;
     }
 
-    location /api/v1/trailers {
-        proxy_pass http://fleet_api;
+    location /admin/v1/fleet/ {
+        proxy_pass http://fleet_api/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

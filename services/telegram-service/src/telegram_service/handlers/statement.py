@@ -10,6 +10,18 @@ from aiogram.types import BufferedInputFile, Message
 
 from telegram_service.clients import driver_client, trip_client
 from telegram_service.config import settings
+from telegram_service.i18n import (
+    ERROR_GENERIC,
+    MSG_DATE_RANGE_MAX,
+    MSG_DATE_RANGE_ORDER,
+    MSG_INVALID_DATE,
+    MSG_NO_TRIPS_FOUND,
+    MSG_NOT_REGISTERED,
+    MSG_PROMPT_DATE_FROM,
+    MSG_PROMPT_DATE_TO,
+    MSG_REPORT_CAPTION,
+    WAITING,
+)
 from telegram_service.observability import (
     BOT_COMMANDS_TOTAL,
     BOT_PDF_GENERATED_TOTAL,
@@ -42,35 +54,37 @@ def _parse_date(text: str) -> date | None:
 
 @router.message(Command("seferlerim"))
 async def cmd_seferlerim(message: Message, state: FSMContext) -> None:
-    """Entry point: driver requests their trip statement."""
+    """Entry point: driver requests their trip statement (/seferlerim)."""
     BOT_COMMANDS_TOTAL.labels(command="/seferlerim", **get_standard_labels()).inc()
     if message.from_user is None:
         return
 
     driver = await driver_client.lookup_by_telegram_id(message.from_user.id)
     if driver is None:
-        await message.answer("⛔ Telegram hesabınız sisteme kayıtlı değil.\nLütfen yöneticinize başvurun.")
+        await message.answer(MSG_NOT_REGISTERED)
         return
 
     await state.set_state(StatementStates.waiting_date_from)
     await state.update_data(driver_id=driver.driver_id, driver_name=driver.full_name)
-    await message.answer("📅 Başlangıç tarihini girin:\n<i>Örnek: 01.03.2026</i>")
+    await message.answer(MSG_PROMPT_DATE_FROM)
 
 
 @router.message(StatementStates.waiting_date_from)
 async def handle_date_from(message: Message, state: FSMContext) -> None:
+    """Handle start date input."""
     date_from = _parse_date(message.text or "")
     if date_from is None:
-        await message.answer("❗ Geçersiz tarih. Lütfen GG.AA.YYYY formatında girin:\n<i>Örnek: 01.03.2026</i>")
+        await message.answer(MSG_INVALID_DATE)
         return
 
     await state.update_data(date_from=date_from.isoformat())
     await state.set_state(StatementStates.waiting_date_to)
-    await message.answer("📅 Bitiş tarihini girin:\n<i>Örnek: 31.03.2026</i>")
+    await message.answer(MSG_PROMPT_DATE_TO)
 
 
 @router.message(StatementStates.waiting_date_to)
 async def handle_date_to(message: Message, state: FSMContext) -> None:
+    """Handle end date input and trigger PDF generation."""
     data = await state.get_data()
     date_from = date.fromisoformat(data["date_from"])
     driver_id: str = data["driver_id"]
@@ -78,19 +92,19 @@ async def handle_date_to(message: Message, state: FSMContext) -> None:
 
     date_to = _parse_date(message.text or "")
     if date_to is None:
-        await message.answer("❗ Geçersiz tarih. Lütfen GG.AA.YYYY formatında girin:\n<i>Örnek: 31.03.2026</i>")
+        await message.answer(MSG_INVALID_DATE)
         return
 
     if date_to < date_from:
-        await message.answer("❗ Bitiş tarihi başlangıç tarihinden önce olamaz.")
+        await message.answer(MSG_DATE_RANGE_ORDER)
         return
 
     if (date_to - date_from).days >= settings.max_date_range_days:
-        await message.answer(f"❗ Tarih aralığı en fazla {settings.max_date_range_days} gün olabilir.")
+        await message.answer(MSG_DATE_RANGE_MAX.format(max_days=settings.max_date_range_days))
         return
 
     await state.clear()
-    await message.answer("⏳ Seferleriniz hazırlanıyor...")
+    await message.answer(WAITING)
 
     try:
         rows = await trip_client.get_driver_statement(
@@ -100,13 +114,15 @@ async def handle_date_to(message: Message, state: FSMContext) -> None:
         )
     except Exception:
         logger.exception("Statement fetch failed for driver %s", driver_id)
-        await message.answer("❌ Seferler alınırken hata oluştu. Lütfen tekrar deneyin.")
+        await message.answer(ERROR_GENERIC)
         return
 
     if not rows:
         await message.answer(
-            f"ℹ️ <b>{date_from.strftime('%d.%m.%Y')}</b> – <b>{date_to.strftime('%d.%m.%Y')}</b> "
-            "tarihleri arasında tamamlanmış sefer bulunamadı."
+            MSG_NO_TRIPS_FOUND.format(
+                date_from=date_from.strftime("%d.%m.%Y"),
+                date_to=date_to.strftime("%d.%m.%Y"),
+            )
         )
         return
 
@@ -120,15 +136,16 @@ async def handle_date_to(message: Message, state: FSMContext) -> None:
         BOT_PDF_GENERATED_TOTAL.labels(**get_standard_labels()).inc()
     except Exception:
         logger.exception("PDF generation failed for driver %s", driver_id)
-        await message.answer("❌ PDF oluşturulurken hata oluştu. Lütfen tekrar deneyin.")
+        await message.answer(ERROR_GENERIC)
         return
 
-    filename = f"seferler_{date_from.strftime('%d%m%Y')}_{date_to.strftime('%d%m%Y')}.pdf"
+    filename = f"trips_{date_from.strftime('%d%m%Y')}_{date_to.strftime('%d%m%Y')}.pdf"
     await message.answer_document(
         document=BufferedInputFile(pdf_bytes, filename=filename),
-        caption=(
-            f"📄 <b>{driver_name}</b> — Sefer Raporu\n"
-            f"📅 {date_from.strftime('%d.%m.%Y')} – {date_to.strftime('%d.%m.%Y')}\n"
-            f"🚛 Toplam: <b>{len(rows)}</b> sefer"
+        caption=MSG_REPORT_CAPTION.format(
+            driver_name=driver_name,
+            date_from=date_from.strftime("%d.%m.%Y"),
+            date_to=date_to.strftime("%d.%m.%Y"),
+            count=len(rows),
         ),
     )

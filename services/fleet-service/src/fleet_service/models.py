@@ -23,7 +23,7 @@ from sqlalchemy import (
     String,
     Text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB  # noqa: F401 — used by timeline/audit models
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -67,7 +67,7 @@ class FleetVehicle(Base):
     soft_delete_reason: Mapped[str | None] = mapped_column(Text)
 
     # Relationships
-    spec_versions: Mapped[list[FleetVehicleSpecVersion]] = relationship(back_populates="vehicle", lazy="selectin")
+    spec_versions: Mapped[list[FleetVehicleSpecVersion]] = relationship(back_populates="vehicle", lazy="raise")
 
     @property
     def lifecycle_state(self) -> str:
@@ -113,7 +113,7 @@ class FleetTrailer(Base):
     soft_delete_reason: Mapped[str | None] = mapped_column(Text)
 
     # Relationships
-    spec_versions: Mapped[list[FleetTrailerSpecVersion]] = relationship(back_populates="trailer", lazy="selectin")
+    spec_versions: Mapped[list[FleetTrailerSpecVersion]] = relationship(back_populates="trailer", lazy="raise")
 
     @property
     def lifecycle_state(self) -> str:
@@ -297,15 +297,23 @@ class FleetOutbox(Base):
     aggregate_id: Mapped[str] = mapped_column(String(26), nullable=False)
     event_name: Mapped[str] = mapped_column(String(80), nullable=False)
     event_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    payload_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    partition_key: Mapped[str | None] = mapped_column(String(100))
     publish_status: Mapped[str] = mapped_column(String(16), nullable=False)
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_error_code: Mapped[str | None] = mapped_column(String(64))
     last_error_message: Mapped[str | None] = mapped_column(Text)
     next_attempt_at_utc: Mapped[datetime.datetime] = mapped_column(nullable=False)
+    claim_token: Mapped[str | None] = mapped_column(String(50))
     claim_expires_at_utc: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
+    claimed_by_worker: Mapped[str | None] = mapped_column(String(50))
     created_at_utc: Mapped[datetime.datetime] = mapped_column(nullable=False)
     published_at_utc: Mapped[datetime.datetime | None] = mapped_column()
+
+    __table_args__ = (
+        Index("ix_fleet_outbox_partition", "partition_key", "publish_status", "created_at_utc"),
+        Index("ix_fleet_outbox_status_retry", "publish_status", "next_attempt_at_utc", "created_at_utc"),
+    )
 
 
 # === 8.9 fleet_idempotency_records ===

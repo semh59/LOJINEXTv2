@@ -1,4 +1,4 @@
-"""Vehicle spec version service — business logic for 3 spec endpoints.
+﻿"""Vehicle spec version service â€” business logic for 3 spec endpoints.
 
 Orchestrates repositories, writes timeline + outbox events within the same transaction.
 """
@@ -6,6 +6,7 @@ Orchestrates repositories, writes timeline + outbox events within the same trans
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 
 from sqlalchemy.exc import IntegrityError
@@ -13,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from fleet_service.auth import AuthContext
+from fleet_service.config import settings
 from fleet_service.constraint_error_mapper import map_integrity_error
 from fleet_service.domain.enums import AggregateType, PublishStatus
 from fleet_service.domain.etag import generate_spec_etag, parse_spec_etag
@@ -80,7 +82,7 @@ async def create_vehicle_spec_version(
     if not vehicle:
         raise VehicleNotFoundError(vehicle_id)
 
-    # Step 4: Guard — cannot add spec to inactive or soft-deleted vehicle
+    # Step 4: Guard â€” cannot add spec to inactive or soft-deleted vehicle
     if vehicle.soft_deleted_at_utc is not None or vehicle.status != "ACTIVE":
         raise AssetInactiveOrDeletedError()
 
@@ -93,7 +95,7 @@ async def create_vehicle_spec_version(
     # Step 6: Default effective_from_utc
     effective_from = to_utc_naive(body.effective_from_utc) if body.effective_from_utc else now
 
-    # Step 7: Get max version_no → new_version_no
+    # Step 7: Get max version_no â†’ new_version_no
     max_version = await vehicle_spec_repo.get_max_version_no(session, vehicle_id)
     new_version_no = max_version + 1
 
@@ -186,8 +188,9 @@ async def create_vehicle_spec_version(
             aggregate_type=AggregateType.VEHICLE,
             aggregate_id=vehicle_id,
             event_name="fleet.vehicle.spec_version_created.v1",
-            event_version=1,
-            payload_json={
+            event_version=settings.schema_event_version,
+            partition_key=vehicle_id,
+            payload_json=json.dumps({
                 "event_id": event_id,
                 "event_name": "fleet.vehicle.spec_version_created.v1",
                 "occurred_at_utc": now.isoformat(),
@@ -198,7 +201,7 @@ async def create_vehicle_spec_version(
                 "spec_stream_version": vehicle.spec_stream_version,
                 "request_id": request_id,
                 "correlation_id": correlation_id,
-            },
+            }),
             publish_status=PublishStatus.PENDING,
             next_attempt_at_utc=now,
             created_at_utc=now,
@@ -207,6 +210,7 @@ async def create_vehicle_spec_version(
 
     response = _build_spec_response(spec)
     etag = generate_spec_etag("VEHICLE", vehicle_id, vehicle.spec_stream_version)
+    await session.commit()
     return response, etag, 201
 
 

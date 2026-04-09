@@ -23,9 +23,14 @@ class TripStateMachine(StateMachine[TripStatus]):
                 TripStatus.PENDING_REVIEW: {
                     TripStatus.COMPLETED,
                     TripStatus.REJECTED,
+                    TripStatus.SOFT_DELETED,
                 },
-                TripStatus.COMPLETED: set(),
-                TripStatus.REJECTED: set(),
+                TripStatus.COMPLETED: {
+                    TripStatus.SOFT_DELETED,
+                },
+                TripStatus.REJECTED: {
+                    TripStatus.SOFT_DELETED,
+                },
                 TripStatus.SOFT_DELETED: set(),
             },
         )

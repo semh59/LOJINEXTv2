@@ -456,12 +456,14 @@ def test_transition_trip_allows_pending_review_to_completed_only() -> None:
     assert trip.version == 2
 
 
-def test_transition_trip_rejects_soft_deleted_transition_from_completed() -> None:
+def test_transition_trip_allows_soft_deleted_from_completed() -> None:
     trip = _base_trip()
     trip.status = "COMPLETED"
 
-    with pytest.raises(ValueError):
-        transition_trip(trip, TripStatus.SOFT_DELETED)
+    transition_trip(trip, TripStatus.SOFT_DELETED)
+
+    assert trip.status == "SOFT_DELETED"
+    assert trip.version == 2
 
 
 @pytest.mark.asyncio

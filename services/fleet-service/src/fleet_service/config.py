@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     outbox_batch_size: int = 50
     outbox_max_retries: int = 5
     outbox_worker_enabled: bool = True
+    schema_event_version: int = 1
 
     # --- Heartbeat ---
     heartbeat_interval_seconds: int = 30
@@ -132,6 +133,8 @@ def validate_prod_settings(current: Settings) -> None:
         errors.append(
             "FLEET_KAFKA_SECURITY_PROTOCOL cannot be PLAINTEXT in prod without FLEET_ALLOW_PLAINTEXT_IN_PROD."
         )
+    if current.platform_jwt_secret:
+        errors.append("FLEET_PLATFORM_JWT_SECRET must not be set in prod; use RS256/JWKS only.")
 
     if errors:
         raise ValueError("Production settings invalid: " + " ".join(errors))

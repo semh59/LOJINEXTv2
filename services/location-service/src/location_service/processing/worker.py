@@ -177,6 +177,7 @@ async def run_processing_worker(
     *,
     poll_interval_seconds: float | None = None,
     worker_name: str | None = None,
+    shutdown_event: asyncio.Event | None = None,
 ) -> None:
     """Continuously claim and process queued route runs."""
     interval = poll_interval_seconds or settings.processing_poll_interval_seconds
@@ -192,6 +193,10 @@ async def run_processing_worker(
     )
 
     while True:
+        if shutdown_event and shutdown_event.is_set():
+            logger.info("Processing worker: shutdown signal received, exiting cleanly.")
+            return
+
         try:
             await record_worker_heartbeat(WORKER_NAME)
             claimed_run = await claim_next_processing_run(worker_name=claimed_by)

@@ -30,6 +30,9 @@ class IdentityUserModel(Base):
     updated_at_utc: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+    deactivated_at_utc: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class IdentityGroupModel(Base):
@@ -192,6 +195,7 @@ class IdentityRefreshTokenModel(Base):
         nullable=False,
     )
     token_hash: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    family_id: Mapped[Optional[str]] = mapped_column(String(26), nullable=True)
     expires_at_utc: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -205,6 +209,7 @@ class IdentityRefreshTokenModel(Base):
     __table_args__ = (
         Index("ix_identity_refresh_tokens_user", "user_id"),
         Index("ix_identity_refresh_tokens_expires", "expires_at_utc"),
+        Index("ix_identity_refresh_tokens_family", "family_id"),
     )
 
 

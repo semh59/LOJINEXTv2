@@ -46,7 +46,6 @@ async def create_vehicle(
         request_id=x_request_id,
         correlation_id=x_correlation_id,
     )
-    await session.commit()
     response.status_code = status_code
     response.headers["ETag"] = etag
     if spec_etag is not None:
@@ -124,7 +123,6 @@ async def patch_vehicle(
         request_id=x_request_id,
         correlation_id=x_correlation_id,
     )
-    await session.commit()
     response.headers["ETag"] = etag
     return result
 
@@ -153,7 +151,6 @@ async def deactivate_vehicle(
         request_id=x_request_id,
         correlation_id=x_correlation_id,
     )
-    await session.commit()
     response.headers["ETag"] = etag
     return result
 
@@ -182,7 +179,6 @@ async def reactivate_vehicle(
         request_id=x_request_id,
         correlation_id=x_correlation_id,
     )
-    await session.commit()
     response.headers["ETag"] = etag
     return result
 
@@ -211,7 +207,6 @@ async def soft_delete_vehicle(
         request_id=x_request_id,
         correlation_id=x_correlation_id,
     )
-    await session.commit()
     response.headers["ETag"] = etag
     return result
 
@@ -240,7 +235,6 @@ async def hard_delete_vehicle(
         correlation_id=x_correlation_id,
         trip_reference_checker=trip_client.check_asset_references,
     )
-    await session.commit()
     return HardDeleteResponse(**result)
 
 

@@ -6,6 +6,7 @@ Orchestrates repositories, writes timeline + outbox events within the same trans
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 from typing import Any
 
@@ -14,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from fleet_service.auth import AuthContext
+from fleet_service.config import settings
 from fleet_service.constraint_error_mapper import map_integrity_error
 from fleet_service.domain.enums import (
     AggregateType,
@@ -227,11 +229,12 @@ async def create_vehicle(
         aggregate_type=AggregateType.VEHICLE,
         aggregate_id=vehicle_id,
         event_name="fleet.vehicle.created.v1",
-        event_version=1,
-        payload_json={
+        event_version=settings.schema_event_version,
+        partition_key=vehicle_id,
+        payload_json=json.dumps({
             "event_id": event_id,
             "event_name": "fleet.vehicle.created.v1",
-            "event_version": 1,
+            "event_version": settings.schema_event_version,
             "occurred_at_utc": now.isoformat(),
             "aggregate_type": "VEHICLE",
             "aggregate_id": vehicle_id,
@@ -239,12 +242,13 @@ async def create_vehicle(
             "request_id": request_id,
             "correlation_id": correlation_id,
             "data": vehicle_snapshot,
-        },
+        }),
         publish_status=PublishStatus.PENDING,
         next_attempt_at_utc=now,
         created_at_utc=now,
     )
     await outbox_repo.insert_outbox_event(session, outbox_event)
+    await session.commit()
 
     # Step 9: Build response
     response = _build_vehicle_detail_response(vehicle, current_spec=current_spec)
@@ -262,6 +266,7 @@ async def create_vehicle(
         expires_at_utc=now + datetime.timedelta(hours=_IDEMPOTENCY_TTL_HOURS),
     )
     await idempotency_repo.insert_record(session, idem_record)
+    # committed above
 
     # Step 11: ETag
     etag = generate_master_etag("VEHICLE", vehicle_id, 1)
@@ -371,6 +376,10 @@ async def patch_vehicle(
     if vehicle.soft_deleted_at_utc is not None:
         raise VehicleSoftDeletedError()
 
+    from fleet_service.services.audit_helpers import _write_fleet_audit, serialize_vehicle_admin
+
+    old_snapshot = serialize_vehicle_admin(vehicle)
+
     now = _utc_now()
     changes: dict[str, Any] = {}
 
@@ -382,9 +391,6 @@ async def patch_vehicle(
         vehicle.plate_raw_current = body.plate
         vehicle.normalized_plate_current = new_normalized
         changes["plate"] = body.plate
-    from fleet_service.services.audit_helpers import _write_fleet_audit, serialize_vehicle_admin
-
-    old_snapshot = serialize_vehicle_admin(vehicle)
 
     if body.brand is not None:
         vehicle.brand = body.brand
@@ -446,7 +452,6 @@ async def patch_vehicle(
         request_id=request_id,
     )
 
-    # Outbox
     await outbox_repo.insert_outbox_event(
         session,
         FleetOutbox(
@@ -454,23 +459,26 @@ async def patch_vehicle(
             aggregate_type=AggregateType.VEHICLE,
             aggregate_id=vehicle_id,
             event_name="fleet.vehicle.updated.v1",
-            event_version=1,
-            payload_json={
+            event_version=settings.schema_event_version,
+            partition_key=vehicle_id,
+            payload_json=json.dumps({
                 "event_id": event_id,
                 "event_name": "fleet.vehicle.updated.v1",
-                "event_version": 1,
+                "event_version": settings.schema_event_version,
                 "occurred_at_utc": now.isoformat(),
                 "aggregate_type": "VEHICLE",
                 "aggregate_id": vehicle_id,
                 "row_version": vehicle.row_version,
                 "request_id": request_id,
                 "correlation_id": correlation_id,
-            },
+            }),
             publish_status=PublishStatus.PENDING,
             next_attempt_at_utc=now,
             created_at_utc=now,
         ),
     )
+
+    await session.commit()
 
     current_spec = await vehicle_repo.get_current_vehicle_spec(session, vehicle_id)
     response = _build_vehicle_detail_response(vehicle, current_spec)
@@ -596,23 +604,26 @@ async def soft_delete_vehicle(
             aggregate_type=AggregateType.VEHICLE,
             aggregate_id=vehicle_id,
             event_name="fleet.vehicle.soft_deleted.v1",
-            event_version=1,
-            payload_json={
+            event_version=settings.schema_event_version,
+            partition_key=vehicle_id,
+            payload_json=json.dumps({
                 "event_id": event_id,
                 "event_name": "fleet.vehicle.soft_deleted.v1",
-                "event_version": 1,
+                "event_version": settings.schema_event_version,
                 "occurred_at_utc": now.isoformat(),
                 "aggregate_type": "VEHICLE",
                 "aggregate_id": vehicle_id,
                 "row_version": vehicle.row_version,
                 "request_id": request_id,
                 "correlation_id": correlation_id,
-            },
+            }),
             publish_status=PublishStatus.PENDING,
             next_attempt_at_utc=now,
             created_at_utc=now,
         ),
     )
+
+    await session.commit()
 
     current_spec = await vehicle_repo.get_current_vehicle_spec(session, vehicle_id)
     response = _build_vehicle_detail_response(vehicle, current_spec)
@@ -798,23 +809,26 @@ async def hard_delete_vehicle(
             aggregate_type=AggregateType.VEHICLE,
             aggregate_id=vehicle_id,
             event_name="fleet.vehicle.hard_deleted.v1",
-            event_version=1,
-            payload_json={
+            event_version=settings.schema_event_version,
+            partition_key=vehicle_id,
+            payload_json=json.dumps({
                 "event_id": event_id,
                 "event_name": "fleet.vehicle.hard_deleted.v1",
-                "event_version": 1,
+                "event_version": settings.schema_event_version,
                 "occurred_at_utc": now.isoformat(),
                 "aggregate_type": "VEHICLE",
                 "aggregate_id": vehicle_id,
                 "snapshot_json": snapshot,
                 "request_id": request_id,
                 "correlation_id": correlation_id,
-            },
+            }),
             publish_status=PublishStatus.PENDING,
             next_attempt_at_utc=now,
             created_at_utc=now,
         ),
     )
+
+    await session.commit()
 
     return {"deleted": True, "aggregate_type": "VEHICLE", "aggregate_id": vehicle_id, "delete_audit_id": audit_id}
 
@@ -934,23 +948,26 @@ async def _lifecycle_transition(
             aggregate_type=AggregateType.VEHICLE,
             aggregate_id=vehicle_id,
             event_name=event_name,
-            event_version=1,
-            payload_json={
+            event_version=settings.schema_event_version,
+            partition_key=vehicle_id,
+            payload_json=json.dumps({
                 "event_id": event_id,
                 "event_name": event_name,
-                "event_version": 1,
+                "event_version": settings.schema_event_version,
                 "occurred_at_utc": now.isoformat(),
                 "aggregate_type": "VEHICLE",
                 "aggregate_id": vehicle_id,
                 "row_version": vehicle.row_version,
                 "request_id": request_id,
                 "correlation_id": correlation_id,
-            },
+            }),
             publish_status=PublishStatus.PENDING,
             next_attempt_at_utc=now,
             created_at_utc=now,
         ),
     )
+
+    await session.commit()
 
     current_spec = await vehicle_repo.get_current_vehicle_spec(session, vehicle_id)
     response = _build_vehicle_detail_response(vehicle, current_spec)

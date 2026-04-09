@@ -45,7 +45,9 @@ async def record_worker_heartbeat(*, seen_at: datetime | None = None) -> None:
         await session.commit()
 
 
-async def run_outbox_relay(broker: EventBroker) -> None:
+async def run_outbox_relay(
+    broker: EventBroker, *, shutdown_event: asyncio.Event | None = None
+) -> None:
     """Poll the outbox table and publish pending events to the broker."""
     logger.info(
         "Outbox relay worker started (poll_interval=%ds backend=%s)",
@@ -54,6 +56,10 @@ async def run_outbox_relay(broker: EventBroker) -> None:
     )
 
     while True:
+        if shutdown_event and shutdown_event.is_set():
+            logger.info("Outbox relay worker: shutdown signal received, exiting cleanly.")
+            return
+
         try:
             await _process_batch(broker)
         except asyncio.CancelledError:

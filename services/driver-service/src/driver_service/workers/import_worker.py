@@ -29,11 +29,15 @@ from driver_service.worker_heartbeats import record_worker_heartbeat
 logger = logging.getLogger("driver_service.import_worker")
 
 
-async def run_import_worker() -> None:
+async def run_import_worker(shutdown_event: asyncio.Event | None = None) -> None:
     """Poll for PENDING/RUNNING import jobs and process them."""
     logger.info("Import worker started (poll_interval=%ds)", settings.maintenance_poll_interval_seconds)
 
     while True:
+        if shutdown_event and shutdown_event.is_set():
+            logger.info("Import worker: shutdown signal received, exiting cleanly.")
+            return
+
         try:
             async with async_session_factory() as session:
                 # Record heartbeat

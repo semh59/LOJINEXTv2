@@ -257,7 +257,7 @@ async def test_login_rejects_user_with_service_group_assignment(client) -> None:
     )
 
     assert response.status_code == 409
-    assert response.json()["detail"] == "User role assignments invalid."
+    assert "User role assignments invalid." in response.json()["message"]
 
 
 @pytest.mark.asyncio

@@ -5,15 +5,27 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 
 from identity_service.config import settings, validate_prod_settings
-from identity_service.database import engine, async_session_factory
-from identity_service.middleware import PrometheusMiddleware, RequestIdMiddleware
+from identity_service.database import async_session_factory, engine
+from identity_service.errors import (
+    ProblemDetailError,
+    problem_detail_handler,
+    validation_exception_handler,
+    internal_error,
+)
+from identity_service.middleware import (
+    PrometheusMiddleware,
+    RateLimitMiddleware,
+    RequestIdMiddleware,
+)
 from identity_service.routers.admin import router as admin_router
 from identity_service.routers.auth import router as auth_router
 from identity_service.routers.health import router as health_router
 from identity_service.token_service import (
+    _executor,
     seed_bootstrap_state,
     validate_bootstrap_state,
 )
@@ -30,12 +42,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     del app
     validate_prod_settings(settings)
 
-    # Bootstrap state and signing keys once on startup
     async with async_session_factory() as session:
         try:
-            bind = session.get_bind()
-            if bind is not None and bind.dialect.name == "postgresql":
-                # 78216 is an arbitrary 64-bit integer for the lock key.
+            if engine.dialect.name == "postgresql":
                 await session.execute(text("SELECT pg_advisory_xact_lock(78216)"))
                 logger.info("Acquired bootstrap advisory lock")
 
@@ -46,11 +55,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as exc:
             await session.rollback()
             logger.error(f"Failed to bootstrap Identity Service: {exc}")
-            # In production, we want to fail fast if we can't bootstrap
             raise RuntimeError(f"Failed to bootstrap Identity Service: {exc}") from exc
 
     yield
+
     await engine.dispose()
+    from identity_service.redis_client import close_redis
+
+    await close_redis()
+    _executor.shutdown(wait=True)
+    logger.info("Identity Service shutdown complete")
 
 
 app = FastAPI(
@@ -62,8 +76,39 @@ app = FastAPI(
     redoc_url=None if settings.environment == "prod" else "/redoc",
 )
 
+# Middleware stack (outermost first — Starlette applies in reverse registration order)
 app.add_middleware(RequestIdMiddleware)
 app.add_middleware(PrometheusMiddleware)
+
+# RateLimitMiddleware is a raw ASGI middleware (not BaseHTTPMiddleware),
+# so it must be added via add_middleware with the class, not an instance.
+# FastAPI will wrap it correctly around the app.
+app.add_middleware(RateLimitMiddleware)
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    problem = ProblemDetailError(
+        status=exc.status_code,
+        code=f"HTTP_{exc.status_code}",
+        title="HTTP Exception",
+        detail=str(exc.detail),
+    )
+    return await problem_detail_handler(request, problem)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler_route(
+    request: Request, exc: RequestValidationError
+):
+    return await validation_exception_handler(request, exc)
+
+
+@app.exception_handler(Exception)
+async def unexpected_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unexpected error occurred: %s", exc)
+    return await problem_detail_handler(request, internal_error())
+
 
 app.include_router(health_router)
 app.include_router(auth_router)

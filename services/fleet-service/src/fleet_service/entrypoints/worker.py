@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import signal
 
 from fleet_service.broker import create_broker
 from fleet_service.config import settings
@@ -16,9 +17,12 @@ from fleet_service.workers.outbox_relay import run_outbox_relay
 logger = logging.getLogger("fleet_service.entrypoints.worker")
 
 
-async def _heartbeat_loop() -> None:
+async def _heartbeat_loop(shutdown_event: asyncio.Event | None = None) -> None:
     """Periodically record a heartbeat for the worker process."""
     while True:
+        if shutdown_event and shutdown_event.is_set():
+            return
+
         try:
             await record_worker_heartbeat("fleet-worker")
         except Exception as exc:
@@ -26,13 +30,16 @@ async def _heartbeat_loop() -> None:
         await asyncio.sleep(settings.heartbeat_interval_seconds)
 
 
-async def _idempotency_cleanup_loop() -> None:
+async def _idempotency_cleanup_loop(shutdown_event: asyncio.Event | None = None) -> None:
     """Periodically delete expired idempotency records."""
     from sqlalchemy import delete
 
     from fleet_service.models import FleetIdempotencyRecord
 
     while True:
+        if shutdown_event and shutdown_event.is_set():
+            return
+
         try:
             async with async_session_factory() as session:
                 now = utc_now_naive()
@@ -48,23 +55,29 @@ async def _idempotency_cleanup_loop() -> None:
 
 
 async def worker_main() -> None:
-    """Start all background worker loops."""
+    """Start all background worker loops with graceful shutdown support."""
     setup_logging(logging.INFO)
     logger.info("Fleet Service worker starting (env=%s)", settings.environment)
 
     broker = create_broker(settings.resolved_broker_type)
+    shutdown_event = asyncio.Event()
+
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, shutdown_event.set)
 
     try:
         await asyncio.gather(
-            run_outbox_relay(broker),
-            _heartbeat_loop(),
-            _idempotency_cleanup_loop(),
+            run_outbox_relay(broker, shutdown_event=shutdown_event),
+            _heartbeat_loop(shutdown_event=shutdown_event),
+            _idempotency_cleanup_loop(shutdown_event=shutdown_event),
         )
     except asyncio.CancelledError:
         logger.info("Worker process cancelled")
     except Exception:
         logger.exception("Worker process encountered an error")
     finally:
+        await broker.close()
         await engine.dispose()
         logger.info("Worker shutdown complete")
 

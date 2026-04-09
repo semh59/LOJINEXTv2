@@ -17,11 +17,14 @@ from location_service.models import LocationOutboxModel
 logger = logging.getLogger("location_service.outbox_relay")
 
 
-async def run_outbox_relay(broker: EventBroker) -> None:
+async def run_outbox_relay(broker: EventBroker, shutdown_event: asyncio.Event | None = None) -> None:
     """Poll the outbox table and publish pending events to the broker."""
     logger.info("Outbox relay worker started (poll_interval=%ds)", settings.outbox_poll_interval_seconds)
 
     while True:
+        if shutdown_event and shutdown_event.is_set():
+            logger.info("Outbox relay worker: shutdown signal received, exiting cleanly.")
+            return
         try:
             async with async_session_factory() as session:
                 await _process_batch(session, broker)

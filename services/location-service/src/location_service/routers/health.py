@@ -63,7 +63,7 @@ async def ready(request: Request) -> JSONResponse:
     else:
         checks["ors_validation"] = "disabled"
     checks["provider_probe_age_s"] = provider_probe_age_seconds(probe_result)
-    checks["auth_verify"] = auth_verify_status()
+    checks["auth_verify"] = await auth_verify_status()
 
     worker_heartbeat = await get_worker_heartbeat_snapshot(
         "processing-worker",

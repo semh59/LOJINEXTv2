@@ -168,7 +168,7 @@ async def _reload_row(session, outbox_id: str) -> FleetOutbox | None:  # type: i
 # --- Main relay loop ---
 
 
-async def run_outbox_relay(broker: MessageBroker) -> None:
+async def run_outbox_relay(broker: MessageBroker, shutdown_event: asyncio.Event | None = None) -> None:
     """Main outbox relay loop.
 
     Runs indefinitely, polling for unpublished events.
@@ -178,6 +178,10 @@ async def run_outbox_relay(broker: MessageBroker) -> None:
 
     try:
         while True:
+            if shutdown_event and shutdown_event.is_set():
+                logger.info("Relay: shutdown signal received, exiting cleanly.")
+                return
+
             try:
                 published = await _relay_batch(broker, settings.outbox_batch_size)
                 if published > 0:

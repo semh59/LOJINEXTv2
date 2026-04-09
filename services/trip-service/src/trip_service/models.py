@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import (
-    JSON,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -333,6 +332,7 @@ class TripOutbox(Base):
         Index("ix_trip_outbox_aggregate", "aggregate_type", "aggregate_id", "created_at_utc"),
         Index("ix_trip_outbox_event_name", "event_name", "created_at_utc"),
         Index("ix_trip_outbox_claim_exp", "claim_expires_at_utc"),
+        Index("ix_trip_outbox_partition", "partition_key", "publish_status", "created_at_utc"),
     )
 
 

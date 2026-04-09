@@ -38,6 +38,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     validate_prod_settings(settings)
     # create_broker() handles its own resolution from settings
     app.state.broker = create_broker()
+    try:
+        await app.state.broker.check_health()
+    except Exception as exc:
+        # Log error and decide whether to fail-fast.
+        # Production readiness requires that if Kafka is mandated, we fail-fast.
+        if settings.environment == "prod":
+            print(f"CRITICAL: Kafka broker health check failed at startup: {exc}")
+            raise
+        print(f"WARNING: Kafka broker health check failed at startup: {exc}")
     yield
     # EventBroker interface uses close(), not stop()
     await app.state.broker.close()

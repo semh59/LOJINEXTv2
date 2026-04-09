@@ -45,15 +45,28 @@ class OutboxRelay:
         now = datetime.now(UTC)
         claim_expires = now + timedelta(seconds=self.claim_ttl_seconds)
 
-        # 1. Fetch pending or stale-claimed events
+        # -----------------------------------------------------------------------
+        # Head-of-Line (HOL) blocking:
+        # Ensures only the earliest available event for a partition is claimed.
+        # -----------------------------------------------------------------------
+        from sqlalchemy.orm import aliased
+
+        o2 = aliased(LocationOutboxModel)
+        hol_subq = select(1).where(
+            o2.partition_key == LocationOutboxModel.partition_key,
+            o2.publish_status != "PUBLISHED",
+            o2.created_at_utc < LocationOutboxModel.created_at_utc,
+        )
+
         stmt = (
             select(LocationOutboxModel)
             .where(
                 LocationOutboxModel.publish_status.in_(["PENDING", "FAILED"]),
                 LocationOutboxModel.next_attempt_at_utc <= now,
                 LocationOutboxModel.retry_count < settings.outbox_retry_max,
+                ~hol_subq.exists(),
             )
-            .order_by(LocationOutboxModel.next_attempt_at_utc.asc())
+            .order_by(LocationOutboxModel.created_at_utc.asc())
             .limit(self.batch_size)
             .with_for_update(skip_locked=True)
         )
@@ -123,7 +136,7 @@ class OutboxRelay:
         await self.broker.close()
 
 
-async def run_outbox_relay() -> None:
+async def run_outbox_relay(shutdown_event: asyncio.Event | None = None) -> None:
     """Infinite loop for the outbox relay worker."""
     relay = OutboxRelay()
     poll_interval = settings.outbox_poll_interval_seconds
@@ -138,6 +151,10 @@ async def run_outbox_relay() -> None:
 
     try:
         while True:
+            if shutdown_event and shutdown_event.is_set():
+                logger.info("Outbox relay: shutdown signal received, exiting cleanly.")
+                return
+
             try:
                 processed = await relay.run_once()
                 if processed == 0:

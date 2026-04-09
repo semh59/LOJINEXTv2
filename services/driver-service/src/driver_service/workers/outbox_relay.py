@@ -20,11 +20,15 @@ from driver_service.worker_heartbeats import record_worker_heartbeat
 logger = logging.getLogger("driver_service.outbox_relay")
 
 
-async def run_outbox_relay(broker: EventBroker) -> None:
+async def run_outbox_relay(broker: EventBroker, shutdown_event: asyncio.Event | None = None) -> None:
     """Poll the outbox table and publish pending events to the broker."""
     logger.info("Outbox relay worker started (poll_interval=%ds)", settings.outbox_poll_interval_seconds)
 
     while True:
+        if shutdown_event and shutdown_event.is_set():
+            logger.info("Outbox relay: shutdown signal received, exiting cleanly.")
+            return
+
         try:
             async with database.async_session_factory() as session:
                 # Record heartbeat
