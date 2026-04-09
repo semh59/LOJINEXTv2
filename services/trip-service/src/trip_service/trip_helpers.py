@@ -6,7 +6,7 @@ import hashlib
 import json
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi.responses import JSONResponse
 from platform_auth import TokenClaims
@@ -107,7 +107,7 @@ def trip_to_resource(trip: TripTrip) -> TripResource:
         source_reference_key=trip.source_reference_key,
         review_reason_code=trip.review_reason_code,
         base_trip_id=trip.base_trip_id,
-        driver_id=trip.driver_id,
+        driver_id=trip.driver_id or "",
         vehicle_id=trip.vehicle_id,
         trailer_id=trip.trailer_id,
         route_pair_id=trip.route_pair_id,
@@ -213,12 +213,14 @@ def _advisory_lock_key(resource_type: str, resource_id: str) -> int:
 async def _acquire_overlap_locks(
     session: AsyncSession,
     *,
-    driver_id: str,
+    driver_id: str | None,
     vehicle_id: str | None,
     trailer_id: str | None,
 ) -> None:
     """Lock trip resources in sorted order so concurrent writers serialize cleanly."""
-    keys = {_advisory_lock_key("driver", driver_id)}
+    keys: set[int] = set()
+    if driver_id is not None:
+        keys.add(_advisory_lock_key("driver", driver_id))
     if vehicle_id is not None:
         keys.add(_advisory_lock_key("vehicle", vehicle_id))
     if trailer_id is not None:
@@ -259,7 +261,7 @@ async def _find_overlap(
 async def assert_no_trip_overlap(
     session: AsyncSession,
     *,
-    driver_id: str,
+    driver_id: str | None,
     vehicle_id: str | None,
     trailer_id: str | None,
     trip_start_utc: datetime,
@@ -277,7 +279,7 @@ async def assert_no_trip_overlap(
     driver_overlap = await _find_overlap(
         session,
         field_name="driver_id",
-        field_value=driver_id,
+        field_value=cast(str, driver_id),
         trip_start_utc=trip_start_utc,
         planned_end_utc=planned_end_utc,
         exclude_trip_id=exclude_trip_id,
@@ -519,7 +521,7 @@ async def _check_idempotency_key(
         claim_result = await secondary_session.execute(claim_stmt)
         await secondary_session.commit()
 
-    if claim_result.rowcount == 1:
+    if getattr(claim_result, "rowcount", 0) == 1:
         return None
 
     try:
@@ -554,11 +556,16 @@ async def _check_idempotency_key(
             # Recurse with depth guard to prevent infinite loops
             if _depth >= 2:
                 raise idempotency_in_flight()
-            return await _check_idempotency_key(session, idempotency_key, endpoint_fingerprint, request_hash, _depth + 1)
+            return await _check_idempotency_key(
+                session, idempotency_key, endpoint_fingerprint, request_hash, _depth + 1
+            )
 
         raise idempotency_in_flight()
 
-    response = JSONResponse(status_code=record.response_status, content=json.loads(record.response_body_json))
+    content = record.response_body_json
+    if isinstance(content, str) or isinstance(content, bytes):
+        content = json.loads(content)
+    response = JSONResponse(status_code=record.response_status, content=content)
     for key, value in record.response_headers_json.items():
         response.headers[key] = value
     return response

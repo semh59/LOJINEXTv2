@@ -4,7 +4,7 @@ import logging
 import time
 from enum import Enum
 from functools import wraps
-from typing import Callable, Type
+from typing import Any, Callable
 
 import httpx
 
@@ -31,8 +31,8 @@ class CircuitBreaker:
         name: str,
         failure_threshold: int = 5,
         recovery_timeout: float = 30.0,
-        expected_exception: Type[Exception] = httpx.HTTPError,
-    ):
+        expected_exception: type[Exception] = httpx.HTTPError,
+    ) -> None:
         self.name = name
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
@@ -41,11 +41,11 @@ class CircuitBreaker:
         self.failure_count = 0
         self.last_failure_time = 0.0
 
-    def __call__(self, func: Callable):
+    def __call__(self, func: Callable[..., Any]) -> Callable[..., Any]:
         """Decorator to wrap an async function with circuit breaker logic."""
 
         @wraps(func)
-        async def wrapper(*args, **kwargs):
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
             if self.state == CircuitState.OPEN:
                 if time.time() - self.last_failure_time > self.recovery_timeout:
                     self.state = CircuitState.HALF_OPEN
@@ -70,14 +70,14 @@ class CircuitBreaker:
 
         return wrapper
 
-    def _handle_failure(self):
+    def _handle_failure(self) -> None:
         self.failure_count += 1
         self.last_failure_time = time.time()
         if self.state != CircuitState.OPEN and self.failure_count >= self.failure_threshold:
             self.state = CircuitState.OPEN
             logger.warning(f"Circuit {self.name} transitioned to OPEN after {self.failure_count} consecutive failures")
 
-    def _reset(self):
+    def _reset(self) -> None:
         self.state = CircuitState.CLOSED
         self.failure_count = 0
 

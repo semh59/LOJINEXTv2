@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Any, cast
 
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,6 +41,7 @@ async def run_outbox_relay(broker: EventBroker, shutdown_event: asyncio.Event | 
 async def _process_batch(session: AsyncSession, broker: EventBroker) -> int:
     """Process a batch of pending outbox rows using individual commits with explicit CLAIM state."""
     now = datetime.now(timezone.utc)
+    row = None
 
     query = (
         select(LocationOutboxModel.outbox_id)
@@ -85,7 +87,7 @@ async def _process_batch(session: AsyncSession, broker: EventBroker) -> int:
             result = await session.execute(
                 select(LocationOutboxModel).where(LocationOutboxModel.outbox_id == outbox_id)
             )
-            row = result.scalar_one_or_none()
+            row = cast(LocationOutboxModel, result.scalar_one_or_none())
             if not row or row.publish_status != "PUBLISHING":
                 continue
 
@@ -131,7 +133,7 @@ async def _process_batch(session: AsyncSession, broker: EventBroker) -> int:
             result = await session.execute(
                 select(LocationOutboxModel).where(LocationOutboxModel.outbox_id == outbox_id)
             )
-            row = result.scalar_one_or_none()
+            row = cast(LocationOutboxModel, result.scalar_one_or_none())
             if row:
                 row.retry_count += 1
                 row.last_error_code = type(e).__name__

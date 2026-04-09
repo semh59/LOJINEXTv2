@@ -12,6 +12,7 @@ CRITICAL DIFFERENCES FROM ENRICHMENT WORKER:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -74,7 +75,7 @@ def _build_message(row: TripOutbox) -> OutboxMessage:
         event_id=row.event_id,
         event_name=row.event_name,
         partition_key=row.partition_key,
-        payload=row.payload_json,
+        payload=json.dumps(row.payload_json, default=str),
         schema_version=row.schema_version,
         aggregate_type=row.aggregate_type,
         aggregate_id=row.aggregate_id,

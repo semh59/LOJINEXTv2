@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import JSONResponse, Response
-from sqlalchemy import func, select
+from sqlalchemy import func, select, Select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -66,10 +66,6 @@ from trip_service.models import (
     TripTripEvidence,
     TripTripTimeline,
 )
-from trip_service.observability import (
-    TRIP_CREATED_TOTAL,
-    TRIP_HARD_DELETED_TOTAL,
-)
 from trip_service.schemas import (
     ApproveRequest,
     AssetReferenceCheckRequest,
@@ -108,10 +104,14 @@ from trip_service.trip_helpers import (
     _save_idempotency_record,
     apply_trip_context,
     build_delete_audit,
-    get_standard_labels,
     is_deleted_trip_status,
     trip_to_resource,
     utc_now,
+)
+from trip_service.observability import (
+    TRIP_CREATED_TOTAL,
+    TRIP_HARD_DELETED_TOTAL,
+    get_standard_labels,
 )
 
 router = APIRouter(tags=["trips"])
@@ -180,7 +180,7 @@ def _require_reference_service_access(auth: AuthContext) -> None:
 # Redundant local definition removed. Using trip_helpers implementation.
 
 
-def _apply_status_filter(stmt, status: TripStatus):  # noqa: ANN001
+def _apply_status_filter(stmt: Select[Any], status: TripStatus) -> Select[Any]:
     """Apply canonical status filters to the given statement.
 
     SOFT_DELETED filter also matches legacy 'CANCELLED' rows (prior schema).
@@ -190,7 +190,7 @@ def _apply_status_filter(stmt, status: TripStatus):  # noqa: ANN001
     return stmt.where(TripTrip.status == status.value)
 
 
-def _reference_column_for_asset_type(asset_type: str):  # noqa: ANN001
+def _reference_column_for_asset_type(asset_type: str) -> Any:
     """Map an asset type to the TripTrip ORM column used for active-reference checks."""
     mapping = {
         "DRIVER": TripTrip.driver_id,

@@ -10,15 +10,15 @@ from location_service.observability import correlation_id
 try:
     from confluent_kafka.admin import AdminClient
 except ImportError:
-    AdminClient = None
+    AdminClient: Any = None  # type: ignore[no-redef]
 
 try:
     from confluent_kafka.aio import AIOProducer
 except ImportError:
     try:
-        from confluent_kafka.experimental.aio import AIOProducer
+        from confluent_kafka.experimental.aio import AIOProducer  # type: ignore[no-redef]
     except ImportError:
-        AIOProducer = None
+        AIOProducer: Any = None  # type: ignore[no-redef]
 
 logger = logging.getLogger("location_service.broker")
 
@@ -90,7 +90,7 @@ class KafkaBroker(EventBroker):
         if AIOProducer is None or AdminClient is None:
             raise RuntimeError("confluent-kafka with asyncio support is not installed.")
 
-        config: dict[str, object] = {
+        config: dict[str, Any] = {
             "bootstrap.servers": bootstrap_servers,
             "client.id": client_id,
         }

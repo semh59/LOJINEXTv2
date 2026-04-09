@@ -17,16 +17,16 @@ from trip_service.observability import correlation_id
 
 try:
     from confluent_kafka.admin import AdminClient
-except ImportError:  # pragma: no cover - exercised only when dependency is absent
-    AdminClient = None
+except ImportError:
+    AdminClient = None  # type: ignore[assignment,misc]
 
 try:
     from confluent_kafka.aio import AIOProducer
-except ImportError:  # pragma: no cover - compatibility fallback
+except ImportError:
     try:
-        from confluent_kafka.experimental.aio import AIOProducer
-    except ImportError:  # pragma: no cover - exercised only when dependency is absent
-        AIOProducer = None
+        from confluent_kafka.experimental.aio import AIOProducer  # type: ignore[no-redef]
+    except ImportError:
+        AIOProducer = None  # type: ignore[assignment,misc]
 
 logger = logging.getLogger("trip_service.broker")
 
@@ -116,7 +116,7 @@ class NoOpBroker(MessageBroker):
 class KafkaBroker(MessageBroker):
     """Kafka-backed broker using Confluent's asyncio producer."""
 
-    def __init__(self, producer_config: dict[str, str], topic: str) -> None:
+    def __init__(self, producer_config: dict[str, Any], topic: str) -> None:
         if AIOProducer is None or AdminClient is None:
             raise RuntimeError("confluent-kafka with asyncio support is not installed.")
         self._topic = topic
@@ -153,9 +153,9 @@ class KafkaBroker(MessageBroker):
         return self._admin.list_topics(timeout=settings.dependency_timeout_seconds)
 
 
-def _kafka_config() -> dict[str, str]:
+def _kafka_config() -> dict[str, Any]:
     """Build the Confluent Kafka client configuration."""
-    config: dict[str, str] = {
+    config: dict[str, Any] = {
         "bootstrap.servers": settings.kafka_bootstrap_servers,
         "client.id": settings.kafka_client_id,
         "security.protocol": settings.kafka_security_protocol,

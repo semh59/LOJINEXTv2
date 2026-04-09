@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from fastapi import Depends
@@ -177,14 +178,14 @@ def _resolve_trip_compat_flag(
 
 @_retry_transient
 @fleet_breaker
-async def _fleet_validate_raw(payload: dict) -> httpx.Response:
+async def _fleet_validate_raw(payload: dict[str, Any]) -> httpx.Response:
     """Thin HTTP POST to Fleet validation; TransportError propagates for tenacity retry."""
     client = await get_dependency_client()
     return await client.post(_fleet_validation_url(), json=payload, headers=await _fleet_service_headers())
 
 
 async def validate_trip_references(
-    driver_id: str,
+    driver_id: str | None,
     vehicle_id: str | None,
     trailer_id: str | None,
 ) -> FleetValidationResult:
@@ -240,7 +241,7 @@ async def validate_trip_references(
 
 async def ensure_trip_references_valid(
     *,
-    driver_id: str,
+    driver_id: str | None,
     vehicle_id: str | None,
     trailer_id: str | None,
     field_prefix: str = "body",
@@ -262,7 +263,7 @@ async def ensure_trip_references_valid(
 
 @_retry_transient
 @location_breaker
-async def _location_resolve_raw(payload: dict) -> httpx.Response:
+async def _location_resolve_raw(payload: dict[str, Any]) -> httpx.Response:
     """Thin HTTP POST to Location resolve; TransportError propagates for tenacity retry."""
     client = await get_dependency_client()
     return await client.post(_location_resolve_url(), json=payload, headers=await _location_service_headers())
@@ -425,7 +426,7 @@ async def probe_location_service() -> bool:
 async def get_trip_service(
     session: AsyncSession = Depends(get_session),
     auth: AuthContext = Depends(user_auth_dependency),
-):
+) -> Any:
     """Dependency to provide a TripService instance."""
     # Lazy import to break circular dependency: dependencies → service → dependencies
     from trip_service.service import TripService

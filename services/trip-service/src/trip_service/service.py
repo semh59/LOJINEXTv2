@@ -108,7 +108,8 @@ class TripService:
         replay = await _check_idempotency_key(self.session, effective_key, endpoint_fp, request_hash)
         if replay is not None:
             # Replay returns a JSONResponse, we need just content/headers for consistent service return
-            return json.loads(replay.body), dict(replay.headers)
+            body_content = replay.body.decode() if hasattr(replay.body, "decode") else str(replay.body)
+            return json.loads(body_content), dict(replay.headers)
 
         await ensure_trip_references_valid(
             driver_id=body.driver_id,
@@ -150,7 +151,9 @@ class TripService:
             vehicle_id=trip.vehicle_id,
             trailer_id=trip.trailer_id,
             trip_start_utc=trip.trip_datetime_utc,
-            planned_end_utc=trip.planned_end_utc or (trip.trip_datetime_utc + timedelta(hours=24)),
+            planned_end_utc=trip.planned_end_utc
+            if trip.planned_end_utc is not None
+            else (trip.trip_datetime_utc + timedelta(hours=24)),
         )
         self.session.add(trip)
         self.session.add(
@@ -358,7 +361,7 @@ class TripService:
 
         if {"driver_id", "vehicle_id", "trailer_id"} & update_data.keys():
             await ensure_trip_references_valid(
-                driver_id=candidate_driver_id,
+                driver_id=candidate_driver_id if isinstance(candidate_driver_id, str) else None,
                 vehicle_id=candidate_vehicle_id,
                 trailer_id=candidate_trailer_id,
             )
@@ -425,7 +428,9 @@ class TripService:
                 vehicle_id=trip.vehicle_id,
                 trailer_id=trip.trailer_id,
                 trip_start_utc=trip.trip_datetime_utc,
-                planned_end_utc=trip.planned_end_utc or (trip.trip_datetime_utc + timedelta(hours=24)),
+                planned_end_utc=trip.planned_end_utc
+                if trip.planned_end_utc is not None
+                else (trip.trip_datetime_utc + timedelta(hours=24)),
                 exclude_trip_id=trip.id,
             )
 
@@ -470,7 +475,8 @@ class TripService:
 
         replay = await _check_idempotency_key(self.session, effective_key, endpoint_fp, request_hash)
         if replay is not None:
-            return json.loads(replay.body), dict(replay.headers)
+            body_content = replay.body.decode() if hasattr(replay.body, "decode") else str(replay.body)
+            return json.loads(body_content), dict(replay.headers)
 
         base_trip = await _get_trip_or_404(self.session, base_trip_id)
         if base_trip.is_empty_return:
@@ -523,7 +529,9 @@ class TripService:
             vehicle_id=trip.vehicle_id,
             trailer_id=trip.trailer_id,
             trip_start_utc=trip.trip_datetime_utc,
-            planned_end_utc=trip.planned_end_utc or (trip.trip_datetime_utc + timedelta(hours=24)),
+            planned_end_utc=trip.planned_end_utc
+            if trip.planned_end_utc is not None
+            else (trip.trip_datetime_utc + timedelta(hours=24)),
         )
         self.session.add(trip)
         self.session.add(

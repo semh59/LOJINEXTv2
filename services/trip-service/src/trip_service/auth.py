@@ -1,17 +1,18 @@
-"""Bearer-token authentication helpers for trip-service."""
-
 from __future__ import annotations
 
 import json
+import logging
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import Header
 from platform_auth import (
     AuthSettings,
     ServiceTokenAcquisitionError,
     ServiceTokenCache,
+    TokenClaims,
     TokenInvalidError,
     TokenMissingError,
     decode_bearer_token,
@@ -105,14 +106,14 @@ async def auth_outbound_status(*, audience: str | None = None) -> str:
     return "ok"
 
 
-def _decode_claims(authorization: str | None):
+def _decode_claims(authorization: str | None) -> TokenClaims:
     """Decode an Authorization header into normalized claims."""
     try:
         return decode_bearer_token(authorization, _platform_auth_settings())
     except TokenMissingError as exc:
         raise trip_auth_required() from exc
     except TokenInvalidError as exc:  # pragma: no cover - exercised through router tests
-        detail = str(exc).strip() or None
+        detail = str(exc).strip() or "Token invalid"
         raise trip_auth_invalid(detail) from exc
 
 
@@ -120,12 +121,15 @@ async def issue_internal_service_token(*, audience: str | None = None) -> str:
     """Return an outbound service token for dependency calls."""
     auth_settings = _platform_auth_settings(audience=_service_token_audience(audience))
     try:
-        return await _SERVICE_TOKEN_CACHE.get_token(
-            service_name=settings.service_name,
-            audience=auth_settings.audience if isinstance(auth_settings.audience, str) else None,
-            token_url=settings.auth_service_token_url,
-            client_id=settings.auth_service_client_id,
-            client_secret=settings.auth_service_client_secret,
+        return cast(
+            str,
+            await _SERVICE_TOKEN_CACHE.get_token(
+                service_name=settings.service_name,
+                audience=auth_settings.audience if isinstance(auth_settings.audience, str) else None,
+                token_url=settings.auth_service_token_url,
+                client_id=settings.auth_service_client_id,
+                client_secret=settings.auth_service_client_secret,
+            ),
         )
     except ServiceTokenAcquisitionError as exc:
         raise RuntimeError(str(exc)) from exc

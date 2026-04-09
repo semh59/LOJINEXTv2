@@ -7,7 +7,7 @@ from platform_common.state_machine import StateMachine
 from trip_service.enums import TripStatus
 
 
-class TripStateMachine(StateMachine[TripStatus]):
+class TripStateMachine(StateMachine[TripStatus]):  # type: ignore[misc]
     """
     Enforces valid transitions for Trip aggregates.
 
