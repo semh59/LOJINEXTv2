@@ -30,6 +30,7 @@ from trip_service.errors import (
     route_required_for_completion,
     trip_version_mismatch,
 )
+from trip_service.middleware import make_etag, parse_etag_version
 from trip_service.models import (
     TripTrip,
     TripTripEnrichment,
@@ -89,9 +90,17 @@ class TripService:
     def _response_headers(self, trip: TripTrip) -> dict[str, str]:
         """Generate common response headers for a trip resource."""
         return {
-            "ETag": f'"{trip.version}"',
+            "ETag": make_etag(trip.id, trip.version),
             "X-Trip-Status": normalize_trip_status(trip.status),
         }
+
+    def _normalize_replay_headers(self, headers: dict[str, str]) -> dict[str, str]:
+        """Ensure standard TitleCase for key headers to prevent KeyError in consumers."""
+        normalized = {}
+        title_map = {"etag": "ETag", "x-trip-status": "X-Trip-Status"}
+        for k, v in headers.items():
+            normalized[title_map.get(k.lower(), k)] = v
+        return normalized
 
     async def create_trip(
         self,
@@ -107,9 +116,15 @@ class TripService:
 
         replay = await _check_idempotency_key(self.session, effective_key, endpoint_fp, request_hash)
         if replay is not None:
-            # Replay returns a JSONResponse, we need just content/headers for consistent service return
-            body_content = replay.body.decode() if hasattr(replay.body, "decode") else str(replay.body)
-            return json.loads(body_content), dict(replay.headers)
+            # Replay returns a JSONResponse — extract content and headers safely
+            raw_body = replay.body
+            if isinstance(raw_body, bytes):
+                body_content = json.loads(raw_body)
+            elif isinstance(raw_body, str):
+                body_content = json.loads(raw_body)
+            else:
+                body_content = json.loads(str(raw_body))
+            return body_content, self._normalize_replay_headers(dict(replay.headers))
 
         await ensure_trip_references_valid(
             driver_id=body.driver_id,
@@ -197,7 +212,7 @@ class TripService:
             await _create_outbox_event(self.session, trip, "trip.completed.v1")
             TRIP_COMPLETED_TOTAL.labels(**get_standard_labels()).inc()
 
-        await self.session.flush()
+        await self.session.commit()
         resource = trip_to_resource(trip)
         resource_dict = resource.model_dump(mode="json")
         headers = self._response_headers(trip)
@@ -219,8 +234,8 @@ class TripService:
         """Soft-delete a trip."""
         trip = await _get_trip_or_404(self.session, trip_id)
         if if_match:
-            version = if_match.strip('"')
-            if version != str(trip.version):
+            parsed_version = parse_etag_version(if_match)
+            if parsed_version is None or parsed_version != trip.version:
                 raise trip_version_mismatch()
 
         if is_deleted_trip_status(trip.status):
@@ -244,7 +259,7 @@ class TripService:
         await _create_outbox_event(self.session, trip, "trip.soft_deleted.v1")
         TRIP_CANCELLED_TOTAL.labels(**get_standard_labels()).inc()
 
-        await self.session.flush()
+        await self.session.commit()
         return trip_to_resource(trip).model_dump(mode="json"), self._response_headers(trip)
 
     async def approve_trip(
@@ -253,8 +268,8 @@ class TripService:
         """Approve a pending-review trip."""
         trip = await _get_trip_or_404(self.session, trip_id)
         if if_match:
-            version = if_match.strip('"')
-            if version != str(trip.version):
+            parsed_version = parse_etag_version(if_match)
+            if parsed_version is None or parsed_version != trip.version:
                 raise trip_version_mismatch()
 
         if normalize_trip_status(trip.status) != TripStatus.PENDING_REVIEW.value:
@@ -299,7 +314,7 @@ class TripService:
         TRIP_COMPLETED_TOTAL.labels(**get_standard_labels()).inc()
 
         try:
-            await self.session.flush()
+            await self.session.commit()
         except IntegrityError as exc:
             raise _map_integrity_error(exc, trip_no=trip.trip_no) from exc
 
@@ -311,8 +326,8 @@ class TripService:
         """Reject a pending-review trip."""
         trip = await _get_trip_or_404(self.session, trip_id)
         if if_match:
-            version = if_match.strip('"')
-            if version != str(trip.version):
+            parsed_version = parse_etag_version(if_match)
+            if parsed_version is None or parsed_version != trip.version:
                 raise trip_version_mismatch()
 
         if normalize_trip_status(trip.status) != TripStatus.PENDING_REVIEW.value:
@@ -332,7 +347,7 @@ class TripService:
             )
         )
         await _create_outbox_event(self.session, trip, "trip.rejected.v1")
-        await self.session.flush()
+        await self.session.commit()
 
         return trip_to_resource(trip).model_dump(mode="json"), self._response_headers(trip)
 
@@ -342,8 +357,8 @@ class TripService:
         """Edit trip fields."""
         trip = await _get_trip_or_404(self.session, trip_id)
         if if_match:
-            version = if_match.strip('"')
-            if version != str(trip.version):
+            parsed_version = parse_etag_version(if_match)
+            if parsed_version is None or parsed_version != trip.version:
                 raise trip_version_mismatch()
 
         normalized_status = normalize_trip_status(trip.status)
@@ -444,6 +459,18 @@ class TripService:
 
         trip.version += 1
         trip.updated_at_utc = now
+        self.session.add(
+            TripTripTimeline(
+                id=_generate_id(),
+                trip_id=trip.id,
+                event_type="TRIP_EDITED",
+                actor_type=_coerce_actor_type(self.auth.role),
+                actor_id=self.auth.actor_id,
+                note=update_data.get("note") or f"Trip edited: {', '.join(changed_fields)}",
+                payload_json=json.dumps({"changed_fields": changed_fields}),
+                created_at_utc=now,
+            )
+        )
 
         await _write_audit(
             self.session,
@@ -457,7 +484,7 @@ class TripService:
             reason=update_data.get("change_reason"),
         )
 
-        await self.session.flush()
+        await self.session.commit()
         return trip_to_resource(trip).model_dump(mode="json"), self._response_headers(trip)
 
     async def create_empty_return(
@@ -475,8 +502,14 @@ class TripService:
 
         replay = await _check_idempotency_key(self.session, effective_key, endpoint_fp, request_hash)
         if replay is not None:
-            body_content = replay.body.decode() if hasattr(replay.body, "decode") else str(replay.body)
-            return json.loads(body_content), dict(replay.headers)
+            raw_body = replay.body
+            if isinstance(raw_body, bytes):
+                body_content = json.loads(raw_body)
+            elif isinstance(raw_body, str):
+                body_content = json.loads(raw_body)
+            else:
+                body_content = json.loads(str(raw_body))
+            return body_content, self._normalize_replay_headers(dict(replay.headers))
 
         base_trip = await _get_trip_or_404(self.session, base_trip_id)
         if base_trip.is_empty_return:
@@ -575,7 +608,7 @@ class TripService:
             await _create_outbox_event(self.session, trip, "trip.completed.v1")
             TRIP_COMPLETED_TOTAL.labels(**get_standard_labels()).inc()
 
-        await self.session.flush()
+        await self.session.commit()
         resource_dict = trip_to_resource(trip).model_dump(mode="json")
         headers = self._response_headers(trip)
 

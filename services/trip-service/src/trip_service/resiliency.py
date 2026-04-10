@@ -49,7 +49,7 @@ class CircuitBreaker:
             if self.state == CircuitState.OPEN:
                 if time.time() - self.last_failure_time > self.recovery_timeout:
                     self.state = CircuitState.HALF_OPEN
-                    logger.info(f"Circuit {self.name} transitioned to HALF_OPEN")
+                    logger.info("Circuit %s transitioned to HALF_OPEN", self.name)
                 else:
                     raise CircuitBreakerError(f"Circuit {self.name} is OPEN")
 
@@ -57,11 +57,10 @@ class CircuitBreaker:
                 result = await func(*args, **kwargs)
                 if self.state in (CircuitState.HALF_OPEN, CircuitState.OPEN):
                     self._reset()
-                    logger.info(f"Circuit {self.name} transitioned to CLOSED (Recovered)")
+                    logger.info("Circuit %s transitioned to CLOSED (Recovered)", self.name)
                 return result
             except self.expected_exception as e:
                 # Trip on systematic HTTP failures (timeouts, 5xx, etc.)
-                # Note: httpx exceptions are already classified in the wrapped functions
                 self._handle_failure()
                 raise e
             except Exception as e:
@@ -75,7 +74,11 @@ class CircuitBreaker:
         self.last_failure_time = time.time()
         if self.state != CircuitState.OPEN and self.failure_count >= self.failure_threshold:
             self.state = CircuitState.OPEN
-            logger.warning(f"Circuit {self.name} transitioned to OPEN after {self.failure_count} consecutive failures")
+            logger.warning(
+                "Circuit %s transitioned to OPEN after %d consecutive failures",
+                self.name,
+                self.failure_count,
+            )
 
     def _reset(self) -> None:
         self.state = CircuitState.CLOSED

@@ -49,7 +49,7 @@ from trip_service.observability import get_standard_labels  # noqa: F401
 from trip_service.schemas import EnrichmentSummary, EvidenceSummary, TripResource
 from trip_service.state_machine import TripStateMachine
 
-_REFERENCE_EXCLUDED_STATUSES = (TripStatus.REJECTED.value, TripStatus.SOFT_DELETED.value)
+_REFERENCE_EXCLUDED_STATUSES = (TripStatus.REJECTED.value, TripStatus.SOFT_DELETED.value, "CANCELLED")
 _MANUAL_CREATE_WINDOW_MINUTES = 30
 
 logger = logging.getLogger("trip_service.trip_helpers")
@@ -496,9 +496,11 @@ async def _check_idempotency_key(
     idempotency_key: str | None,
     endpoint_fingerprint: str,
     request_hash: str,
-    _depth: int = 0,
 ) -> JSONResponse | None:
-    """Replay a stored idempotent response when the same key is reused."""
+    """Replay a stored idempotent response when the same key is reused.
+
+    Refactored to avoid recursion and premature session commits.
+    """
     if not idempotency_key:
         return None
 
@@ -521,8 +523,8 @@ async def _check_idempotency_key(
         claim_result = await secondary_session.execute(claim_stmt)
         await secondary_session.commit()
 
-    if getattr(claim_result, "rowcount", 0) == 1:
-        return None
+        if getattr(claim_result, "rowcount", 0) == 1:
+            return None
 
     try:
         record = (
@@ -536,68 +538,38 @@ async def _check_idempotency_key(
             )
         ).scalar_one()
     except (NoResultFound, IntegrityError, OperationalError, DBAPIError):
-        # If we can't lock it or it's gone, it's either in-flight elsewhere or a race.
         raise idempotency_in_flight()
 
     if record.request_hash != request_hash:
         raise idempotency_payload_mismatch()
 
     if record.response_status == 0:
-        # BUG-1 Fix: If the placeholder is stale (> 60s), allow reclamation.
-        # This handles cases where the main transaction crashed before saving a response.
-        if (datetime.now(UTC) - record.created_at_utc).total_seconds() > 60:
+        # If the placeholder is stale (> 60s), notify client to retry.
+        # We cleanup the stale record in a separate session.
+        if (utc_now() - record.created_at_utc).total_seconds() > 60:
             logger.warning(
-                "Idempotency %s: Clearing stale in-flight record (created at %s)",
+                "Idempotency %s: Stale in-flight record detected (created at %s)",
                 idempotency_key,
                 record.created_at_utc,
             )
-            await session.delete(record)
-            await session.commit()
-            # Recurse with depth guard to prevent infinite loops
-            if _depth >= 2:
-                raise idempotency_in_flight()
-            return await _check_idempotency_key(
-                session, idempotency_key, endpoint_fingerprint, request_hash, _depth + 1
-            )
+            async with async_session_factory() as cleanup_session:
+                await cleanup_session.execute(
+                    text(
+                        "DELETE FROM trip_idempotency_records WHERE idempotency_key = :k AND endpoint_fingerprint = :f"
+                    ),
+                    {"k": idempotency_key, "f": endpoint_fingerprint},
+                )
+                await cleanup_session.commit()
 
         raise idempotency_in_flight()
 
     content = record.response_body_json
-    if isinstance(content, str) or isinstance(content, bytes):
+    if isinstance(content, (str, bytes)):
         content = json.loads(content)
     response = JSONResponse(status_code=record.response_status, content=content)
     for key, value in record.response_headers_json.items():
         response.headers[key] = value
     return response
-
-
-async def _save_idempotency_response(
-    idempotency_key: str,
-    endpoint_fingerprint: str,
-    request_payload: dict[str, Any],
-    response_body: dict[str, Any],
-    status_code: int,
-) -> None:
-    """Persist the response for an idempotency key using a dedicated connection.
-    This ensures that even if the main trip transaction fails, the successful
-    outcome (e.g. 200 OK from previously created trip) is recorded.
-    """
-    payload_hash = hashlib.sha256(json.dumps(request_payload, sort_keys=True).encode()).hexdigest()
-    now = utc_now()
-    async with async_session_factory() as session:
-        session.add(
-            TripIdempotencyRecord(
-                idempotency_key=idempotency_key,
-                endpoint_fingerprint=endpoint_fingerprint,
-                request_hash=payload_hash,
-                response_status=status_code,
-                response_headers_json={},
-                response_body_json=json.dumps(response_body),
-                created_at_utc=now,
-                expires_at_utc=now + timedelta(hours=settings.idempotency_retention_hours),
-            )
-        )
-        await session.commit()
 
 
 def get_actor_actor_role(claims: TokenClaims) -> tuple[str, str]:
@@ -791,7 +763,8 @@ def _set_enrichment_state(
 
 def _merged_payload_hash(payload: dict[str, Any]) -> str:
     """Generate a stable hash for a request payload."""
-    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def _generate_id() -> str:
@@ -819,29 +792,36 @@ async def _save_idempotency_record(
     response_body: dict[str, Any],
     response_headers: dict[str, str],
 ) -> None:
-    """Persist idempotency replay material for later requests."""
+    """Persist idempotency replay material for later requests.
+
+    Note: We use a secondary session to ensure the result is committed
+    even if the main transaction has already finished or if we want
+    to ensure atomic persistence of the replay data.
+    """
     now = utc_now()
-    stmt = (
-        pg_insert(TripIdempotencyRecord)
-        .values(
-            idempotency_key=idempotency_key,
-            endpoint_fingerprint=endpoint_fingerprint,
-            request_hash=request_hash,
-            response_status=response_status,
-            response_headers_json=response_headers,
-            response_body_json=json.dumps(response_body, default=str),
-            created_at_utc=now,
-            expires_at_utc=now + timedelta(hours=settings.idempotency_retention_hours),
+    async with async_session_factory() as secondary_session:
+        stmt = (
+            pg_insert(TripIdempotencyRecord)
+            .values(
+                idempotency_key=idempotency_key,
+                endpoint_fingerprint=endpoint_fingerprint,
+                request_hash=request_hash,
+                response_status=response_status,
+                response_headers_json=response_headers,
+                response_body_json=json.dumps(response_body, default=str),
+                created_at_utc=now,
+                expires_at_utc=now + timedelta(hours=settings.idempotency_retention_hours),
+            )
+            .on_conflict_do_update(
+                index_elements=["idempotency_key", "endpoint_fingerprint"],
+                set_={
+                    "request_hash": request_hash,
+                    "response_status": response_status,
+                    "response_headers_json": response_headers,
+                    "response_body_json": json.dumps(response_body, default=str),
+                    "expires_at_utc": now + timedelta(hours=settings.idempotency_retention_hours),
+                },
+            )
         )
-        .on_conflict_do_update(
-            index_elements=["idempotency_key", "endpoint_fingerprint"],
-            set_={
-                "request_hash": request_hash,
-                "response_status": response_status,
-                "response_headers_json": response_headers,
-                "response_body_json": json.dumps(response_body, default=str),
-                "expires_at_utc": now + timedelta(hours=settings.idempotency_retention_hours),
-            },
-        )
-    )
-    await session.execute(stmt)
+        await secondary_session.execute(stmt)
+        await secondary_session.commit()

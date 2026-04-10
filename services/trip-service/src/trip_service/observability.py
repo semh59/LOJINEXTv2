@@ -191,12 +191,15 @@ async def cleanup_outbox_records() -> int:
     return total_deleted
 
 
-async def run_cleanup_loop(interval_seconds: int = 3600) -> None:
+async def run_cleanup_loop(
+    interval_seconds: int = 3600,
+    shutdown_event: asyncio.Event | None = None,
+) -> None:
     """Run cleanup jobs periodically (default: every hour)."""
     worker_name = "cleanup-worker"
     logger.info("Cleanup loop starting (interval: %ds)", interval_seconds)
 
-    while True:
+    while not (shutdown_event and shutdown_event.is_set()):
         try:
             await cleanup_idempotency_records()
             await cleanup_outbox_records()
@@ -207,16 +210,29 @@ async def run_cleanup_loop(interval_seconds: int = 3600) -> None:
             else:
                 logger.error("Cleanup error: %s", e)
 
-        await _sleep_with_heartbeats(worker_name, interval_seconds)
+        await _sleep_with_heartbeats(worker_name, interval_seconds, shutdown_event)
+
+    logger.info("Cleanup loop received shutdown signal, exiting.")
 
 
-async def _sleep_with_heartbeats(worker_name: str, interval_seconds: int) -> None:
+async def _sleep_with_heartbeats(
+    worker_name: str,
+    interval_seconds: int,
+    shutdown_event: asyncio.Event | None = None,
+) -> None:
     """Keep long-sleep workers healthy for readiness checks."""
     heartbeat_interval = max(1, min(settings.worker_heartbeat_timeout_seconds // 2, interval_seconds))
     remaining = interval_seconds
 
-    while remaining > 0:
+    while remaining > 0 and not (shutdown_event and shutdown_event.is_set()):
         await record_worker_heartbeat(worker_name)
         sleep_for = min(heartbeat_interval, remaining)
-        await asyncio.sleep(sleep_for)
+        try:
+            if shutdown_event:
+                await asyncio.wait_for(shutdown_event.wait(), timeout=sleep_for)
+                return  # shutdown signalled
+            else:
+                await asyncio.sleep(sleep_for)
+        except asyncio.TimeoutError:
+            pass
         remaining -= sleep_for

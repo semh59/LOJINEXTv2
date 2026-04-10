@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import json
-import logging
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 from fastapi import Header
 from platform_auth import (
@@ -203,29 +202,3 @@ def reference_service_auth_dependency(
     return require_service_token(authorization, {"driver-service", "fleet-service"})
 
 
-def admin_or_internal_auth_dependency(
-    authorization: str | None = Header(None, alias="Authorization"),
-) -> AuthContext:
-    """FastAPI dependency for ADMIN or internal service endpoints."""
-    if authorization is None:
-        raise trip_auth_required()
-
-    claims = _decode_claims(authorization)
-    role = str(claims.role)
-    effective_role = role
-    if role in {"ADMIN", "MANAGER"}:
-        effective_role = ActorType.MANAGER.value
-    elif role == "SUPER_ADMIN":
-        effective_role = ActorType.SUPER_ADMIN.value
-
-    authorized_roles = {ActorType.MANAGER.value, ActorType.OPERATOR.value, ActorType.SUPER_ADMIN.value}
-    if effective_role in authorized_roles:
-        actor_id = claims.sub.strip()
-        return AuthContext(actor_id=actor_id, actor_type=effective_role, role=effective_role)
-
-    service_name = (claims.service or "").strip()
-    if role == ActorType.SERVICE.value and service_name:
-        actor_id = claims.sub.strip()
-        return AuthContext(actor_id=actor_id, actor_type=role, role=role, service_name=service_name)
-
-    raise trip_forbidden("ADMIN or internal service role required.")

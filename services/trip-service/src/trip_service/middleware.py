@@ -115,6 +115,28 @@ def require_trip_if_match(request: Request, trip_id: str) -> int:
     return version
 
 
+def parse_etag_version(etag_value: str) -> int | None:
+    """Parse a raw ETag / If-Match string and return the embedded version.
+
+    Supports both the canonical format ``"trip-{id}-v{version}"`` and a
+    bare numeric fallback for backwards compatibility.
+    """
+    if not etag_value:
+        return None
+    raw = etag_value.strip()
+    # Strip surrounding quotes
+    if raw.startswith('"') and raw.endswith('"') and len(raw) >= 2:
+        raw = raw[1:-1]
+    match = re.match(r"^trip-.+-v?(\d+)$", raw)
+    if match:
+        return int(match.group(1))
+    # Fallback: plain numeric version (legacy)
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # V8 Section 8.3 — Pagination Utilities
 # ---------------------------------------------------------------------------
@@ -192,8 +214,28 @@ def date_range_to_utc(
 # ---------------------------------------------------------------------------
 
 
+# Pattern to detect dynamic path segments (ULID, UUID, numeric IDs)
+_DYNAMIC_PATH_SEGMENT = re.compile(
+    r"/[0-9a-hjkmnp-zA-HJKMNP-Z]{10,}"  # ULID (Crockford Base32, 10+ chars)
+    r"|/\d+"  # Numeric IDs
+    r"|/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"  # UUID
+)
+
+
+def _template_path(path: str) -> str:
+    """Convert raw request path to a low-cardinality template for Prometheus labels.
+
+    Replaces dynamic segments (ULID, UUID, numeric IDs) with '{id}' to prevent
+    cardinality explosion in Prometheus metrics.
+    """
+    return _DYNAMIC_PATH_SEGMENT.sub("/{id}", path)
+
+
 class PrometheusMiddleware:
-    """Measure HTTP request duration and record to Prometheus metrics."""
+    """Measure HTTP request duration and record to Prometheus metrics.
+
+    Uses path templating to prevent cardinality explosion from dynamic IDs.
+    """
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -209,11 +251,8 @@ class PrometheusMiddleware:
 
         start_time = time.perf_counter()
         method = scope["method"]
-        path = scope["path"]
-
-        # To avoid high cardinality, we usually map the path to a template
-        # but for simplicity we'll use the path directly if it's low cardinality
-        # In a real app, we'd use something like scope["route"].path
+        raw_path = scope["path"]
+        endpoint = _template_path(raw_path)
 
         status_code = [500]  # Default if send fails
 
@@ -227,10 +266,9 @@ class PrometheusMiddleware:
         finally:
             duration = time.perf_counter() - start_time
             labels = get_standard_labels()
-            # Standard labels: method, endpoint, status_code
             REQUEST_DURATION.labels(
                 method=method,
-                endpoint=path,
+                endpoint=endpoint,
                 status_code=status_code[0],
                 **labels,
             ).observe(duration)

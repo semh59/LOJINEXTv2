@@ -289,17 +289,25 @@ async def client(db_engine, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[A
     test_app.dependency_overrides[get_session] = override_get_session
     install_jwks_urlopen_mock(monkeypatch, TEST_JWKS_BUNDLE, jwks_url=settings.auth_jwks_url)
 
-    # Also patch the global database factory to ensure heartbeats use the test engine
+    # Also patch the global database factory to ensure heartbeats and workers use the test engine
     import trip_service.database
 
     monkeypatch.setattr(trip_service.database, "async_session_factory", session_factory)
     monkeypatch.setattr("trip_service.routers.health.async_session_factory", session_factory)
+    monkeypatch.setattr("trip_service.trip_helpers.async_session_factory", session_factory)
+    monkeypatch.setattr("trip_service.observability.async_session_factory", session_factory)
+    monkeypatch.setattr("trip_service.workers.enrichment_worker.async_session_factory", session_factory)
+    monkeypatch.setattr("trip_service.workers.outbox_relay.async_session_factory", session_factory)
     monkeypatch.setattr("trip_service.worker_heartbeats.async_session_factory", session_factory)
     monkeypatch.setattr("trip_service.routers.health.probe_fleet_service", healthy_dependency_probe)
     monkeypatch.setattr("trip_service.routers.health.probe_location_service", healthy_dependency_probe)
     monkeypatch.setattr("trip_service.routers.trips.ensure_trip_references_valid", allow_all_trip_references)
     monkeypatch.setattr("trip_service.routers.trips.fetch_trip_context", stub_fetch_trip_context)
     monkeypatch.setattr("trip_service.routers.trips.resolve_route_by_names", stub_resolve_route_by_names)
+
+    # Patch the service layer too (which is called by the dependencies)
+    monkeypatch.setattr("trip_service.service.ensure_trip_references_valid", allow_all_trip_references)
+    monkeypatch.setattr("trip_service.service.fetch_trip_context", stub_fetch_trip_context)
 
     # Initialize heartbeats for health checks
     await record_worker_heartbeat("enrichment-worker")
