@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import uuid
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select, update
@@ -17,6 +19,8 @@ from location_service.observability import correlation_id
 
 logger = logging.getLogger("location_service.outbox_relay")
 
+WORKER_ID = f"location-outbox-{uuid.getnode()}"
+
 
 class OutboxRelay:
     """Relays pending outbox events to the configured event broker."""
@@ -24,7 +28,7 @@ class OutboxRelay:
     def __init__(self) -> None:
         self.broker = create_broker()
         self.batch_size = settings.outbox_publish_batch_size
-        self.claim_ttl_seconds = 60
+        self.claim_ttl = timedelta(minutes=5)
 
     async def run_once(self) -> int:
         """Process a single batch of pending outbox events."""
@@ -43,12 +47,10 @@ class OutboxRelay:
 
     async def _claim_batch(self, session: AsyncSession) -> list[LocationOutboxModel]:
         now = datetime.now(UTC)
-        claim_expires = now + timedelta(seconds=self.claim_ttl_seconds)
+        claim_expires = now + self.claim_ttl
+        claim_token = str(uuid.uuid4())
 
-        # -----------------------------------------------------------------------
-        # Head-of-Line (HOL) blocking:
-        # Ensures only the earliest available event for a partition is claimed.
-        # -----------------------------------------------------------------------
+        from sqlalchemy import and_, or_
         from sqlalchemy.orm import aliased
 
         o2 = aliased(LocationOutboxModel)
@@ -61,9 +63,16 @@ class OutboxRelay:
         stmt = (
             select(LocationOutboxModel)
             .where(
-                LocationOutboxModel.publish_status.in_(["PENDING", "FAILED"]),
+                or_(
+                    LocationOutboxModel.publish_status.in_(["PENDING", "FAILED"]),
+                    and_(
+                        LocationOutboxModel.publish_status == "PUBLISHING",
+                        LocationOutboxModel.claim_expires_at_utc.is_not(None),
+                        LocationOutboxModel.claim_expires_at_utc <= now,
+                    ),
+                ),
                 LocationOutboxModel.next_attempt_at_utc <= now,
-                LocationOutboxModel.retry_count < settings.outbox_retry_max,
+                LocationOutboxModel.attempt_count < settings.outbox_retry_max,
                 ~hol_subq.exists(),
             )
             .order_by(LocationOutboxModel.created_at_utc.asc())
@@ -75,13 +84,14 @@ class OutboxRelay:
         if not events:
             return []
 
-        # 2. Mark as PUBLISHING in DB
         event_ids = [e.outbox_id for e in events]
         await session.execute(
             update(LocationOutboxModel)
             .where(LocationOutboxModel.outbox_id.in_(event_ids))
             .values(
                 publish_status="PUBLISHING",
+                claim_token=claim_token,
+                claimed_by_worker=WORKER_ID,
                 claim_expires_at_utc=claim_expires,
             )
         )
@@ -89,17 +99,24 @@ class OutboxRelay:
         return list(events)
 
     async def _publish_event(self, event: LocationOutboxModel) -> bool:
-        # Set correlation ID for tracing
-        # The payload should ideally contain a correlation ID from the original request
-        # but here we use a generated one or the one in context if available.
-        cid = event.payload_json.get("correlation_id") or event.outbox_id
+        payload = json.loads(event.payload_json) if isinstance(event.payload_json, str) else event.payload_json
+        cid = payload.get("correlation_id") or event.outbox_id
         token = correlation_id.set(cid)
 
         try:
             await self.broker.publish(
                 topic=settings.kafka_topic,
-                key=event.partition_key,
-                payload=event.payload_json,
+                key=event.aggregate_id,
+                payload={
+                    "event_id": event.outbox_id,
+                    "event_name": event.event_name,
+                    "event_version": event.event_version,
+                    "aggregate_id": event.aggregate_id,
+                    "aggregate_type": event.aggregate_type,
+                    "aggregate_version": event.aggregate_version,
+                    "payload": payload,
+                    "published_at_utc": datetime.now(UTC).isoformat(),
+                },
             )
             return True
         except Exception as exc:
@@ -109,7 +126,7 @@ class OutboxRelay:
                 exc,
                 extra={"event_name": event.event_name},
             )
-            event.last_error_code = type(exc).__name__
+            event.last_error_code = type(exc).__name__[:100]
             return False
         finally:
             correlation_id.reset(token)
@@ -119,15 +136,20 @@ class OutboxRelay:
         if success:
             event.publish_status = "PUBLISHED"
             event.published_at_utc = now
+            event.claim_expires_at_utc = None
+            event.claim_token = None
+            event.claimed_by_worker = None
         else:
-            event.retry_count += 1
-            if event.retry_count >= settings.outbox_retry_max:
-                event.publish_status = "DEAD"
+            event.attempt_count += 1
+            event.claim_expires_at_utc = None
+            event.claim_token = None
+            event.claimed_by_worker = None
+            if event.attempt_count >= settings.outbox_retry_max:
+                event.publish_status = "DEAD_LETTER"
             else:
                 event.publish_status = "FAILED"
-                # Exponential backoff: 2, 4, 8, 16... minutes
-                delay = 2**event.retry_count
-                event.next_attempt_at_utc = now + timedelta(minutes=delay)
+                backoff = min(2**event.attempt_count, 300)
+                event.next_attempt_at_utc = now + timedelta(seconds=backoff)
 
         await session.merge(event)
         await session.commit()

@@ -29,9 +29,15 @@ METRICS_LABELS = ["service", "env", "version"]
 
 # --- API metrics ---
 REQUEST_DURATION = Histogram(
-    "fleet_request_duration_seconds",
+    "fleet_http_request_duration_seconds",
     "API request latency",
     ["method", "endpoint", "status_code"] + METRICS_LABELS,
+)
+
+HTTP_REQUESTS_TOTAL = Counter(
+    "fleet_http_requests_total",
+    "Total number of HTTP requests",
+    METRICS_LABELS + ["method", "endpoint", "status_code"],
 )
 
 # --- Business metrics (Section 16.4) ---
@@ -79,7 +85,7 @@ SELECTABLE_QUERY_TOTAL = Counter(
     "fleet_selectable_query_total", "Selectable queries", ["aggregate_type"] + METRICS_LABELS
 )
 
-OUTBOX_PUBLISH_SUCCESS_TOTAL = Counter("fleet_outbox_publish_success_total", "Outbox publish successes", METRICS_LABELS)
+OUTBOX_PUBLISH_SUCCESS_TOTAL = Counter("fleet_outbox_published_total", "Outbox publish successes", METRICS_LABELS)
 OUTBOX_PUBLISH_FAILURES_TOTAL = Counter(
     "fleet_outbox_publish_failures_total", "Outbox publish failures", METRICS_LABELS
 )
@@ -116,7 +122,6 @@ HTTP_OUTBOUND_TIMEOUT_TOTAL = Counter(
 )
 
 # --- Legacy Aliases ---
-HTTP_REQUESTS_TOTAL = REQUEST_DURATION
 HTTP_REQUEST_DURATION_SECONDS = REQUEST_DURATION
 
 

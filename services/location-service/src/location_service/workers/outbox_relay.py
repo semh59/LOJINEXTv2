@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 
@@ -16,6 +18,8 @@ from location_service.database import async_session_factory
 from location_service.models import LocationOutboxModel
 
 logger = logging.getLogger("location_service.outbox_relay")
+
+WORKER_ID = f"location-outbox-{uuid.getnode()}"
 
 
 async def run_outbox_relay(broker: EventBroker, shutdown_event: asyncio.Event | None = None) -> None:
@@ -41,7 +45,8 @@ async def run_outbox_relay(broker: EventBroker, shutdown_event: asyncio.Event | 
 async def _process_batch(session: AsyncSession, broker: EventBroker) -> int:
     """Process a batch of pending outbox rows using individual commits with explicit CLAIM state."""
     now = datetime.now(timezone.utc)
-    row = None
+    claim_expiry = now + timedelta(minutes=5)
+    claim_token = str(uuid.uuid4())
 
     query = (
         select(LocationOutboxModel.outbox_id)
@@ -70,20 +75,21 @@ async def _process_batch(session: AsyncSession, broker: EventBroker) -> int:
     if not outbox_ids:
         return 0
 
-    claim_expiry = now + timedelta(minutes=5)
-
-    # Claim the batch atomically
     await session.execute(
         update(LocationOutboxModel)
         .where(LocationOutboxModel.outbox_id.in_(outbox_ids))
-        .values(publish_status="PUBLISHING", claim_expires_at_utc=claim_expiry)
+        .values(
+            publish_status="PUBLISHING",
+            claim_token=claim_token,
+            claimed_by_worker=WORKER_ID,
+            claim_expires_at_utc=claim_expiry,
+        )
     )
     await session.commit()
 
     published_count = 0
     for outbox_id in outbox_ids:
         try:
-            # Reload row within its own transaction
             result = await session.execute(
                 select(LocationOutboxModel).where(LocationOutboxModel.outbox_id == outbox_id)
             )
@@ -91,27 +97,19 @@ async def _process_batch(session: AsyncSession, broker: EventBroker) -> int:
             if not row or row.publish_status != "PUBLISHING":
                 continue
 
-            # V2.1 Standard: Payload must contain aggregate metadata
-            # For Location, we use target_id as aggregate_id
-            target_id = (
-                row.payload_json.get("target_id")
-                or row.payload_json.get("location_id")
-                or row.payload_json.get("pair_id")
-                or row.payload_json.get("route_pair_id")
-                or row.outbox_id
-            )
-            target_type = row.payload_json.get("target_type") or "LOCATION"
+            payload = json.loads(row.payload_json)
 
             await broker.publish(
                 topic=settings.kafka_topic,
-                key=target_id,  # Partition by aggregate_id
+                key=row.aggregate_id,
                 payload={
                     "event_id": row.outbox_id,
                     "event_name": row.event_name,
                     "event_version": row.event_version,
-                    "aggregate_id": target_id,
-                    "aggregate_type": target_type,
-                    "payload": row.payload_json,
+                    "aggregate_id": row.aggregate_id,
+                    "aggregate_type": row.aggregate_type,
+                    "aggregate_version": row.aggregate_version,
+                    "payload": payload,
                     "published_at_utc": now.isoformat(),
                 },
             )
@@ -120,8 +118,9 @@ async def _process_batch(session: AsyncSession, broker: EventBroker) -> int:
             row.published_at_utc = now
             row.last_error_code = None
             row.claim_expires_at_utc = None
+            row.claim_token = None
+            row.claimed_by_worker = None
 
-            # Individual commit per row to guarantee at-least-once delivery
             await session.commit()
             published_count += 1
 
@@ -129,20 +128,21 @@ async def _process_batch(session: AsyncSession, broker: EventBroker) -> int:
             await session.rollback()
             logger.error("Failed to publish outbox row %s: %s", outbox_id, str(e))
 
-            # Reload to fail the row
             result = await session.execute(
                 select(LocationOutboxModel).where(LocationOutboxModel.outbox_id == outbox_id)
             )
             row = cast(LocationOutboxModel, result.scalar_one_or_none())
             if row:
-                row.retry_count += 1
-                row.last_error_code = type(e).__name__
+                row.attempt_count += 1
+                row.last_error_code = type(e).__name__[:100]
                 row.claim_expires_at_utc = None
-                if row.retry_count >= settings.outbox_retry_max:
+                row.claim_token = None
+                row.claimed_by_worker = None
+                if row.attempt_count >= settings.outbox_retry_max:
                     row.publish_status = "DEAD_LETTER"
                 else:
                     row.publish_status = "FAILED"
-                    backoff = min(2**row.retry_count, 300)
+                    backoff = min(2**row.attempt_count, 300)
                     row.next_attempt_at_utc = datetime.fromtimestamp(now.timestamp() + backoff, tz=timezone.utc)
 
                 await session.commit()

@@ -15,11 +15,11 @@ from location_service.schemas import BulkRefreshTriggerRequest, BulkRefreshTrigg
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/v1/bulk-refresh", tags=["bulk-refresh"])
+router = APIRouter(tags=["bulk-refresh"])
 
 
 @router.post(
-    "/jobs",
+    "/api/v1/bulk-refresh/jobs",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=BulkRefreshTriggerResponse,
     dependencies=[Depends(super_admin_auth_dependency)],

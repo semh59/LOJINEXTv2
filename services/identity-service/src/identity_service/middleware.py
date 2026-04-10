@@ -6,11 +6,9 @@ import json
 import time
 from uuid import uuid4
 
-from fastapi import Request, Response
-from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from identity_service.observability import (
     HTTP_REQUEST_DURATION_SECONDS,
@@ -20,56 +18,102 @@ from identity_service.observability import (
 )
 
 
-class RequestIdMiddleware(BaseHTTPMiddleware):
-    """Ensure every request has an X-Correlation-ID."""
+class RequestIdMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
 
-    async def dispatch(self, request: Request, call_next):
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+
+        headers = {k.lower(): v for k, v in scope.get("headers", [])}
         correlation_id_val = (
-            request.headers.get("X-Correlation-ID")
-            or request.headers.get("X-Request-ID")
+            headers.get(b"x-correlation-id", b"").decode()
+            or headers.get(b"x-request-id", b"").decode()
             or str(uuid4())
         )
-        request.state.correlation_id = correlation_id_val
-        request.state.request_id = correlation_id_val
+
+        if "state" not in scope:
+            scope["state"] = {}
+        scope["state"]["correlation_id"] = correlation_id_val
+        scope["state"]["request_id"] = correlation_id_val
 
         token = correlation_id.set(correlation_id_val)
+
+        async def send_with_ids(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                existing_headers = list(message.get("headers", []))
+                existing_headers.append(
+                    (b"X-Correlation-ID", correlation_id_val.encode())
+                )
+                existing_headers.append((b"X-Request-Id", correlation_id_val.encode()))
+                message["headers"] = existing_headers
+            await send(message)
+
         try:
-            response = await call_next(request)
-            response.headers["X-Correlation-ID"] = correlation_id_val
-            return response
+            await self.app(scope, receive, send_with_ids)
         finally:
             correlation_id.reset(token)
 
 
-class PrometheusMiddleware(BaseHTTPMiddleware):
-    """Collect Prometheus metrics and serve /metrics."""
+class PrometheusMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
 
-    async def dispatch(self, request: Request, call_next):
-        if request.url.path == "/metrics":
-            return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
 
-        method = request.method
-        endpoint = request.url.path
+        path = scope.get("path", "")
+
+        if path == "/metrics":
+            body = generate_latest()
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [
+                        [b"content-type", CONTENT_TYPE_LATEST.encode()],
+                        [b"content-length", str(len(body)).encode()],
+                    ],
+                }
+            )
+            await send({"type": "http.response.body", "body": body})
+            return
+
+        method = scope["method"]
+        endpoint = path
 
         start_time = time.perf_counter()
+        status_code = [500]
+
+        async def wrapped_send(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                status_code[0] = message["status"]
+            await send(message)
 
         try:
-            response = await call_next(request)
-            status_code = response.status_code
+            await self.app(scope, receive, wrapped_send)
         except Exception:
-            status_code = 500
+            _record_metrics(method, endpoint, status_code[0], start_time)
             raise
-        finally:
-            process_time = time.perf_counter() - start_time
-            labels = get_standard_labels()
-            HTTP_REQUESTS_TOTAL.labels(
-                method=method, endpoint=endpoint, status_code=status_code, **labels
-            ).inc()
-            HTTP_REQUEST_DURATION_SECONDS.labels(
-                method=method, endpoint=endpoint, **labels
-            ).observe(process_time)
+        else:
+            _record_metrics(method, endpoint, status_code[0], start_time)
 
-        return response
+
+def _record_metrics(
+    method: str, endpoint: str, status_code: int, start_time: float
+) -> None:
+    duration = time.perf_counter() - start_time
+    labels = get_standard_labels()
+    HTTP_REQUESTS_TOTAL.labels(
+        method=method, endpoint=endpoint, status_code=status_code, **labels
+    ).inc()
+    HTTP_REQUEST_DURATION_SECONDS.labels(
+        method=method, endpoint=endpoint, **labels
+    ).observe(duration)
 
 
 def _rate_limit_error(

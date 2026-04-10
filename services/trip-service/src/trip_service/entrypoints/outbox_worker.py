@@ -20,8 +20,11 @@ async def _run() -> None:
     shutdown_event = asyncio.Event()
 
     loop = asyncio.get_running_loop()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, shutdown_event.set)
+    try:
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, shutdown_event.set)
+    except NotImplementedError:
+        logger.warning("Signal handlers not supported on this platform. Graceful shutdown may not work.")
 
     logger.info("Starting dedicated outbox relay process with broker %s", type(broker).__name__)
     try:

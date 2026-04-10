@@ -23,13 +23,15 @@ class ProblemDetailError(Exception):
         status: int,
         code: str,
         title: str,
-        detail: str | None = None,
+        detail: str = "",
+        instance: str = "",
         errors: list[dict[str, Any]] | None = None,
     ) -> None:
         self.status = status
         self.code = code
         self.title = title
         self.detail = detail
+        self.instance = instance
         self.errors = errors or []
         super().__init__(f"{code}: {title}")
 
@@ -306,11 +308,11 @@ async def problem_detail_handler(request: Request, exc: ProblemDetailError) -> J
         "title": exc.title,
         "status": exc.status,
         "code": exc.code,
-        "detail": exc.detail or "",
+        "detail": exc.detail,
+        "instance": exc.instance or str(request.url.path),
         "request_id": request_id,
+        "errors": exc.errors,
     }
-    if exc.errors:
-        body["errors"] = exc.errors
 
     return JSONResponse(
         status_code=exc.status,
@@ -321,7 +323,6 @@ async def problem_detail_handler(request: Request, exc: ProblemDetailError) -> J
 
 async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Convert FastAPI/Pydantic validation errors to application/problem+json format."""
-    request_id = getattr(request.state, "request_id", None)
     errors = []
     for err in exc.errors():
         field = ".".join(str(loc) for loc in err["loc"] if loc != "body")
@@ -330,11 +331,13 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     return JSONResponse(
         status_code=422,
         content={
-            "type": "https://fleet-service/errors/VALIDATION_ERROR",
+            "type": "https://errors.lojinext.com/VALIDATION_ERROR",
             "title": "Input validation failed",
             "status": 422,
             "code": "VALIDATION_ERROR",
-            "request_id": request_id,
+            "detail": "Request validation failed.",
+            "instance": str(request.url.path),
+            "request_id": getattr(request.state, "request_id", None),
             "errors": errors,
         },
         media_type="application/problem+json",

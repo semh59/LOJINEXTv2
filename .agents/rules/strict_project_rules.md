@@ -15,9 +15,11 @@ Before writing any code or answering any request, you MUST verify the project st
 1. `.agents/docs/AGENTS.md`
 2. `.agents/docs/WORKFLOW.md`
 3. `.agents/docs/RULES.md`
-4. `MEMORY/PROJECT_STATE.md`
-5. `MEMORY/DECISIONS.md`
-6. `MEMORY/KNOWN_ISSUES.md`
+4. `standards/PLATFORM_STANDARD.md`
+5. `standards/SERVICE_REGISTRY.md`
+6. `standards/DECISIONS.md`
+7. `standards/KNOWN_ISSUES.md`
+8. `MEMORY/PROJECT_STATE.md`
 
 **CRITICAL RULES SUMMARY:**
 

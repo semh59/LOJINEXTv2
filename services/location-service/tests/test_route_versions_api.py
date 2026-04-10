@@ -138,7 +138,7 @@ async def _seed_route_version(test_session: AsyncSession) -> tuple[Route, RouteV
 async def test_get_route_version_detail(client: AsyncClient, test_session: AsyncSession) -> None:
     route, version = await _seed_route_version(test_session)
 
-    response = await client.get(f"/v1/routes/{route.route_id}/versions/{version.version_no}")
+    response = await client.get(f"/api/v1/routes/{route.route_id}/versions/{version.version_no}")
     assert response.status_code == 200
     body = response.json()
     assert body["route_id"] == str(route.route_id)
@@ -158,7 +158,7 @@ async def test_get_route_version_geometry_returns_ordered_coordinates(
 ) -> None:
     route, version = await _seed_route_version(test_session)
 
-    response = await client.get(f"/v1/routes/{route.route_id}/versions/{version.version_no}/geometry")
+    response = await client.get(f"/api/v1/routes/{route.route_id}/versions/{version.version_no}/geometry")
     assert response.status_code == 200
     body = response.json()
     assert body["route_id"] == str(route.route_id)
@@ -169,10 +169,10 @@ async def test_get_route_version_geometry_returns_ordered_coordinates(
 
 @pytest.mark.asyncio
 async def test_missing_route_version_returns_not_found(client: AsyncClient) -> None:
-    response = await client.get(f"/v1/routes/{str(ULID())}/versions/1")
+    response = await client.get(f"/api/v1/routes/{str(ULID())}/versions/1")
     assert response.status_code == 404
     assert response.json()["code"] == "LOCATION_ROUTE_VERSION_NOT_FOUND"
 
-    geometry = await client.get(f"/v1/routes/{str(ULID())}/versions/1/geometry")
+    geometry = await client.get(f"/api/v1/routes/{str(ULID())}/versions/1/geometry")
     assert geometry.status_code == 404
     assert geometry.json()["code"] == "LOCATION_ROUTE_VERSION_NOT_FOUND"

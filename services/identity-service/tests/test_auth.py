@@ -133,7 +133,7 @@ async def test_super_admin_can_create_and_update_user(client) -> None:
     admin_user_id = me_response.json()["user_id"]
 
     create_response = await client.post(
-        "/admin/v1/users",
+        "/api/v1/users",
         json={
             "username": "manager-1",
             "email": "manager@example.com",
@@ -152,7 +152,7 @@ async def test_super_admin_can_create_and_update_user(client) -> None:
     assert created["groups"] == ["MANAGER"]
 
     update_response = await client.patch(
-        f"/admin/v1/users/{created['user_id']}",
+        f"/api/v1/users/{created['user_id']}",
         json={"groups": ["OPERATOR"], "is_active": False},
         headers={
             "Authorization": f"Bearer {access_token}",
@@ -208,7 +208,7 @@ async def test_admin_rejects_non_canonical_groups(client) -> None:
     access_token = login_response.json()["access_token"]
 
     response = await client.post(
-        "/admin/v1/users",
+        "/api/v1/users",
         json={
             "username": "bad-group-user",
             "email": "bad-group@example.com",

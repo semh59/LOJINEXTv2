@@ -46,6 +46,7 @@ class RequestIdMiddleware:
             if message["type"] == "http.response.start":
                 existing_headers = list(message.get("headers", []))
                 existing_headers.append((b"X-Correlation-ID", correlation_id_val.encode()))
+                existing_headers.append((b"X-Request-Id", correlation_id_val.encode()))
                 message["headers"] = existing_headers
             await send(message)
 

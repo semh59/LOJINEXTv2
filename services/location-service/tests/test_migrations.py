@@ -49,7 +49,7 @@ def test_alembic_upgrade_head_creates_live_pair_unique_index() -> None:
                                     SELECT indexname
                                     FROM pg_indexes
                                     WHERE schemaname = 'public'
-                                      AND tablename = 'route_pairs'
+                                      AND tablename = 'location_route_pairs'
                                     ORDER BY indexname
                                     """
                                 )
@@ -123,7 +123,7 @@ def test_alembic_live_pair_uniqueness_migration_blocks_duplicate_drafts() -> Non
                         await conn.execute(
                             text(
                                 """
-                                INSERT INTO route_pairs (
+                                INSERT INTO location_route_pairs (
                                     route_pair_id,
                                     pair_code,
                                     origin_location_id,
@@ -188,7 +188,7 @@ def test_alembic_upgrade_head_creates_processing_run_claim_columns() -> None:
                                     SELECT column_name
                                     FROM information_schema.columns
                                     WHERE table_schema = 'public'
-                                      AND table_name = 'processing_runs'
+                                      AND table_name = 'location_processing_runs'
                                     """
                                 )
                             )

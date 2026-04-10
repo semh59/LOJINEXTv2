@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
 from typing import Any, cast
 
 from fastapi import Header
 from platform_auth import (
+    AuthContext,
     AuthSettings,
     ServiceTokenAcquisitionError,
     ServiceTokenCache,
@@ -28,21 +28,6 @@ from trip_service.errors import (
 
 _SERVICE_TOKEN_CACHE = ServiceTokenCache()
 _DEFAULT_SERVICE_AUDIENCE = "lojinext-platform"
-
-
-@dataclass(frozen=True)
-class AuthContext:
-    """Authenticated caller context used by routers."""
-
-    actor_id: str
-    actor_type: str
-    role: str
-    service_name: str | None = None
-
-    @property
-    def is_super_admin(self) -> bool:
-        """Return whether the caller is a super admin."""
-        return self.role == ActorType.SUPER_ADMIN.value
 
 
 def _platform_auth_settings(*, audience: str | None = None) -> AuthSettings:
@@ -144,21 +129,14 @@ def require_user_token(
     claims = _decode_claims(authorization)
     role = str(claims.role)
 
-    # Map legacy or platform roles to local ActorType
-    effective_role = role
-    if role in {"ADMIN", "MANAGER"}:
-        effective_role = ActorType.MANAGER.value
-    elif role == "SUPER_ADMIN":
-        effective_role = ActorType.SUPER_ADMIN.value
-
     authorized_roles = {ActorType.MANAGER.value, ActorType.OPERATOR.value, ActorType.SUPER_ADMIN.value}
-    if effective_role not in authorized_roles:
-        raise trip_forbidden(f"User token does not have an authorized role: {role} (mapped to {effective_role})")
+    if role not in authorized_roles:
+        raise trip_forbidden(f"User token does not have an authorized role: {role}")
 
     actor_id = claims.sub.strip()
     if not actor_id:
         raise trip_auth_invalid("Token is missing sub.")
-    return AuthContext(actor_id=actor_id, actor_type=effective_role, role=effective_role)
+    return AuthContext(actor_id=actor_id, role=role)
 
 
 def require_service_token(authorization: str | None, allowed_services: set[str]) -> AuthContext:
@@ -171,7 +149,7 @@ def require_service_token(authorization: str | None, allowed_services: set[str])
         raise trip_forbidden("Token is not a valid service token.")
     if service_name not in allowed_services:
         raise trip_forbidden("Service token is not allowed for this endpoint.")
-    return AuthContext(actor_id=actor_id, actor_type=ActorType.SERVICE.value, role=role, service_name=service_name)
+    return AuthContext(actor_id=actor_id, role=role, service_name=service_name)
 
 
 def user_auth_dependency(
@@ -200,5 +178,3 @@ def reference_service_auth_dependency(
 ) -> AuthContext:
     """FastAPI dependency for service-only trip reference checks."""
     return require_service_token(authorization, {"driver-service", "fleet-service"})
-
-

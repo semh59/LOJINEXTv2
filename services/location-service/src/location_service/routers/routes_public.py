@@ -13,7 +13,7 @@ from location_service.errors import internal_error, route_version_not_found
 from location_service.models import Route, RoutePair, RouteSegment, RouteVersion
 from location_service.schemas import RouteGeometryResponse, RouteVersionDetailResponse
 
-router = APIRouter(prefix="/v1/routes", tags=["routes"])
+router = APIRouter(tags=["routes"])
 
 
 async def _get_route_version_row(
@@ -35,7 +35,7 @@ async def _get_route_version_row(
     return cast(tuple[RouteVersion, Route, RoutePair], row)
 
 
-@router.get("/{route_id}/versions/{version_no}", response_model=RouteVersionDetailResponse)
+@router.get("/api/v1/routes/{route_id}/versions/{version_no}", response_model=RouteVersionDetailResponse)
 async def get_route_version_detail(
     route_id: str,
     version_no: int,
@@ -75,7 +75,7 @@ async def get_route_version_detail(
     )
 
 
-@router.get("/{route_id}/versions/{version_no}/geometry", response_model=RouteGeometryResponse)
+@router.get("/api/v1/routes/{route_id}/versions/{version_no}/geometry", response_model=RouteGeometryResponse)
 async def get_route_version_geometry(
     route_id: str,
     version_no: int,

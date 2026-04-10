@@ -77,14 +77,19 @@ def setup_logging(level: int = logging.INFO) -> None:
 
 # HTTP Request Metrics
 REQUEST_DURATION = Histogram(
-    "driver_request_duration_seconds",
+    "driver_http_request_duration_seconds",
     "API request latency",
     ["method", "endpoint", "status_code"] + METRICS_LABELS,
 )
 
-# Outbox Worker Metrics
+HTTP_REQUESTS_TOTAL = Counter(
+    "driver_http_requests_total",
+    "Total number of HTTP requests",
+    METRICS_LABELS + ["method", "endpoint", "status_code"],
+)
+
 OUTBOX_EVENTS_PUBLISHED = Counter(
-    "driver_outbox_events_published_total",
+    "driver_outbox_published_total",
     "Total outgoing events published successfully",
     ["event_name"] + METRICS_LABELS,
 )
@@ -93,6 +98,12 @@ OUTBOX_PUBLISH_FAILURES = Counter(
     "driver_outbox_publish_failures_total",
     "Total outbox relay failures to Kafka",
     ["event_name"] + METRICS_LABELS,
+)
+
+OUTBOX_DEAD_LETTER_TOTAL = Counter(
+    "driver_outbox_dead_letter_total",
+    "Outbox events that reached DEAD_LETTER",
+    METRICS_LABELS,
 )
 
 # Business Metrics
@@ -109,5 +120,4 @@ DRIVERS_SOFT_DELETED_TOTAL = Counter(
 )
 
 # --- Legacy Aliases ---
-HTTP_REQUESTS_TOTAL = REQUEST_DURATION
 HTTP_REQUEST_DURATION_SECONDS = REQUEST_DURATION

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import httpx
 from fastapi import Header
 from platform_auth import (
+    AuthContext,
     AuthSettings,
     PlatformRole,
     TokenClaims,
@@ -22,20 +21,6 @@ from location_service.errors import location_auth_invalid, location_auth_require
 TRIP_SERVICE_NAME = "trip-service"
 
 _PUBLIC_USER_ROLES = {PlatformRole.MANAGER, PlatformRole.SUPER_ADMIN}
-
-
-@dataclass(frozen=True)
-class AuthContext:
-    """Authenticated caller context used by routers."""
-
-    actor_id: str
-    role: str
-    service_name: str | None = None
-
-    @property
-    def actor_type(self) -> str:
-        """Backward-compatible alias for legacy router audit code."""
-        return self.role
 
 
 def _platform_auth_settings() -> AuthSettings:

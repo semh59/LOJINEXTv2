@@ -36,8 +36,8 @@ from location_service.schemas import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/v1/pairs", tags=["processing"])
-public_router = APIRouter(prefix="/v1", tags=["processing"])
+router = APIRouter(tags=["processing"])
+public_router = APIRouter(tags=["processing"])
 
 _ALLOWED_LIST_SORTS = {
     "created_at_utc:desc",
@@ -101,7 +101,9 @@ def _serialize_run(run: ProcessingRun, pair: RoutePair) -> ProcessingRunResponse
     )
 
 
-@router.post("/{pair_id}/calculate", status_code=status.HTTP_202_ACCEPTED, response_model=ProcessingRunResponse)
+@router.post(
+    "/api/v1/pairs/{pair_id}/calculate", status_code=status.HTTP_202_ACCEPTED, response_model=ProcessingRunResponse
+)
 async def calculate_route_pair(
     pair_id: str = Path(...),
     request: CalculateRequest | None = None,
@@ -122,7 +124,9 @@ async def calculate_route_pair(
     return _serialize_run(run, pair)
 
 
-@router.post("/{pair_id}/refresh", status_code=status.HTTP_202_ACCEPTED, response_model=ProcessingRunResponse)
+@router.post(
+    "/api/v1/pairs/{pair_id}/refresh", status_code=status.HTTP_202_ACCEPTED, response_model=ProcessingRunResponse
+)
 async def refresh_route_pair(
     pair_id: str = Path(...),
     db: AsyncSession = Depends(get_db),
@@ -139,15 +143,15 @@ async def refresh_route_pair(
     return _serialize_run(run, pair)
 
 
-@public_router.get("/processing-runs/{run_id}", response_model=ProcessingRunResponse)
-@router.get("/processing-runs/{run_id}", response_model=ProcessingRunResponse)
+@public_router.get("/api/v1/processing-runs/{run_id}", response_model=ProcessingRunResponse)
+@router.get("/api/v1/pairs/processing-runs/{run_id}", response_model=ProcessingRunResponse)
 async def get_processing_run(run_id: str = Path(...), db: AsyncSession = Depends(get_db)) -> ProcessingRunResponse:
     """Get status of a ProcessingRun."""
     run, pair = await _get_run_with_pair(db, run_id)
     return _serialize_run(run, pair)
 
 
-@router.get("/{pair_id}/processing-runs", response_model=ProcessingRunListResponse)
+@router.get("/api/v1/pairs/{pair_id}/processing-runs", response_model=ProcessingRunListResponse)
 async def list_pair_processing_runs(
     pair_id: str,
     db: AsyncSession = Depends(get_db),
@@ -206,13 +210,13 @@ async def list_pair_processing_runs(
 
 
 @public_router.post(
-    "/processing-runs/{run_id}/force-fail",
+    "/api/v1/processing-runs/{run_id}/force-fail",
     status_code=status.HTTP_200_OK,
     response_model=ProcessingRunResponse,
     dependencies=[Depends(super_admin_auth_dependency)],
 )
 @router.post(
-    "/processing-runs/{run_id}/force-fail",
+    "/api/v1/pairs/processing-runs/{run_id}/force-fail",
     status_code=status.HTTP_200_OK,
     response_model=ProcessingRunResponse,
     dependencies=[Depends(super_admin_auth_dependency)],

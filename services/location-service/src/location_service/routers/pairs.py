@@ -42,7 +42,7 @@ from location_service.schemas import (
     ProfileCode,
 )
 
-router = APIRouter(prefix="/v1/pairs", tags=["pairs"])
+router = APIRouter(tags=["pairs"])
 
 
 _ALLOWED_SORTS = {
@@ -154,7 +154,7 @@ def serialize_pair_response(pair: RoutePair, origin: LocationPoint, destination:
 serialize_pair = serialize_pair_response
 
 
-@router.post("", response_model=PairResponse, status_code=201)
+@router.post("/api/v1/pairs", response_model=PairResponse, status_code=201)
 async def create_pair(
     payload: PairCreateRequest,
     response: Response,
@@ -232,7 +232,7 @@ async def create_pair(
     return serialize_pair_response(pair, origin, destination)
 
 
-@router.get("/{pair_id}", response_model=PairResponse)
+@router.get("/api/v1/pairs/{pair_id}", response_model=PairResponse)
 async def get_pair(
     pair_id: str,
     response: Response,
@@ -244,7 +244,7 @@ async def get_pair(
     return serialize_pair_response(pair, origin, destination)
 
 
-@router.get("", response_model=PairListResponse)
+@router.get("/api/v1/pairs", response_model=PairListResponse)
 async def list_pairs(
     session: Annotated[AsyncSession, Depends(get_db)],
     page: Annotated[int, Query(ge=1)] = 1,
@@ -329,7 +329,7 @@ async def list_pairs(
     }
 
 
-@router.patch("/{pair_id}", response_model=PairResponse)
+@router.patch("/api/v1/pairs/{pair_id}", response_model=PairResponse)
 async def update_pair(
     pair_id: str,
     payload: PairUpdateRequest,
@@ -407,7 +407,7 @@ async def update_pair(
     return serialize_pair_response(pair, origin, destination)
 
 
-@router.delete("/{pair_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/api/v1/pairs/{pair_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def soft_delete_pair(
     pair_id: str,
     request: Request,

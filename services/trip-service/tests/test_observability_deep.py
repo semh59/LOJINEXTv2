@@ -12,7 +12,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import trip_service.observability as observability
-from trip_service.enums import OutboxPublishStatus
+from platform_common import OutboxPublishStatus
 from trip_service.models import TripIdempotencyRecord, TripOutbox
 
 pytestmark = [pytest.mark.runtime, pytest.mark.dbgate]

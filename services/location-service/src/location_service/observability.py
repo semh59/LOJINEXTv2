@@ -75,9 +75,15 @@ def setup_logging(level: str = "INFO") -> None:
 # --- Standardized API Metrics ---
 
 REQUEST_DURATION = Histogram(
-    "location_request_duration_seconds",
+    "location_http_request_duration_seconds",
     "API request latency",
     ["method", "endpoint", "status_code"] + METRICS_LABELS,
+)
+
+HTTP_REQUESTS_TOTAL = Counter(
+    "location_http_requests_total",
+    "Total number of HTTP requests",
+    METRICS_LABELS + ["method", "endpoint", "status_code"],
 )
 
 # --- Service Specific Metrics ---
@@ -138,12 +144,23 @@ BULK_REFRESH_ITEMS_TOTAL = Counter(
     ["status"] + METRICS_LABELS,
 )
 
+OUTBOX_PUBLISHED_TOTAL = Counter(
+    "location_outbox_published_total",
+    "Outbox events published",
+    METRICS_LABELS + ["event_name"],
+)
+
+OUTBOX_DEAD_LETTER_TOTAL = Counter(
+    "location_outbox_dead_letter_total",
+    "Outbox events that reached DEAD_LETTER",
+    METRICS_LABELS,
+)
+
 STUCK_RUNS_RECOVERED = Counter(
     "location_stuck_runs_recovered_total",
     "Total stuck runs recovered at startup",
     METRICS_LABELS,
 )
 
-# --- Legacy Aliases (to avoid breaking existing code immediately) ---
-API_REQUESTS_TOTAL = REQUEST_DURATION  # Histograms also provide counters
+API_REQUESTS_TOTAL = REQUEST_DURATION
 API_REQUEST_DURATION_SECONDS = REQUEST_DURATION

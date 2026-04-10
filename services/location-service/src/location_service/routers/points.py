@@ -39,7 +39,7 @@ from location_service.schemas import (
     PointUpdate,
 )
 
-router = APIRouter(prefix="/v1/points", tags=["points"])
+router = APIRouter(tags=["points"])
 
 
 _CODE_PATTERN = re.compile(r"^[A-Z0-9_]{2,32}$")
@@ -150,7 +150,7 @@ async def _raise_name_conflict_if_needed(
         raise point_name_conflict(f"Normalized name conflicts with existing point '{conflict.code}'.")
 
 
-@router.post("", response_model=PointResponse, status_code=201)
+@router.post("/api/v1/points", response_model=PointResponse, status_code=201)
 async def create_point(
     payload: PointCreate,
     response: Response,
@@ -226,7 +226,7 @@ async def create_point(
     return PointResponse.model_validate(point)
 
 
-@router.get("/{location_id}", response_model=PointResponse)
+@router.get("/api/v1/points/{location_id}", response_model=PointResponse)
 async def get_point(
     location_id: str,
     response: Response,
@@ -242,7 +242,7 @@ async def get_point(
     return PointResponse.model_validate(point)
 
 
-@router.get("", response_model=PointListResponse)
+@router.get("/api/v1/points", response_model=PointListResponse)
 async def list_points(
     session: Annotated[AsyncSession, Depends(get_db)],
     page: Annotated[int, Query(ge=1)] = 1,
@@ -308,7 +308,7 @@ async def list_points(
     }
 
 
-@router.patch("/{location_id}", response_model=PointResponse)
+@router.patch("/api/v1/points/{location_id}", response_model=PointResponse)
 async def update_point(
     location_id: str,
     payload: PointUpdate,

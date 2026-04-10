@@ -1,3 +1,7 @@
+# ⚠️ DEPRECATED — Bu dosya standards/KNOWN_ISSUES.md'a taşınmıştır.
+# Bu dosya yalnızca referans olarak saklanmaktadır.
+# Agent'lar bu dosyayı OKUMAMALIDIR — standards/KNOWN_ISSUES.md okuyun.
+
 # KNOWN_ISSUES.md
 # Known Issues
 

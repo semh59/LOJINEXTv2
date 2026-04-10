@@ -1,3 +1,8 @@
+# ⚠️ DEPRECATED — Bu dosya eski sürümdür.
+# Yeni sürüm: standards/PLATFORM_STANDARD.md (v3.0.0+)
+# Bu dosya yalnızca referans olarak saklanmaktadır.
+# Agent'lar bu dosyayı OKUMAMALIDIR — standards/PLATFORM_STANDARD.md okuyun.
+
 # PLATFORM_STANDARD.md
 # LOJINEXTv2 — Platform Engineering Standard
 

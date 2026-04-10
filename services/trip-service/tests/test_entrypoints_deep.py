@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -66,8 +67,10 @@ def test_api_main_calls_uvicorn_with_environment_sensitive_reload(monkeypatch: p
 @pytest.mark.asyncio
 async def test_cleanup_worker_run_configures_and_shuts_down(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
+    captured_kwargs: dict[str, object] = {}
 
-    async def fake_run_cleanup_loop() -> None:
+    async def fake_run_cleanup_loop(**kwargs: object) -> None:
+        captured_kwargs.update(kwargs)
         calls.append("loop")
 
     async def fake_shutdown() -> None:
@@ -80,13 +83,18 @@ async def test_cleanup_worker_run_configures_and_shuts_down(monkeypatch: pytest.
     await cleanup_entrypoint._run()
 
     assert calls == ["configure", "loop", "shutdown"]
+    # Verify shutdown_event was wired
+    assert "shutdown_event" in captured_kwargs
+    assert isinstance(captured_kwargs["shutdown_event"], asyncio.Event)
 
 
 @pytest.mark.asyncio
 async def test_enrichment_worker_run_configures_and_shuts_down(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
+    captured_kwargs: dict[str, object] = {}
 
-    async def fake_run_worker() -> None:
+    async def fake_run_worker(**kwargs: object) -> None:
+        captured_kwargs.update(kwargs)
         calls.append("worker")
 
     async def fake_shutdown() -> None:
@@ -99,14 +107,19 @@ async def test_enrichment_worker_run_configures_and_shuts_down(monkeypatch: pyte
     await enrichment_entrypoint._run()
 
     assert calls == ["configure", "worker", "shutdown"]
+    # Verify shutdown_event was wired
+    assert "shutdown_event" in captured_kwargs
+    assert isinstance(captured_kwargs["shutdown_event"], asyncio.Event)
 
 
 @pytest.mark.asyncio
 async def test_outbox_worker_run_creates_broker_and_shuts_down(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
+    captured_kwargs: dict[str, object] = {}
     broker = object()
 
-    async def fake_run_outbox_relay(received_broker) -> None:
+    async def fake_run_outbox_relay(received_broker, **kwargs: object) -> None:
+        captured_kwargs.update(kwargs)
         calls.append(type(received_broker).__name__)
 
     async def fake_shutdown() -> None:
@@ -120,6 +133,8 @@ async def test_outbox_worker_run_creates_broker_and_shuts_down(monkeypatch: pyte
     await outbox_entrypoint._run()
 
     assert calls == ["configure", "object", "shutdown"]
+    assert "shutdown_event" in captured_kwargs
+    assert isinstance(captured_kwargs["shutdown_event"], asyncio.Event)
 
 
 def test_cleanup_worker_main_uses_asyncio_run(monkeypatch: pytest.MonkeyPatch) -> None:

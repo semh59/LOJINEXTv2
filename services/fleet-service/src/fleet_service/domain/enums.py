@@ -3,16 +3,6 @@
 from enum import StrEnum
 
 
-class ActorType(StrEnum):
-    """Actor types for audit fields."""
-
-    ADMIN = "ADMIN"
-    MANAGER = "MANAGER"
-    SUPER_ADMIN = "SUPER_ADMIN"
-    SERVICE = "SERVICE"
-    SYSTEM = "SYSTEM"
-
-
 class OwnershipType(StrEnum):
     """Vehicle/trailer ownership classification."""
 
@@ -177,16 +167,6 @@ class ReeferPowerSource(StrEnum):
     TRACTOR_POWERED = "TRACTOR_POWERED"
     GRID_CHARGED = "GRID_CHARGED"
     OTHER = "OTHER"
-
-
-class PublishStatus(StrEnum):
-    """Outbox publish status (includes PUBLISHING atomic state)."""
-
-    PENDING = "PENDING"
-    PUBLISHING = "PUBLISHING"
-    PUBLISHED = "PUBLISHED"
-    FAILED = "FAILED"
-    DEAD_LETTER = "DEAD_LETTER"
 
 
 class DeleteResult(StrEnum):

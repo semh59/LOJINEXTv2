@@ -29,6 +29,7 @@ from identity_service.token_service import (
 # Existing tests (retained)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_audit_masking_integrity(session: AsyncSession):
     """Scan audit snapshots for unmasked emails to ensure forensic airtightness."""
@@ -82,6 +83,7 @@ async def test_security_jwt_integrity(session: AsyncSession):
 # NEW: BUG-4 — Audience bypass is fixed
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_audience_bypass_rejected_without_strict_mode(client) -> None:
     """Service-A cannot request a token for audience=service-B when strict=False (default)."""
@@ -97,12 +99,15 @@ async def test_audience_bypass_rejected_without_strict_mode(client) -> None:
     assert response.status_code in {400, 401}
     body = response.json()
     assert "error_code" in body  # platform-standard error format
-    assert "disabled" in body["message"].lower() or "audience" in body["message"].lower()
+    assert (
+        "disabled" in body["message"].lower() or "audience" in body["message"].lower()
+    )
 
 
 # ---------------------------------------------------------------------------
 # NEW: BUG-5 — Retired signing key rejected
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_retired_signing_key_rejects_decode(session: AsyncSession) -> None:
@@ -121,7 +126,9 @@ async def test_retired_signing_key_rejects_decode(session: AsyncSession) -> None
     await session.commit()
 
     # Decode attempt must fail
-    async with __import__("identity_service.database", fromlist=["async_session_factory"]).async_session_factory() as new_session:
+    async with __import__(
+        "identity_service.database", fromlist=["async_session_factory"]
+    ).async_session_factory() as new_session:
         with pytest.raises(ValueError, match="retired"):
             await decode_access_token(new_session, access_token)
 
@@ -129,6 +136,7 @@ async def test_retired_signing_key_rejects_decode(session: AsyncSession) -> None
 # ---------------------------------------------------------------------------
 # NEW: BUG-2 — Refresh token family reuse detection
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_refresh_token_reuse_invalidates_family(client) -> None:
@@ -156,7 +164,10 @@ async def test_refresh_token_reuse_invalidates_family(client) -> None:
         json={"refresh_token": original_refresh},
     )
     assert reuse.status_code == 401
-    assert "reuse" in reuse.json()["message"].lower() or "invalidated" in reuse.json()["message"].lower()
+    assert (
+        "reuse" in reuse.json()["message"].lower()
+        or "invalidated" in reuse.json()["message"].lower()
+    )
 
     # The rotated token must also now be invalid (family was nuked)
     after_nuke = await client.post(
@@ -169,6 +180,7 @@ async def test_refresh_token_reuse_invalidates_family(client) -> None:
 # ---------------------------------------------------------------------------
 # NEW: H-4 — Logout blocklists access token
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_logout_blocklists_access_token(client) -> None:
@@ -209,6 +221,7 @@ async def test_logout_blocklists_access_token(client) -> None:
 # NEW: H-4 — User deactivation revokes refresh tokens
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_user_deactivation_revokes_refresh_tokens(client) -> None:
     """Deactivating a user must revoke all their active refresh tokens."""
@@ -221,7 +234,7 @@ async def test_user_deactivation_revokes_refresh_tokens(client) -> None:
 
     # Create a test user
     create = await client.post(
-        "/admin/v1/users",
+        "/api/v1/users",
         json={
             "username": "test-deactivate",
             "email": "deactivate@example.com",
@@ -244,7 +257,7 @@ async def test_user_deactivation_revokes_refresh_tokens(client) -> None:
 
     # Deactivate the user
     deactivate = await client.patch(
-        f"/admin/v1/users/{user_id}",
+        f"/api/v1/users/{user_id}",
         json={"is_active": False},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
@@ -262,6 +275,7 @@ async def test_user_deactivation_revokes_refresh_tokens(client) -> None:
 # ---------------------------------------------------------------------------
 # NEW: BUG-1 — Rate limiting on login endpoint
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_rate_limit_login_by_ip(client) -> None:
@@ -306,12 +320,16 @@ async def test_login_lockout_after_repeated_failures(client) -> None:
         json={"username": "bootstrap-admin", "password": "bootstrap-password"},
     )
     assert locked.status_code == 429
-    assert "locked" in locked.json()["message"].lower() or "locked" in locked.json()["error_code"].lower()
+    assert (
+        "locked" in locked.json()["message"].lower()
+        or "locked" in locked.json()["error_code"].lower()
+    )
 
 
 # ---------------------------------------------------------------------------
 # NEW: Outbox worker shutdown_event
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_outbox_worker_respects_shutdown_event() -> None:

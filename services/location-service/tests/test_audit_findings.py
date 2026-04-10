@@ -92,7 +92,7 @@ def test_patch_point_requires_if_match(app_client, mock_session) -> None:
     result.scalar_one_or_none.return_value = mock_point
     mock_session.execute = AsyncMock(return_value=result)
 
-    response = app_client.patch(f"/v1/points/{location_id}", json={"name_tr": "Yeni"})
+    response = app_client.patch(f"/api/v1/points/{location_id}", json={"name_tr": "Yeni"})
     assert response.status_code == 428
     assert response.json()["code"] == "LOCATION_IF_MATCH_REQUIRED"
 
@@ -113,7 +113,7 @@ def test_patch_point_etag_mismatch(app_client, mock_session) -> None:
     mock_session.execute = AsyncMock(return_value=result)
 
     response = app_client.patch(
-        f"/v1/points/{location_id}",
+        f"/api/v1/points/{location_id}",
         json={"name_tr": "Yeni"},
         headers={"If-Match": '"3"'},
     )
@@ -142,7 +142,7 @@ def test_deactivate_point_blocked_by_active_pair(app_client, mock_session) -> No
     mock_session.execute = AsyncMock(side_effect=[point_result, blocking_result])
 
     response = app_client.patch(
-        f"/v1/points/{location_id}",
+        f"/api/v1/points/{location_id}",
         json={"is_active": False},
         headers={"If-Match": '"2"'},
     )
@@ -158,7 +158,7 @@ def test_create_point_code_conflict(app_client, mock_session) -> None:
     mock_session.execute = AsyncMock(return_value=first_result)
 
     response = app_client.post(
-        "/v1/points",
+        "/api/v1/points",
         json={
             "code": "IST",
             "name_tr": "?stanbul",
@@ -186,7 +186,7 @@ def test_create_pair_inactive_origin(app_client, mock_session) -> None:
     destination_result.scalar_one_or_none.return_value = active_destination
     mock_session.execute = AsyncMock(side_effect=[origin_result, destination_result])
 
-    response = app_client.post("/v1/pairs", json={"origin_code": "INACT", "destination_code": "ACT"})
+    response = app_client.post("/api/v1/pairs", json={"origin_code": "INACT", "destination_code": "ACT"})
     assert response.status_code == 409
     assert response.json()["code"] == "LOCATION_POINT_INACTIVE_FOR_NEW_PAIR"
 
@@ -203,7 +203,7 @@ def test_create_pair_same_origin_destination(app_client, mock_session) -> None:
     destination_result.scalar_one_or_none.return_value = same_point
     mock_session.execute = AsyncMock(side_effect=[origin_result, destination_result])
 
-    response = app_client.post("/v1/pairs", json={"origin_code": "IST", "destination_code": "IST"})
+    response = app_client.post("/api/v1/pairs", json={"origin_code": "IST", "destination_code": "IST"})
     assert response.status_code == 422
     assert response.json()["code"] == "LOCATION_ROUTE_ORIGIN_EQUALS_DESTINATION"
 
@@ -218,13 +218,13 @@ def test_soft_delete_pair_and_already_deleted(app_client, mock_session) -> None:
     result.scalar_one_or_none.return_value = pair
     mock_session.execute = AsyncMock(return_value=result)
 
-    delete_response = app_client.delete(f"/v1/pairs/{pair_id}", headers={"If-Match": '"1"'})
+    delete_response = app_client.delete(f"/api/v1/pairs/{pair_id}", headers={"If-Match": '"1"'})
     assert delete_response.status_code == 204
     assert pair.pair_status == "SOFT_DELETED"
     assert pair.row_version == 2
 
     pair.pair_status = "SOFT_DELETED"
-    already_deleted = app_client.delete(f"/v1/pairs/{pair_id}", headers={"If-Match": '"2"'})
+    already_deleted = app_client.delete(f"/api/v1/pairs/{pair_id}", headers={"If-Match": '"2"'})
     assert already_deleted.status_code == 409
     assert already_deleted.json()["code"] == "LOCATION_ROUTE_PAIR_ALREADY_SOFT_DELETED"
 
@@ -235,7 +235,7 @@ def test_processing_state_guards(app_client, mock_session) -> None:
     soft_deleted_pair = MagicMock(spec=RoutePair)
     soft_deleted_pair.pair_status = "SOFT_DELETED"
     mock_session.get = AsyncMock(return_value=soft_deleted_pair)
-    response = app_client.post(f"/v1/pairs/{pair_id}/calculate", json={})
+    response = app_client.post(f"/api/v1/pairs/{pair_id}/calculate", json={})
     assert response.status_code == 409
     assert response.json()["code"] == "LOCATION_ROUTE_PAIR_SOFT_DELETED"
 
@@ -250,7 +250,7 @@ def test_processing_state_guards(app_client, mock_session) -> None:
     mock_session.get = AsyncMock(return_value=active_pair)
     mock_session.execute = AsyncMock(return_value=run_result)
 
-    running_response = app_client.post(f"/v1/pairs/{pair_id}/calculate", json={})
+    running_response = app_client.post(f"/api/v1/pairs/{pair_id}/calculate", json={})
     assert running_response.status_code == 409
     assert running_response.json()["code"] == "LOCATION_ROUTE_PAIR_ALREADY_RUNNING"
 
@@ -263,7 +263,7 @@ def test_processing_state_guards(app_client, mock_session) -> None:
     mock_session.get = AsyncMock(return_value=draft_pair)
     mock_session.execute = AsyncMock(return_value=no_run)
 
-    pending_response = app_client.post(f"/v1/pairs/{pair_id}/calculate", json={})
+    pending_response = app_client.post(f"/api/v1/pairs/{pair_id}/calculate", json={})
     assert pending_response.status_code == 409
     assert pending_response.json()["code"] == "LOCATION_ROUTE_PAIR_PENDING_DRAFT_EXISTS"
 
@@ -287,7 +287,7 @@ def test_force_fail_respects_sla(app_client, mock_session) -> None:
     mock_result.one_or_none.return_value = (mock_run, mock_pair)
     mock_session.execute = AsyncMock(return_value=mock_result)
 
-    response = app_client.post(f"/v1/pairs/processing-runs/{run_id}/force-fail", headers=SUPER_ADMIN_HEADERS)
+    response = app_client.post(f"/api/v1/pairs/processing-runs/{run_id}/force-fail", headers=SUPER_ADMIN_HEADERS)
     assert response.status_code == 409
     assert response.json()["code"] == "LOCATION_RUN_NOT_STUCK"
 
@@ -301,7 +301,7 @@ def test_force_fail_respects_sla(app_client, mock_session) -> None:
         mock_run.run_status = "FAILED"
 
     mock_session.refresh = fake_refresh
-    success = app_client.post(f"/v1/pairs/processing-runs/{run_id}/force-fail", headers=SUPER_ADMIN_HEADERS)
+    success = app_client.post(f"/api/v1/pairs/processing-runs/{run_id}/force-fail", headers=SUPER_ADMIN_HEADERS)
     assert success.status_code == 200
 
 

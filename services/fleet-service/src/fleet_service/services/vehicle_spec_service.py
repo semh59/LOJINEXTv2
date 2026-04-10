@@ -1,4 +1,4 @@
-﻿"""Vehicle spec version service â€” business logic for 3 spec endpoints.
+"""Vehicle spec version service â€” business logic for 3 spec endpoints.
 
 Orchestrates repositories, writes timeline + outbox events within the same transaction.
 """
@@ -16,7 +16,8 @@ from ulid import ULID
 from fleet_service.auth import AuthContext
 from fleet_service.config import settings
 from fleet_service.constraint_error_mapper import map_integrity_error
-from fleet_service.domain.enums import AggregateType, PublishStatus
+from fleet_service.domain.enums import AggregateType
+from platform_common import OutboxPublishStatus
 from fleet_service.domain.etag import generate_spec_etag, parse_spec_etag
 from fleet_service.errors import (
     AssetInactiveOrDeletedError,
@@ -190,19 +191,21 @@ async def create_vehicle_spec_version(
             event_name="fleet.vehicle.spec_version_created.v1",
             event_version=settings.schema_event_version,
             partition_key=vehicle_id,
-            payload_json=json.dumps({
-                "event_id": event_id,
-                "event_name": "fleet.vehicle.spec_version_created.v1",
-                "occurred_at_utc": now.isoformat(),
-                "aggregate_type": "VEHICLE",
-                "aggregate_id": vehicle_id,
-                "vehicle_spec_version_id": spec_version_id,
-                "version_no": new_version_no,
-                "spec_stream_version": vehicle.spec_stream_version,
-                "request_id": request_id,
-                "correlation_id": correlation_id,
-            }),
-            publish_status=PublishStatus.PENDING,
+            payload_json=json.dumps(
+                {
+                    "event_id": event_id,
+                    "event_name": "fleet.vehicle.spec_version_created.v1",
+                    "occurred_at_utc": now.isoformat(),
+                    "aggregate_type": "VEHICLE",
+                    "aggregate_id": vehicle_id,
+                    "vehicle_spec_version_id": spec_version_id,
+                    "version_no": new_version_no,
+                    "spec_stream_version": vehicle.spec_stream_version,
+                    "request_id": request_id,
+                    "correlation_id": correlation_id,
+                }
+            ),
+            publish_status=OutboxPublishStatus.PENDING,
             next_attempt_at_utc=now,
             created_at_utc=now,
         ),

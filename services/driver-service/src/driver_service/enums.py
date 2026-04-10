@@ -36,15 +36,6 @@ class AuditActionType(str, enum.Enum):
     IMPORT_UPDATE = "IMPORT_UPDATE"
 
 
-class OutboxPublishStatus(str, enum.Enum):
-    """Outbox row lifecycle status."""
-
-    PENDING = "PENDING"
-    PUBLISHED = "PUBLISHED"
-    FAILED = "FAILED"
-    DEAD_LETTER = "DEAD_LETTER"
-
-
 class ImportJobStatus(str, enum.Enum):
     """Async import job lifecycle status."""
 
@@ -64,12 +55,3 @@ class ImportRowStatus(str, enum.Enum):
     UPDATED = "UPDATED"
     SKIPPED = "SKIPPED"
     FAILED = "FAILED"
-
-
-class ActorRole(str, enum.Enum):
-    """Roles used in auth context."""
-
-    ADMIN = "ADMIN"
-    MANAGER = "MANAGER"
-    INTERNAL_SERVICE = "INTERNAL_SERVICE"
-    SERVICE = "SERVICE"

@@ -33,14 +33,14 @@ from identity_service.token_service import (
     write_audit,
 )
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+router = APIRouter(tags=["admin"])
 
 
 def _req_id(request: Request) -> str | None:
     return getattr(request.state, "correlation_id", None)
 
 
-@router.get("/v1/users", response_model=UserListResponse)
+@router.get("/api/v1/users", response_model=UserListResponse)
 async def list_users(
     username: str | None = None,
     cursor: str | None = None,
@@ -75,7 +75,7 @@ async def list_users(
     return UserListResponse(items=items, next_cursor=next_cursor)
 
 
-@router.post("/v1/users", response_model=UserResponse, status_code=201)
+@router.post("/api/v1/users", response_model=UserResponse, status_code=201)
 async def create_user(
     request: Request,
     body: AdminCreateUserRequest,
@@ -139,7 +139,7 @@ async def create_user(
     return UserResponse(**profile)
 
 
-@router.patch("/v1/users/{user_id}", response_model=UserResponse)
+@router.patch("/api/v1/users/{user_id}", response_model=UserResponse)
 async def update_user(
     user_id: str,
     request: Request,
@@ -217,7 +217,7 @@ async def update_user(
     return UserResponse(**new_profile)
 
 
-@router.get("/v1/audit", response_model=AuditListResponse)
+@router.get("/api/v1/audit", response_model=AuditListResponse)
 async def list_audit_logs(
     target_id: str | None = None,
     cursor: str | None = None,

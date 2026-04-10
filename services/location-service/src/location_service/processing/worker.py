@@ -66,11 +66,13 @@ def _claim_expired_or_stale(now: datetime) -> Any:
 def _is_schema_not_ready(exc: Exception) -> bool:
     if isinstance(exc, ProgrammingError):
         message = str(exc).lower()
-        return "processing_runs" in message and any(marker in message for marker in ("does not exist", "relation"))
+        return "location_processing_runs" in message and any(
+            marker in message for marker in ("does not exist", "relation")
+        )
 
     if isinstance(exc, DBAPIError):
         message = str(exc).lower()
-        return "processing_runs" in message and any(
+        return "location_processing_runs" in message and any(
             marker in message for marker in ("does not exist", "undefined table", "relation")
         )
 

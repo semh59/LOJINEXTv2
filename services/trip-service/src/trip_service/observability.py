@@ -22,7 +22,7 @@ from sqlalchemy.exc import DBAPIError
 
 from trip_service.config import settings
 from trip_service.database import async_session_factory
-from trip_service.enums import OutboxPublishStatus
+from platform_common import OutboxPublishStatus
 from trip_service.models import TripIdempotencyRecord, TripOutbox
 from trip_service.worker_heartbeats import record_worker_heartbeat
 
@@ -97,11 +97,20 @@ ENRICHMENT_COMPLETED_TOTAL = Counter(
     "enrichment_completed_total", "Enrichment rows completed", METRICS_LABELS + ["result"]
 )
 ENRICHMENT_FAILED_TOTAL = Counter("enrichment_failed_total", "Enrichment rows that reached max retries", METRICS_LABELS)
-OUTBOX_PUBLISHED_TOTAL = Counter("outbox_published_total", "Outbox events published", METRICS_LABELS + ["event_name"])
-OUTBOX_DEAD_LETTER_TOTAL = Counter("outbox_dead_letter_total", "Outbox events that reached DEAD_LETTER", METRICS_LABELS)
+OUTBOX_PUBLISHED_TOTAL = Counter(
+    "trip_outbox_published_total", "Outbox events published", METRICS_LABELS + ["event_name"]
+)
+OUTBOX_DEAD_LETTER_TOTAL = Counter(
+    "trip_outbox_dead_letter_total", "Outbox events that reached DEAD_LETTER", METRICS_LABELS
+)
 REQUEST_DURATION = Histogram(
-    "http_request_duration_seconds",
+    "trip_http_request_duration_seconds",
     "HTTP request duration",
+    METRICS_LABELS + ["method", "endpoint", "status_code"],
+)
+HTTP_REQUESTS_TOTAL = Counter(
+    "trip_http_requests_total",
+    "Total number of HTTP requests",
     METRICS_LABELS + ["method", "endpoint", "status_code"],
 )
 

@@ -1,3 +1,7 @@
+# ⚠️ DEPRECATED — Bu dosya standards/DECISIONS.md'a taşınmıştır.
+# Bu dosya yalnızca referans olarak saklanmaktadır.
+# Agent'lar bu dosyayı OKUMAMALIDIR — standards/DECISIONS.md okuyun.
+
 # DECISIONS.md
 
 # Decisions Log

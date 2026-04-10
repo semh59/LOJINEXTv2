@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from fleet_service.auth import AuthContext
-from fleet_service.domain.enums import ActorType, MasterStatus
+from fleet_service.domain.enums import MasterStatus
 from fleet_service.domain.etag import generate_master_etag
 from fleet_service.errors import (
     AssetAlreadyInTargetStateError,
@@ -18,7 +18,7 @@ from fleet_service.services.vehicle_service import _lifecycle_transition
 
 @pytest.fixture
 def auth_context():
-    return AuthContext(actor_type=ActorType.ADMIN, actor_id="test-admin")
+    return AuthContext(role="SUPER_ADMIN", actor_id="test-admin")
 
 
 @pytest.fixture
@@ -36,10 +36,10 @@ def active_vehicle():
         row_version=1,
         spec_stream_version=0,
         created_at_utc=datetime.datetime.now(datetime.UTC).replace(tzinfo=None),
-        created_by_actor_type=ActorType.ADMIN,
+        created_by_actor_type="SUPER_ADMIN",
         created_by_actor_id="test-admin",
         updated_at_utc=datetime.datetime.now(datetime.UTC).replace(tzinfo=None),
-        updated_by_actor_type=ActorType.ADMIN,
+        updated_by_actor_type="SUPER_ADMIN",
         updated_by_actor_id="test-admin",
         soft_deleted_at_utc=None,
     )

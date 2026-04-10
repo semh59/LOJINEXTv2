@@ -84,7 +84,7 @@ async def test_ready_returns_503_when_cached_provider_probe_is_unavailable(
 async def test_ready_returns_503_when_processing_worker_heartbeat_missing(
     raw_client: AsyncClient, test_session: AsyncSession
 ) -> None:
-    await test_session.execute(text("DELETE FROM worker_heartbeats"))
+    await test_session.execute(text("DELETE FROM location_worker_heartbeats"))
     await test_session.commit()
 
     response = await raw_client.get("/ready")

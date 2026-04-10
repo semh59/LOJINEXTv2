@@ -1,6 +1,7 @@
 import enum
 
 from platform_auth import PlatformActorType, PlatformRole
+from platform_common import OutboxPublishStatus
 
 
 class TripStatus(str, enum.Enum):
@@ -47,15 +48,6 @@ class ActorType(str, enum.Enum):
     SERVICE = str(PlatformRole.SERVICE.value)
     SYSTEM = str(PlatformActorType.SYSTEM.value)
     DRIVER = str(PlatformActorType.DRIVER.value)
-
-
-class OutboxPublishStatus(str, enum.Enum):
-    PENDING = "PENDING"
-    READY = "READY"
-    PUBLISHING = "PUBLISHING"
-    PUBLISHED = "PUBLISHED"
-    FAILED = "FAILED"
-    DEAD_LETTER = "DEAD_LETTER"
 
 
 class EvidenceSource(str, enum.Enum):

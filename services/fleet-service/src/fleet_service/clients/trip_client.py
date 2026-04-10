@@ -20,18 +20,48 @@ from fleet_service.observability import correlation_id
 
 logger = logging.getLogger("fleet_service.clients.trip_client")
 
+# --- Singleton HTTP client ---
+
+_client: httpx.AsyncClient | None = None
+_client_lock = asyncio.Lock()
+
+
+async def _get_client() -> httpx.AsyncClient:
+    global _client
+    async with _client_lock:
+        if _client is None or _client.is_closed:
+            _client = httpx.AsyncClient(
+                timeout=httpx.Timeout(
+                    connect=settings.http_connect_timeout,
+                    read=settings.http_read_timeout,
+                    write=settings.http_read_timeout,
+                    pool=settings.http_total_timeout,
+                ),
+            )
+        return _client
+
+
+async def close() -> None:
+    global _client
+    async with _client_lock:
+        old = _client
+        _client = None
+    if old is not None and not old.is_closed:
+        await old.aclose()
+
+
 # --- Circuit Breaker State (module-level) ---
 
 _failure_count: int = 0
 _last_failure_time: float = 0.0
 _state: str = "CLOSED"  # CLOSED | OPEN | HALF_OPEN
-_lock = asyncio.Lock()
+_breaker_lock = asyncio.Lock()
 
 
 async def _check_breaker() -> None:
     """Raise immediately if circuit is OPEN and cooldown hasn't elapsed."""
     global _state  # noqa: PLW0603
-    async with _lock:
+    async with _breaker_lock:
         if _state == "CLOSED":
             return
         if _state == "OPEN":
@@ -46,7 +76,7 @@ async def _check_breaker() -> None:
 
 async def _record_success() -> None:
     global _failure_count, _state  # noqa: PLW0603
-    async with _lock:
+    async with _breaker_lock:
         if _state == "HALF_OPEN":
             _failure_count = 0
             _state = "CLOSED"
@@ -57,7 +87,7 @@ async def _record_success() -> None:
 
 async def _record_failure() -> None:
     global _failure_count, _last_failure_time, _state  # noqa: PLW0603
-    async with _lock:
+    async with _breaker_lock:
         _failure_count += 1
         _last_failure_time = time.monotonic()
         if _state == "HALF_OPEN":
@@ -84,29 +114,22 @@ async def check_asset_references(asset_id: str, asset_type: str) -> dict[str, An
     payload = {"asset_id": asset_id, "asset_type": asset_type}
 
     try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(
-                connect=settings.http_connect_timeout,
-                read=settings.http_read_timeout,
-                write=settings.http_read_timeout,
-                pool=settings.http_total_timeout,
-            ),
-        ) as client:
-            headers = {"Authorization": f"Bearer {token}"}
-            if c_id := correlation_id.get():
-                headers["X-Correlation-ID"] = c_id
+        client = await _get_client()
+        headers = {"Authorization": f"Bearer {token}"}
+        if c_id := correlation_id.get():
+            headers["X-Correlation-ID"] = c_id
 
-            resp = await client.post(url, json=payload, headers=headers)
-            resp.raise_for_status()
-            data = resp.json()
-            await _record_success()
-            return {
-                "asset_id": asset_id,
-                "asset_type": asset_type,
-                "is_referenced": bool(data.get("is_referenced", False)),
-                "has_references": bool(data.get("is_referenced", False)),
-                "active_trip_count": int(data.get("active_trip_count", 0) or 0),
-            }
+        resp = await client.post(url, json=payload, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+        await _record_success()
+        return {
+            "asset_id": asset_id,
+            "asset_type": asset_type,
+            "is_referenced": bool(data.get("is_referenced", False)),
+            "has_references": bool(data.get("is_referenced", False)),
+            "active_trip_count": int(data.get("active_trip_count", 0) or 0),
+        }
     except Exception as exc:
         await _record_failure()
         logger.error("trip-client check_asset_references(%s, %s) failed: %s", asset_id, asset_type, exc)

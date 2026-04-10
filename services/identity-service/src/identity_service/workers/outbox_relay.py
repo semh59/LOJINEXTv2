@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import and_, or_, select
@@ -18,6 +19,7 @@ from identity_service.models import IdentityOutboxModel, IdentityWorkerHeartbeat
 logger = logging.getLogger("identity_service.outbox_relay")
 
 OUTBOX_WORKER_NAME = "outbox_relay"
+WORKER_ID = f"identity-outbox-{uuid.getnode()}"
 
 
 def _now_utc() -> datetime:
@@ -57,7 +59,9 @@ async def run_outbox_relay(
 
     while True:
         if shutdown_event and shutdown_event.is_set():
-            logger.info("Outbox relay worker: shutdown signal received, exiting cleanly.")
+            logger.info(
+                "Outbox relay worker: shutdown signal received, exiting cleanly."
+            )
             return
 
         try:
@@ -81,9 +85,8 @@ async def _claim_batch(
 ) -> list[str]:
     """Claim a batch of outbox rows for publishing."""
     current_time = now or _now_utc()
-    claim_expires_at = current_time + timedelta(
-        seconds=settings.outbox_claim_ttl_seconds
-    )
+    claim_expires_at = current_time + timedelta(minutes=5)
+    claim_token = str(uuid.uuid4())
     query = (
         select(IdentityOutboxModel)
         .where(
@@ -110,8 +113,10 @@ async def _claim_batch(
     claimed_ids: list[str] = []
     for row in rows:
         row.publish_status = "PUBLISHING"
+        row.claim_token = claim_token
+        row.claimed_by_worker = WORKER_ID
         row.claim_expires_at_utc = claim_expires_at
-        row.last_error = None
+        row.last_error_code = None
         claimed_ids.append(row.outbox_id)
 
     await session.commit()
@@ -133,6 +138,7 @@ async def _load_claimed_payload(
                 "event_version": row.event_version,
                 "aggregate_id": row.aggregate_id,
                 "aggregate_type": row.aggregate_type,
+                "aggregate_version": row.aggregate_version,
                 "data": payload,
                 "published_at_utc": _now_utc().isoformat(),
             },
@@ -147,7 +153,9 @@ async def _mark_published(outbox_id: str) -> None:
         row.publish_status = "PUBLISHED"
         row.published_at_utc = _now_utc()
         row.claim_expires_at_utc = None
-        row.last_error = None
+        row.claim_token = None
+        row.claimed_by_worker = None
+        row.last_error_code = None
         row.next_attempt_at_utc = row.published_at_utc
         await session.commit()
 
@@ -158,28 +166,35 @@ async def _mark_publish_failure(outbox_id: str, exc: Exception) -> None:
         if row is None:
             return
 
-        row.retry_count += 1
+        row.attempt_count += 1
         row.claim_expires_at_utc = None
-        row.last_error = _format_error(exc)
+        row.claim_token = None
+        row.claimed_by_worker = None
+        row.last_error_code = _format_error(exc)[:100]
         now = _now_utc()
-        if row.retry_count >= settings.outbox_retry_max:
+        if row.attempt_count >= settings.outbox_retry_max:
             row.publish_status = "DEAD_LETTER"
             row.next_attempt_at_utc = now
             logger.error(
-                "Outbox row %s moved to DEAD_LETTER after %d retries",
+                "Outbox row %s moved to DEAD_LETTER after %d attempts",
                 row.outbox_id,
-                row.retry_count,
+                row.attempt_count,
             )
         else:
             row.publish_status = "FAILED"
-            backoff = min(2**row.retry_count, 300)
+            backoff = min(2**row.attempt_count, 300)
             row.next_attempt_at_utc = now + timedelta(seconds=backoff)
         await session.commit()
 
 
 async def _publish_claimed_row(outbox_id: str, broker: EventBroker) -> bool:
     """Publish a previously claimed row and finalize it in its own transaction."""
-    from identity_service.observability import correlation_id
+    from identity_service.observability import (
+        OUTBOX_DEAD_LETTER_TOTAL,
+        OUTBOX_PUBLISHED_TOTAL,
+        correlation_id,
+        get_standard_labels,
+    )
 
     token = correlation_id.set(outbox_id)
     try:
@@ -196,9 +211,17 @@ async def _publish_claimed_row(outbox_id: str, broker: EventBroker) -> bool:
             )
         except Exception as exc:  # noqa: BLE001
             await _mark_publish_failure(outbox_id, exc)
+            row_data = await _load_claimed_payload(outbox_id)
+            if row_data is None:
+                labels = get_standard_labels()
+                OUTBOX_DEAD_LETTER_TOTAL.labels(**labels).inc()
             return False
 
         await _mark_published(outbox_id)
+        labels = get_standard_labels()
+        OUTBOX_PUBLISHED_TOTAL.labels(
+            event_name=event_payload.get("event_name", "unknown"), **labels
+        ).inc()
         return True
     finally:
         correlation_id.reset(token)

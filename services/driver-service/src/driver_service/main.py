@@ -20,7 +20,7 @@ from driver_service.routers.health import router as health_router
 from driver_service.routers.import_jobs import router as import_jobs_router
 from driver_service.routers.internal import router as internal_router
 from driver_service.routers.lifecycle import router as lifecycle_router
-from driver_service.routers.maintenance import router as maintenance_router
+from driver_service.routers.maintenance import close_http_client, router as maintenance_router
 from driver_service.routers.public import router as public_router
 
 logger = logging.getLogger("driver_service")
@@ -47,6 +47,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     await broker.close()
+    await close_http_client()
     await engine.dispose()
     logger.info("Shutdown complete")
 

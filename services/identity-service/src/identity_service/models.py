@@ -5,8 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -128,8 +127,8 @@ class IdentityAuditLogModel(Base):
     action_type: Mapped[str] = mapped_column(String(32), nullable=False)
     actor_id: Mapped[str] = mapped_column(String(64), nullable=False)
     actor_role: Mapped[str] = mapped_column(String(32), nullable=False)
-    old_snapshot_json: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
-    new_snapshot_json: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    old_snapshot_json: Mapped[Optional[str]] = mapped_column(Text(), nullable=True)
+    new_snapshot_json: Mapped[Optional[str]] = mapped_column(Text(), nullable=True)
     request_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at_utc: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
@@ -150,14 +149,17 @@ class IdentityOutboxModel(Base):
     outbox_id: Mapped[str] = mapped_column(String(26), primary_key=True)
     aggregate_type: Mapped[str] = mapped_column(String(32), nullable=False)
     aggregate_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    aggregate_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     event_name: Mapped[str] = mapped_column(String(128), nullable=False)
     event_version: Mapped[int] = mapped_column(nullable=False)
-    payload_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text(), nullable=False)
     publish_status: Mapped[str] = mapped_column(
         String(20), default="PENDING", nullable=False
     )
-    retry_count: Mapped[int] = mapped_column(default=0, nullable=False)
-    last_error: Mapped[Optional[str]] = mapped_column(Text(), nullable=True)
+    attempt_count: Mapped[int] = mapped_column(default=0, nullable=False)
+    last_error_code: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    claim_token: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    claimed_by_worker: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     created_at_utc: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

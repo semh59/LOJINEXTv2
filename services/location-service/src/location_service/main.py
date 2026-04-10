@@ -26,7 +26,6 @@ from location_service.routers import (
     pairs,
     points,
     processing,
-    removed_endpoints,
     routes_public,
 )
 
@@ -79,7 +78,6 @@ def create_app() -> FastAPI:
     app.include_router(approval.router, dependencies=public_dependencies)
     app.include_router(bulk_refresh.router, dependencies=public_dependencies)
     app.include_router(routes_public.router, dependencies=public_dependencies)
-    app.include_router(removed_endpoints.router, dependencies=public_dependencies)
     app.include_router(internal_routes.router, dependencies=[Depends(trip_service_auth_dependency)])
     return app
 

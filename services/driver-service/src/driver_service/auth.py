@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 from fastapi import Header
 from platform_auth import (
+    AuthContext,
     AuthSettings,
+    PlatformRole,
     ServiceTokenAcquisitionError,
     ServiceTokenCache,
     TokenInvalidError,
@@ -17,7 +18,6 @@ from platform_auth import (
 from platform_auth.key_provider import JWKSKeyProvider, build_verification_provider
 
 from driver_service.config import settings
-from driver_service.enums import ActorRole
 from driver_service.errors import (
     driver_auth_invalid,
     driver_auth_required,
@@ -28,30 +28,6 @@ from driver_service.errors import (
 
 _ALLOWED_INTERNAL_SERVICES = {"driver-service", "fleet-service"}
 _SERVICE_TOKEN_CACHE = ServiceTokenCache()
-
-
-@dataclass(frozen=True)
-class AuthContext:
-    """Authenticated caller context used by routers."""
-
-    actor_id: str
-    role: str
-    service_name: str | None = None
-
-    @property
-    def is_admin(self) -> bool:
-        """Return whether the caller has ADMIN role."""
-        return self.role == ActorRole.ADMIN
-
-    @property
-    def is_manager(self) -> bool:
-        """Return whether the caller has MANAGER role."""
-        return self.role == ActorRole.MANAGER
-
-    @property
-    def is_internal_service(self) -> bool:
-        """Return whether the caller is an internal service."""
-        return self.role == ActorRole.SERVICE
 
 
 def _verification_auth_settings() -> AuthSettings:
@@ -133,8 +109,8 @@ def require_admin_token(authorization: str | None) -> AuthContext:
     """Validate a bearer token requiring ADMIN role."""
     claims = _decode_claims(authorization)
     role = claims.role
-    if role != ActorRole.ADMIN:
-        raise driver_forbidden("Only ADMIN can perform this action.")
+    if role not in {PlatformRole.SUPER_ADMIN, PlatformRole.MANAGER}:
+        raise driver_forbidden("SUPER_ADMIN or MANAGER role required.")
     actor_id = claims.sub.strip()
     if not actor_id:
         raise driver_auth_invalid("Token is missing sub.")
@@ -145,8 +121,8 @@ def require_admin_or_manager_token(authorization: str | None) -> AuthContext:
     """Validate a bearer token requiring ADMIN or MANAGER role."""
     claims = _decode_claims(authorization)
     role = claims.role
-    if role not in {ActorRole.ADMIN, ActorRole.MANAGER}:
-        raise driver_forbidden("ADMIN or MANAGER role required.")
+    if role not in {PlatformRole.SUPER_ADMIN, PlatformRole.MANAGER}:
+        raise driver_forbidden("SUPER_ADMIN or MANAGER role required.")
     actor_id = claims.sub.strip()
     if not actor_id:
         raise driver_auth_invalid("Token is missing sub.")
@@ -166,13 +142,13 @@ def require_internal_service_token(authorization: str | None) -> AuthContext:
     role = claims.role.strip()
     service_name = (claims.service or "").strip()
     actor_id = claims.sub.strip()
-    if role != ActorRole.SERVICE or not service_name or not actor_id:
+    if role != PlatformRole.SERVICE or not service_name or not actor_id:
         raise driver_internal_forbidden("Token is not a valid service token.")
     if actor_id != service_name:
         raise driver_internal_forbidden("Service token subject must match service name.")
     if not service_name or service_name not in _ALLOWED_INTERNAL_SERVICES:
         raise driver_internal_forbidden("Service token is not allowed for driver internal endpoints.")
-    return AuthContext(actor_id=actor_id, role=ActorRole.SERVICE, service_name=service_name)
+    return AuthContext(actor_id=actor_id, role=PlatformRole.SERVICE, service_name=service_name)
 
 
 def require_admin_or_internal_token(authorization: str | None) -> AuthContext:
@@ -182,16 +158,16 @@ def require_admin_or_internal_token(authorization: str | None) -> AuthContext:
     actor_id = claims.sub.strip()
     if not actor_id:
         raise driver_auth_invalid("Token is missing sub.")
-    if role == ActorRole.ADMIN:
+    if role == PlatformRole.SUPER_ADMIN:
         return AuthContext(actor_id=actor_id, role=role)
     service_name = (claims.service or "").strip()
-    if role == ActorRole.SERVICE:
+    if role == PlatformRole.SERVICE:
         if not service_name or service_name != actor_id:
             raise driver_forbidden("Service token subject must match service name.")
         if service_name not in _ALLOWED_INTERNAL_SERVICES:
             raise driver_forbidden("Service token is not allowed for this endpoint.")
-        return AuthContext(actor_id=actor_id, role=ActorRole.SERVICE, service_name=service_name)
-    raise driver_forbidden("ADMIN or internal service role required.")
+        return AuthContext(actor_id=actor_id, role=PlatformRole.SERVICE, service_name=service_name)
+    raise driver_forbidden("SUPER_ADMIN or internal service role required.")
 
 
 def admin_auth_dependency(

@@ -40,6 +40,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         yield
     finally:
+        from fleet_service.clients import driver_client, trip_client
+
+        await driver_client.close()
+        await trip_client.close()
         await broker.close()
         await engine.dispose()
         logger.info("Shutdown complete")

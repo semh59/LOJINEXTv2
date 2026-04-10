@@ -1,5 +1,6 @@
 """Shared authentication primitives for LOJINEXT services."""
 
+from platform_auth.auth_context import AuthContext
 from platform_auth.claims import TokenClaims
 from platform_auth.dependencies import decode_bearer_token, parse_bearer_token
 from platform_auth.errors import (
@@ -20,6 +21,7 @@ from platform_auth.settings import AuthSettings
 from platform_auth.token_factory import ServiceTokenFactory
 
 __all__ = [
+    "AuthContext",
     "AuthSettings",
     "PlatformAuthError",
     "PlatformActorType",

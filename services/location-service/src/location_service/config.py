@@ -72,7 +72,10 @@ class Settings(BaseSettings):
     kafka_topic: str = "location-events"
     kafka_bootstrap_servers: str = "localhost:9092"
     kafka_client_id: str = "location-service"
+    kafka_security_protocol: str = "PLAINTEXT"
     ignore_provider_health: bool = False
+    platform_jwt_secret: str | None = None
+    allow_plaintext_in_prod: bool = False
 
     @property
     def provider_timeout_seconds(self) -> float:
@@ -114,6 +117,12 @@ def validate_prod_settings(current: Settings) -> None:
             errors.append("LOCATION_ORS_BASE_URL must be set when LOCATION_ENABLE_ORS_VALIDATION=true in prod.")
     if current.provider_timeout_ms <= 0:
         errors.append("LOCATION_PROVIDER_TIMEOUT_MS must be greater than zero.")
+    if current.platform_jwt_secret is not None:
+        errors.append("LOCATION_PLATFORM_JWT_SECRET must not be set in prod; verification must use JWKS.")
+    if current.kafka_security_protocol == "PLAINTEXT" and not current.allow_plaintext_in_prod:
+        errors.append(
+            "LOCATION_KAFKA_SECURITY_PROTOCOL cannot be PLAINTEXT in prod without LOCATION_ALLOW_PLAINTEXT_IN_PROD."
+        )
 
     if errors:
         raise ValueError("Production settings invalid: " + " ".join(errors))

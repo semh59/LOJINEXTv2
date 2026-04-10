@@ -19,7 +19,7 @@ from location_service.processing.approval import approve_route_versions, discard
 from location_service.routers.pairs import _get_pair_detail, serialize_pair_response
 from location_service.schemas import PairResponse
 
-router = APIRouter(prefix="/v1/pairs", tags=["approval"])
+router = APIRouter(tags=["approval"])
 
 
 def _raise_from_approval_error(pair_id: str, exc: ValueError, *, discard: bool = False) -> None:
@@ -36,7 +36,7 @@ def _raise_from_approval_error(pair_id: str, exc: ValueError, *, discard: bool =
     raise exc
 
 
-@router.post("/{pair_id}/approve", response_model=PairResponse)
+@router.post("/api/v1/pairs/{pair_id}/approve", response_model=PairResponse)
 async def approve_route_pair_draft(
     request: Request,
     response: Response,
@@ -59,7 +59,7 @@ async def approve_route_pair_draft(
     return serialize_pair_response(pair, origin, destination)
 
 
-@router.post("/{pair_id}/discard", response_model=PairResponse)
+@router.post("/api/v1/pairs/{pair_id}/discard", response_model=PairResponse)
 async def discard_route_pair_draft(
     request: Request,
     response: Response,

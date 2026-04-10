@@ -64,6 +64,7 @@ class Settings(BaseSettings):
     kafka_bootstrap_servers: str = "localhost:9092"
     kafka_topic: str = "driver.events.v1"
     kafka_client_id: str = "driver-service"
+    platform_jwt_secret: str | None = None
     kafka_security_protocol: str = "PLAINTEXT"
     allow_plaintext_in_prod: bool = False
     kafka_sasl_mechanism: str | None = None
@@ -115,6 +116,8 @@ def validate_prod_settings(current: Settings) -> None:
         errors.append("DRIVER_AUTH_SERVICE_CLIENT_SECRET must be set for outbound service auth.")
     if not current.database_url or current.database_url == DEFAULT_DATABASE_URL:
         errors.append("DRIVER_DATABASE_URL must be set to a non-default value in prod.")
+    if current.platform_jwt_secret is not None:
+        errors.append("DRIVER_PLATFORM_JWT_SECRET must not be set in prod; verification must use JWKS.")
     if current.broker_type is None:
         errors.append("DRIVER_BROKER_TYPE must be explicitly set in prod.")
     if not current.kafka_bootstrap_servers or current.kafka_bootstrap_servers == "localhost:9092":

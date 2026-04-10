@@ -188,6 +188,9 @@ async def _run_job_logic(session: AsyncSession, job_id: str) -> None:
                 # Write Outbox
                 outbox = DriverOutboxModel(
                     outbox_id=str(ULID()),
+                    aggregate_type="DRIVER",
+                    aggregate_id=existing_driver.driver_id,
+                    aggregate_version=existing_driver.row_version,
                     driver_id=existing_driver.driver_id,
                     event_name="driver.updated.v1",
                     event_version=1,
@@ -199,7 +202,7 @@ async def _run_job_logic(session: AsyncSession, job_id: str) -> None:
                         }
                     ),
                     publish_status="PENDING",
-                    retry_count=0,
+                    attempt_count=0,
                     created_at_utc=now,
                     next_attempt_at_utc=now,
                 )
@@ -253,6 +256,9 @@ async def _run_job_logic(session: AsyncSession, job_id: str) -> None:
                 # Write Outbox
                 outbox = DriverOutboxModel(
                     outbox_id=str(ULID()),
+                    aggregate_type="DRIVER",
+                    aggregate_id=driver_id,
+                    aggregate_version=1,
                     driver_id=driver_id,
                     event_name="driver.created.v1",
                     event_version=1,
@@ -269,7 +275,7 @@ async def _run_job_logic(session: AsyncSession, job_id: str) -> None:
                         }
                     ),
                     publish_status="PENDING",
-                    retry_count=0,
+                    attempt_count=0,
                     created_at_utc=now,
                     next_attempt_at_utc=now,
                 )

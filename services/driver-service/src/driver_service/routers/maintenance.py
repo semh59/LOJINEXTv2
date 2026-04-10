@@ -7,6 +7,7 @@ Feature-flagged endpoints:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -48,6 +49,27 @@ from driver_service.serializers import serialize_driver_admin
 logger = logging.getLogger("driver_service")
 router = APIRouter(prefix="/internal/v1/drivers", tags=["driver-maintenance"])
 
+_http_client: httpx.AsyncClient | None = None
+_http_client_lock = asyncio.Lock()
+
+
+async def _get_http_client() -> httpx.AsyncClient:
+    global _http_client
+    if _http_client is not None:
+        return _http_client
+    async with _http_client_lock:
+        if _http_client is None:
+            _http_client = httpx.AsyncClient(timeout=settings.dependency_timeout_seconds)
+    return _http_client
+
+
+async def close_http_client() -> None:
+    global _http_client
+    client = _http_client
+    _http_client = None
+    if client is not None:
+        await client.aclose()
+
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
@@ -60,12 +82,15 @@ def _new_ulid() -> str:
 async def _write_outbox(session: AsyncSession, driver_id: str, event_name: str, payload: dict[str, Any]) -> None:
     outbox = DriverOutboxModel(
         outbox_id=_new_ulid(),
+        aggregate_type="DRIVER",
+        aggregate_id=driver_id,
+        aggregate_version=1,
         driver_id=driver_id,
         event_name=event_name,
         event_version=1,
         payload_json=json.dumps(payload),
         publish_status="PENDING",
-        retry_count=0,
+        attempt_count=0,
         created_at_utc=_now_utc(),
         next_attempt_at_utc=_now_utc(),
     )
@@ -82,20 +107,20 @@ async def _check_trip_references(driver_id: str) -> bool:
     payload = {"asset_id": driver_id, "asset_type": "DRIVER"}
 
     try:
-        async with httpx.AsyncClient(timeout=settings.dependency_timeout_seconds) as client:
-            headers = {"Authorization": f"Bearer {token}"}
-            if c_id := correlation_id.get():
-                headers["X-Correlation-ID"] = c_id
+        client = await _get_http_client()
+        headers = {"Authorization": f"Bearer {token}"}
+        if c_id := correlation_id.get():
+            headers["X-Correlation-ID"] = c_id
 
-            resp = await client.post(url, json=payload, headers=headers)
-            if resp.status_code == 200:
-                data = resp.json()
-                # is_referenced=True means there ARE active trips, so NOT safe to delete
-                return not data.get("is_referenced", True)
+        resp = await client.post(url, json=payload, headers=headers)
+        if resp.status_code == 200:
+            data = resp.json()
+            # is_referenced=True means there ARE active trips, so NOT safe to delete
+            return not data.get("is_referenced", True)
 
-            # Trip service returned error — fail closed (unsafe)
-            logger.error("Trip Service reference check failed: %d %s", resp.status_code, resp.text)
-            return False
+        # Trip service returned error — fail closed (unsafe)
+        logger.error("Trip Service reference check failed: %d %s", resp.status_code, resp.text)
+        return False
     except Exception:
         logger.exception("Connectivity error during Trip Service reference check")
         raise driver_trip_check_unavailable()

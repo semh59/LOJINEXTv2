@@ -142,12 +142,21 @@ async def _write_outbox(
 
     outbox = LocationOutboxModel(
         outbox_id=_new_ulid(),
+        aggregate_type=payload.get("target_type", "LOCATION"),
+        aggregate_id=str(
+            payload.get("target_id")
+            or payload.get("location_id")
+            or payload.get("pair_id")
+            or payload.get("route_pair_id")
+            or _new_ulid()
+        ),
+        aggregate_version=1,
         event_name=event_name,
         event_version=1,
-        payload_json=payload,
+        payload_json=json.dumps(payload),
         partition_key=p_key,
         publish_status="PENDING",
-        retry_count=0,
+        attempt_count=0,
         created_at_utc=now,
         next_attempt_at_utc=now,
     )

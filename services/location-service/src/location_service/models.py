@@ -72,7 +72,7 @@ class LocationPoint(Base):
 
 
 class RoutePair(Base):
-    __tablename__ = "route_pairs"
+    __tablename__ = "location_route_pairs"
 
     route_pair_id: Mapped[str] = mapped_column(String(26), primary_key=True, default=lambda: str(ULID()))
     pair_code: Mapped[str] = mapped_column(String(29), unique=True, nullable=False)  # Format RP_<ULID>
@@ -82,10 +82,10 @@ class RoutePair(Base):
     pair_status: Mapped[PairStatus] = mapped_column(String(50), nullable=False)
 
     forward_route_id: Mapped[Optional[str]] = mapped_column(
-        ForeignKey("routes.route_id", use_alter=True), nullable=True
+        ForeignKey("location_routes.route_id", use_alter=True), nullable=True
     )
     reverse_route_id: Mapped[Optional[str]] = mapped_column(
-        ForeignKey("routes.route_id", use_alter=True), nullable=True
+        ForeignKey("location_routes.route_id", use_alter=True), nullable=True
     )
 
     current_active_forward_version_no: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -121,10 +121,10 @@ class RoutePair(Base):
 
 
 class Route(Base):
-    __tablename__ = "routes"
+    __tablename__ = "location_routes"
 
     route_id: Mapped[str] = mapped_column(String(26), primary_key=True, default=lambda: str(ULID()))
-    route_pair_id: Mapped[str] = mapped_column(ForeignKey("route_pairs.route_pair_id"), nullable=False)
+    route_pair_id: Mapped[str] = mapped_column(ForeignKey("location_route_pairs.route_pair_id"), nullable=False)
     route_code: Mapped[str] = mapped_column(String(31), unique=True, nullable=False)
     direction: Mapped[DirectionCode] = mapped_column(String(20), nullable=False)
     created_by: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -132,9 +132,9 @@ class Route(Base):
 
 
 class RouteVersionCounter(Base):
-    __tablename__ = "route_version_counters"
+    __tablename__ = "location_route_version_counters"
 
-    route_id: Mapped[str] = mapped_column(ForeignKey("routes.route_id"), primary_key=True)
+    route_id: Mapped[str] = mapped_column(ForeignKey("location_routes.route_id"), primary_key=True)
     next_version_no: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_utcnow, nullable=False)
     updated_at_utc: Mapped[datetime] = mapped_column(
@@ -143,12 +143,12 @@ class RouteVersionCounter(Base):
 
 
 class RouteVersion(Base):
-    __tablename__ = "route_versions"
+    __tablename__ = "location_route_versions"
 
-    route_id: Mapped[str] = mapped_column(ForeignKey("routes.route_id"), primary_key=True)
+    route_id: Mapped[str] = mapped_column(ForeignKey("location_routes.route_id"), primary_key=True)
     version_no: Mapped[int] = mapped_column(Integer, primary_key=True)
     processing_run_id: Mapped[Optional[str]] = mapped_column(
-        ForeignKey("processing_runs.processing_run_id"), nullable=True
+        ForeignKey("location_processing_runs.processing_run_id"), nullable=True
     )
     processing_status: Mapped[ProcessingStatus] = mapped_column(String(50), nullable=False)
 
@@ -196,7 +196,7 @@ class RouteVersion(Base):
 
 
 class RouteSegment(Base):
-    __tablename__ = "route_segments"
+    __tablename__ = "location_route_segments"
 
     route_id: Mapped[str] = mapped_column(String(26), primary_key=True)
     version_no: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -226,7 +226,7 @@ class RouteSegment(Base):
     __table_args__ = (
         ForeignKeyConstraint(
             ["route_id", "version_no"],
-            ["route_versions.route_id", "route_versions.version_no"],
+            ["location_route_versions.route_id", "location_route_versions.version_no"],
             name="fk_route_segments_version",
         ),
         CheckConstraint("distance_m >= 0", name="chk_route_segments_distance"),
@@ -245,10 +245,10 @@ class RouteSegment(Base):
 
 
 class ProcessingRun(Base):
-    __tablename__ = "processing_runs"
+    __tablename__ = "location_processing_runs"
 
     processing_run_id: Mapped[str] = mapped_column(String(26), primary_key=True, default=lambda: str(ULID()))
-    route_pair_id: Mapped[str] = mapped_column(ForeignKey("route_pairs.route_pair_id"), nullable=False)
+    route_pair_id: Mapped[str] = mapped_column(ForeignKey("location_route_pairs.route_pair_id"), nullable=False)
     run_status: Mapped[RunStatus] = mapped_column(String(50), nullable=False)
     trigger_type: Mapped[TriggerType] = mapped_column(String(50), nullable=False)
     attempt_no: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
@@ -264,7 +264,7 @@ class ProcessingRun(Base):
     expected_reverse_version_no: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     bulk_refresh_job_id: Mapped[Optional[str]] = mapped_column(
-        ForeignKey("bulk_refresh_jobs.bulk_refresh_job_id"), nullable=True
+        ForeignKey("location_bulk_refresh_jobs.bulk_refresh_job_id"), nullable=True
     )
     started_at_utc: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at_utc: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -291,7 +291,7 @@ class ProcessingRun(Base):
 
 
 class RouteUsageRef(Base):
-    __tablename__ = "route_usage_refs"
+    __tablename__ = "location_route_usage_refs"
 
     route_id: Mapped[str] = mapped_column(String(26), primary_key=True)
     version_no: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -305,7 +305,7 @@ class RouteUsageRef(Base):
     __table_args__ = (
         ForeignKeyConstraint(
             ["route_id", "version_no"],
-            ["route_versions.route_id", "route_versions.version_no"],
+            ["location_route_versions.route_id", "location_route_versions.version_no"],
             ondelete="RESTRICT",
             name="fk_route_usage_refs_version",
         ),
@@ -313,7 +313,7 @@ class RouteUsageRef(Base):
 
 
 class BulkRefreshJob(Base):
-    __tablename__ = "bulk_refresh_jobs"
+    __tablename__ = "location_bulk_refresh_jobs"
 
     bulk_refresh_job_id: Mapped[str] = mapped_column(String(26), primary_key=True, default=lambda: str(ULID()))
     job_status: Mapped[BulkRefreshStatus] = mapped_column(String(50), nullable=False)
@@ -343,19 +343,19 @@ class BulkRefreshJob(Base):
 
 
 class BulkRefreshJobItem(Base):
-    __tablename__ = "bulk_refresh_job_items"
+    __tablename__ = "location_bulk_refresh_job_items"
 
     item_id: Mapped[str] = mapped_column(String(26), primary_key=True, default=lambda: str(ULID()))
     bulk_refresh_job_id: Mapped[str] = mapped_column(
-        ForeignKey("bulk_refresh_jobs.bulk_refresh_job_id", ondelete="CASCADE"), nullable=False
+        ForeignKey("location_bulk_refresh_jobs.bulk_refresh_job_id", ondelete="CASCADE"), nullable=False
     )
     item_no: Mapped[int] = mapped_column(Integer, nullable=False)
     route_pair_id: Mapped[Optional[str]] = mapped_column(
-        ForeignKey("route_pairs.route_pair_id", ondelete="SET NULL"), nullable=True
+        ForeignKey("location_route_pairs.route_pair_id", ondelete="SET NULL"), nullable=True
     )
     item_status: Mapped[BulkRefreshItemStatus] = mapped_column(String(50), nullable=False)
     processing_run_id: Mapped[Optional[str]] = mapped_column(
-        ForeignKey("processing_runs.processing_run_id", ondelete="SET NULL"), nullable=True
+        ForeignKey("location_processing_runs.processing_run_id", ondelete="SET NULL"), nullable=True
     )
     error_code: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
@@ -368,7 +368,7 @@ class BulkRefreshJobItem(Base):
 
 
 class IdempotencyKey(Base):
-    __tablename__ = "idempotency_keys"
+    __tablename__ = "location_idempotency_keys"
 
     key_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
     locked_at_utc: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -387,7 +387,7 @@ class IdempotencyKey(Base):
 class WorkerHeartbeat(Base):
     """Persisted worker heartbeats for cross-service and multi-process readiness."""
 
-    __tablename__ = "worker_heartbeats"
+    __tablename__ = "location_worker_heartbeats"
 
     worker_name: Mapped[str] = mapped_column(String(100), primary_key=True)
     recorded_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_utcnow, nullable=False)
@@ -399,14 +399,19 @@ class LocationOutboxModel(Base):
     __tablename__ = "location_outbox"
 
     outbox_id: Mapped[str] = mapped_column(String(26), primary_key=True, default=lambda: str(ULID()))
+    aggregate_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    aggregate_id: Mapped[str] = mapped_column(String(26), nullable=False)
+    aggregate_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     event_name: Mapped[str] = mapped_column(String(64), nullable=False)
     event_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    payload_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
     partition_key: Mapped[str] = mapped_column(String(64), nullable=False)
     publish_status: Mapped[str] = mapped_column(String(16), nullable=False, default="PENDING")
     last_error_code: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    claim_token: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    claimed_by_worker: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     claim_expires_at_utc: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     next_attempt_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     published_at_utc: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -419,6 +424,7 @@ class LocationOutboxModel(Base):
             "claim_expires_at_utc",
             postgresql_where=text("publish_status = 'PUBLISHING'"),
         ),
+        Index("ix_location_outbox_aggregate", "aggregate_type", "aggregate_id", "created_at_utc"),
     )
 
 

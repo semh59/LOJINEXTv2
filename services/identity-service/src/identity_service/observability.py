@@ -62,15 +62,27 @@ METRICS_LABELS = ["service", "env", "version"]
 
 # Standard HTTP metrics
 HTTP_REQUESTS_TOTAL = Counter(
-    "http_requests_total",
+    "identity_http_requests_total",
     "Total number of HTTP requests",
     METRICS_LABELS + ["method", "endpoint", "status_code"],
 )
 
 HTTP_REQUEST_DURATION_SECONDS = Histogram(
-    "http_request_duration_seconds",
+    "identity_http_request_duration_seconds",
     "HTTP request latency in seconds",
     METRICS_LABELS + ["method", "endpoint"],
+)
+
+OUTBOX_PUBLISHED_TOTAL = Counter(
+    "identity_outbox_published_total",
+    "Outbox events published",
+    METRICS_LABELS + ["event_name"],
+)
+
+OUTBOX_DEAD_LETTER_TOTAL = Counter(
+    "identity_outbox_dead_letter_total",
+    "Outbox events that reached DEAD_LETTER",
+    METRICS_LABELS,
 )
 
 

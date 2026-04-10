@@ -24,7 +24,7 @@ from sqlalchemy.orm import aliased
 from trip_service.broker import MessageBroker, OutboxMessage
 from trip_service.config import settings
 from trip_service.database import async_session_factory
-from trip_service.enums import OutboxPublishStatus
+from platform_common import OutboxPublishStatus
 from trip_service.models import TripOutbox
 from trip_service.observability import (
     OUTBOX_DEAD_LETTER_TOTAL,

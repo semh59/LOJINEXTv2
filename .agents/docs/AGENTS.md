@@ -29,13 +29,15 @@ Do not write a single line of code before reading these in order:
 1.  .agents/docs/AGENTS.md             ← you are here
 2.  .agents/docs/WORKFLOW.md           ← how to work
 3.  .agents/docs/RULES.md              ← what is never allowed
-4.  MEMORY/PROJECT_STATE.md            ← where the project stands now
-5.  MEMORY/DECISIONS.md                ← why things are the way they are
-6.  MEMORY/KNOWN_ISSUES.md             ← what is already broken or risky
-7.  TASKS/<your-task>/BRIEF.md         ← what this task must produce
-8.  TASKS/<your-task>/PLAN.md          ← how (write this if it does not exist)
-9.  TASKS/<your-task>/STATE.md         ← where the last agent stopped
-10. TASKS/<your-task>/NEXT_AGENT.md    ← notes left specifically for you
+4.  standards/PLATFORM_STANDARD.md    ← binding engineering standard
+5.  standards/SERVICE_REGISTRY.md      ← service identities and boundaries
+6.  standards/DECISIONS.md             ← why things are the way they are
+7.  standards/KNOWN_ISSUES.md          ← what is already broken or risky
+8.  MEMORY/PROJECT_STATE.md            ← where the project stands now
+9.  TASKS/<your-task>/BRIEF.md         ← what this task must produce
+10. TASKS/<your-task>/PLAN.md          ← how (write this if it does not exist)
+11. TASKS/<your-task>/STATE.md         ← where the last agent stopped
+12. TASKS/<your-task>/NEXT_AGENT.md    ← notes left specifically for you
 ```
 
 This takes 10–15 minutes. It prevents 2–3 hours of wrong work.
@@ -56,8 +58,13 @@ TASKS/<id>/          Task-level memory
                      where we stopped, what comes next
 ```
 
-Any decision not written in MEMORY/DECISIONS.md does not exist.
+Any decision not written in `standards/DECISIONS.md` does not exist.
 The next agent will make a different decision and create a conflict.
+
+**Deprecated paths — do NOT use:**
+- `MEMORY/PLATFORM_STANDARD.md` → use `standards/PLATFORM_STANDARD.md`
+- `MEMORY/DECISIONS.md` → use `standards/DECISIONS.md`
+- `MEMORY/KNOWN_ISSUES.md` → use `standards/KNOWN_ISSUES.md`
 
 ---
 
@@ -75,7 +82,7 @@ TASKS/
 ```
 
 A task ID is assigned before any work begins.
-The next available ID is always in MEMORY/PROJECT_STATE.md under "Next Task ID."
+The next available ID is always in `MEMORY/PROJECT_STATE.md` under "Next Task ID."
 
 ---
 

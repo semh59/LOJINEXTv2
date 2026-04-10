@@ -19,6 +19,7 @@ dependencies = [
     "prometheus-client>=0.21.0",
     "confluent-kafka>=2.5.0",
     "redis[asyncio]>=5.0.0",
+    "platform-auth",
 ]
 
 [project.scripts]
@@ -44,6 +45,9 @@ asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
 pythonpath = ["src", "../../packages/platform-auth/src"]
+
+[tool.uv.sources]
+platform-auth = { path = "../../packages/platform-auth" }
 
 [tool.mypy]
 python_version = "3.12"

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from driver_service.enums import ActorRole
+from platform_auth import PlatformRole
 from driver_service.models import DriverModel
 from driver_service.normalization import derive_lifecycle_state, mask_phone_for_manager
 
@@ -80,15 +80,15 @@ def serialize_driver_internal(driver: DriverModel) -> dict[str, Any]:
 
 def serialize_driver_for_role(driver: DriverModel, role: str) -> dict[str, Any]:
     """Serialize a driver resource based on the caller's role."""
-    if role == ActorRole.ADMIN:
+    if role == PlatformRole.SUPER_ADMIN:
         return serialize_driver_admin(driver)
-    if role == ActorRole.MANAGER:
+    if role == PlatformRole.MANAGER:
         return serialize_driver_manager(driver)
     return serialize_driver_internal(driver)
 
 
 def serialize_driver_list_item(driver: DriverModel, role: str) -> dict[str, Any]:
-    """Serialize a driver for list responses — uses MANAGER shape by default, ADMIN gets full."""
-    if role == ActorRole.ADMIN:
+    """Serialize a driver for list responses — uses MANAGER shape by default, SUPER_ADMIN gets full."""
+    if role == PlatformRole.SUPER_ADMIN:
         return serialize_driver_admin(driver)
     return serialize_driver_manager(driver)

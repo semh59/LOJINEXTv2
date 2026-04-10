@@ -12,16 +12,16 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
 from typing import Any
 
 from fastapi import Header
 
 from fleet_service.config import settings
-from fleet_service.domain.enums import ActorType
 from fleet_service.errors import ProblemDetailError
 from platform_auth import (
+    AuthContext,
     AuthSettings,
+    PlatformRole,
     ServiceTokenAcquisitionError,
     ServiceTokenCache,
     TokenInvalidError,
@@ -49,27 +49,6 @@ class AuthInvalidError(ProblemDetailError):
         super().__init__(401, "AUTH_INVALID", detail)
 
 
-@dataclass(frozen=True)
-class AuthContext:
-    """Authenticated caller context for request processing."""
-
-    actor_id: str
-    actor_type: str
-    service_name: str | None = None
-
-    @property
-    def is_admin(self) -> bool:
-        return self.actor_type == ActorType.ADMIN
-
-    @property
-    def is_super_admin(self) -> bool:
-        return self.actor_type == ActorType.SUPER_ADMIN
-
-    @property
-    def is_service(self) -> bool:
-        return self.actor_type == ActorType.SERVICE
-
-
 def _platform_auth_settings(*, audience: str | None = None) -> AuthSettings:
     """Build shared auth settings for inbound verification and outbound tokens.
 
@@ -81,7 +60,7 @@ def _platform_auth_settings(*, audience: str | None = None) -> AuthSettings:
     if fallback_secret and settings.environment != "prod":
         return AuthSettings(
             algorithm="HS256",
-            secret_key=fallback_secret,
+            shared_secret=fallback_secret,
             issuer=settings.auth_issuer or None,
             audience=effective_audience,
             jwks_url=None,
@@ -171,17 +150,17 @@ async def issue_service_token(*, audience: str | None = None) -> str:
 
 
 def require_admin_token(authorization: str | None) -> AuthContext:
-    """Validate a bearer token requiring ADMIN or SUPER_ADMIN role."""
+    """Validate a bearer token requiring ADMIN, MANAGER or SUPER_ADMIN role."""
     from fleet_service.errors import InsufficientRoleError
 
     claims = _decode_claims(authorization)
     role = claims.role
-    if role not in {ActorType.ADMIN, ActorType.MANAGER, ActorType.SUPER_ADMIN}:
-        raise InsufficientRoleError("ADMIN")
+    if role not in {PlatformRole.SUPER_ADMIN, PlatformRole.MANAGER}:
+        raise InsufficientRoleError("SUPER_ADMIN")
     actor_id = claims.sub.strip()
     if not actor_id:
         raise AuthInvalidError("Token is missing sub.")
-    return AuthContext(actor_id=actor_id, actor_type=role)
+    return AuthContext(actor_id=actor_id, role=role)
 
 
 def require_super_admin_token(authorization: str | None) -> AuthContext:
@@ -190,12 +169,12 @@ def require_super_admin_token(authorization: str | None) -> AuthContext:
 
     claims = _decode_claims(authorization)
     role = claims.role
-    if role != ActorType.SUPER_ADMIN:
+    if role != PlatformRole.SUPER_ADMIN:
         raise InsufficientRoleError("SUPER_ADMIN")
     actor_id = claims.sub.strip()
     if not actor_id:
         raise AuthInvalidError("Token is missing sub.")
-    return AuthContext(actor_id=actor_id, actor_type=role)
+    return AuthContext(actor_id=actor_id, role=role)
 
 
 def require_service_token(authorization: str | None, *, allowed_services: set[str] | None = None) -> AuthContext:
@@ -206,13 +185,13 @@ def require_service_token(authorization: str | None, *, allowed_services: set[st
     role = claims.role
     actor_id = claims.sub.strip()
     service_name = (claims.service or "").strip()
-    if role != ActorType.SERVICE or not actor_id or not service_name:
+    if role != PlatformRole.SERVICE or not actor_id or not service_name:
         raise UnauthorizedInternalCallError()
     if actor_id != service_name:
         raise UnauthorizedInternalCallError()
     if allowed_services is not None and service_name not in allowed_services:
         raise UnauthorizedInternalCallError()
-    return AuthContext(actor_id=actor_id, actor_type=ActorType.SERVICE, service_name=service_name)
+    return AuthContext(actor_id=actor_id, role=PlatformRole.SERVICE, service_name=service_name)
 
 
 def admin_auth(

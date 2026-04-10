@@ -53,6 +53,17 @@ services:
       - identity.user_created.v1
     notes: "RS256 / JWKS sahibi. PLATFORM_JWT_SECRET bridge yalnızca geçiş dönemi için."
 
+  telegram-service:
+    port: 8106
+    owner_domain: telegram bot integration
+    stack: { language: python, version: "3.12", framework: fastapi, orm: sqlalchemy2_async }
+    internal_dependencies:
+      - { service: trip-service, path: /internal/v1/trips/* }
+      - { service: driver-service, path: /internal/v1/drivers/* }
+      - { service: fleet-service, path: /internal/v1/vehicles/* }
+    kafka_topics_produced: []
+    notes: "Telegram bot entegrasyon katmanı. Trip ingest ve driver/fleet lookup için iç servis çağrıları yapar."
+
 # Yeni servis eklemek:
 # 1. Buraya yeni blok ekle (port, owner_domain, stack, deps, topics, notes)
 # 2. Şablona dokunma.

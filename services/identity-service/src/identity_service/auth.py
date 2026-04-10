@@ -4,12 +4,17 @@ from __future__ import annotations
 
 from typing import Callable
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header
 from platform_auth import PlatformRole
 from platform_auth.dependencies import parse_bearer_token
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from identity_service.database import get_session
+from identity_service.errors import (
+    identity_conflict,
+    identity_forbidden,
+    identity_unauthorized,
+)
 from identity_service.models import IdentityUserModel
 from identity_service.token_service import (
     InvalidUserRoleAssignmentsError,
@@ -24,22 +29,20 @@ async def current_user(
 ) -> dict[str, object]:
     """Resolve the current authenticated user."""
     if authorization is None:
-        raise HTTPException(status_code=401, detail="Authorization header is required.")
+        raise identity_unauthorized("Authorization header is required.")
     try:
         token = parse_bearer_token(authorization)
         claims = await decode_access_token(session, token)
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=401, detail="Invalid or expired token."
-        ) from exc
+        raise identity_unauthorized("Invalid or expired token.") from exc
 
     user = await session.get(IdentityUserModel, claims.sub)
     if user is None or not user.is_active:
-        raise HTTPException(status_code=401, detail="User is inactive or missing.")
+        raise identity_unauthorized("User is inactive or missing.")
     try:
         return await build_user_profile(session, user)
     except InvalidUserRoleAssignmentsError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise identity_conflict(str(exc)) from exc
 
 
 def require_role(role_name: str) -> Callable:
@@ -51,9 +54,7 @@ def require_role(role_name: str) -> Callable:
         user: dict[str, object] = Depends(current_user),
     ) -> dict[str, object]:
         if user.get("role") != expected_role:
-            raise HTTPException(
-                status_code=403, detail=f"{expected_role} role required."
-            )
+            raise identity_forbidden(f"{expected_role} role required.")
         return user
 
     return _require_role

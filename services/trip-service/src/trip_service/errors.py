@@ -32,16 +32,15 @@ async def problem_detail_handler(request: Request, exc: ProblemDetailError) -> J
     """Convert ProblemDetail exceptions into RFC 9457 problem+json responses."""
     request_id = getattr(request.state, "request_id", "unknown")
     body: dict[str, Any] = {
-        "type": f"https://trip-service/errors/{exc.code}",
+        "type": f"https://errors.lojinext.com/{exc.code}",
         "title": exc.title,
         "status": exc.status,
         "detail": exc.detail,
         "instance": exc.instance or str(request.url.path),
         "code": exc.code,
         "request_id": request_id,
+        "errors": exc.errors,
     }
-    if exc.errors:
-        body["errors"] = exc.errors
     return JSONResponse(status_code=exc.status, content=body, media_type="application/problem+json")
 
 

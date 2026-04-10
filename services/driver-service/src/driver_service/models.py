@@ -181,7 +181,9 @@ class DriverOutboxModel(Base):
     __tablename__ = "driver_outbox"
 
     outbox_id: Mapped[str] = mapped_column(String(26), primary_key=True)
-    # Outbox should NOT CASCADE delete; we must handle pending events before hard-delete
+    aggregate_type: Mapped[str] = mapped_column(String(16), nullable=False, default="DRIVER")
+    aggregate_id: Mapped[str] = mapped_column(String(26), nullable=False)
+    aggregate_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     driver_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("driver_drivers.driver_id", ondelete="RESTRICT"), nullable=False
     )
@@ -190,9 +192,10 @@ class DriverOutboxModel(Base):
     payload_json: Mapped[str] = mapped_column(Text, nullable=False)
     partition_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     publish_status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING")
-    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    last_error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    claim_token: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    claimed_by_worker: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     published_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     next_attempt_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -205,6 +208,7 @@ class DriverOutboxModel(Base):
         ),
         Index("ix_driver_outbox_pending", "publish_status", "next_attempt_at_utc", "created_at_utc"),
         Index("ix_driver_outbox_driver_id", "driver_id", "created_at_utc"),
+        Index("ix_driver_outbox_aggregate", "aggregate_type", "aggregate_id", "created_at_utc"),
     )
 
 

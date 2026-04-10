@@ -88,14 +88,16 @@ async def _write_audit(
 async def _write_outbox(session: AsyncSession, driver_id: str, event_name: str, payload: dict[str, Any]) -> None:
     outbox = DriverOutboxModel(
         outbox_id=_new_ulid(),
+        aggregate_type="DRIVER",
+        aggregate_id=driver_id,
+        aggregate_version=1,
         driver_id=driver_id,
         event_name=event_name,
         event_version=1,
-        # V2.1: Enforce TEXT payload per platform standard
         payload_json=json.dumps(payload),
-        partition_key=driver_id,  # V2.1: Partition by driver_id
+        partition_key=driver_id,
         publish_status="PENDING",
-        retry_count=0,
+        attempt_count=0,
         created_at_utc=_now_utc(),
         next_attempt_at_utc=_now_utc(),
     )

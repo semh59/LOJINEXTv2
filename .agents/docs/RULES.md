@@ -99,7 +99,7 @@ If tokens run out: NEXT_AGENT.md is written before anything else.
 ## RULE-11 — Memory lives in files, not in conversation
 
 Conversation ends when the session ends.
-A decision not written in MEMORY/DECISIONS.md does not exist.
+A decision not written in `standards/DECISIONS.md` does not exist.
 The next agent will make a different decision.
 
 ---
@@ -129,7 +129,7 @@ Mixed commits make git history useless for debugging.
 ## RULE-14 — Known issues are written, not deferred silently
 
 Something wrong that will not be fixed in this task
-goes in MEMORY/KNOWN_ISSUES.md.
+goes in `standards/KNOWN_ISSUES.md`.
 
 "I'll fix it later" with no written record means the next agent
 discovers it at the worst moment.
@@ -154,7 +154,7 @@ No key, token, password, or secret appears in source code.
 If a secret is accidentally committed:
 1. Remove from history immediately
 2. Rotate the exposed credential immediately
-3. Document in MEMORY/KNOWN_ISSUES.md
+3. Document in `standards/KNOWN_ISSUES.md`
 
 ---
 
@@ -171,7 +171,7 @@ UI text shown to users goes through i18n — that is the only exception.
 
 No task from Phase N+1 begins until all Phase N tasks are done.
 
-Exceptions require a written entry in MEMORY/DECISIONS.md:
+Exceptions require a written entry in `standards/DECISIONS.md`:
 - why the gate is bypassed
 - what risk is accepted
 - what will be done about it

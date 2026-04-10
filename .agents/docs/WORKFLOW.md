@@ -120,7 +120,7 @@ If tokens run out, STATE.md is the only map the next agent has.
 
 **When you discover something unexpected:**
 
-Bug outside your scope → add to MEMORY/KNOWN_ISSUES.md, do not fix, continue.
+Bug outside your scope → add to `standards/KNOWN_ISSUES.md`, do not fix, continue.
 Missing dependency blocks you → note in STATE.md, write NEXT_AGENT.md, stop.
 Plan is wrong → add a Plan Revision section to PLAN.md, continue with corrected plan.
 
@@ -165,8 +165,8 @@ TASKS/<id>/TEST_EVIDENCE.md
 Update when applicable:
 ```
 MEMORY/PROJECT_STATE.md     overall project state changed
-MEMORY/DECISIONS.md         architectural or strategic decision was made
-MEMORY/KNOWN_ISSUES.md      cross-cutting issue found or resolved
+standards/DECISIONS.md      architectural or strategic decision was made
+standards/KNOWN_ISSUES.md   cross-cutting issue found or resolved
 ```
 
 Do not skip this phase because code is working.
@@ -230,7 +230,7 @@ One task, one purpose.
 Second piece of work discovered:
 ```
 1. Create TASKS/TASK-<nextID>/BRIEF.md for it
-2. Increment Next Task ID in MEMORY/PROJECT_STATE.md
+2. Increment Next Task ID in `MEMORY/PROJECT_STATE.md`
 3. Note in NEXT_AGENT.md: "out of scope — new task TASK-XXXX opened"
 4. Do not do it in the current task
 ```
@@ -249,7 +249,7 @@ Blocked:
 
 Bug found outside scope:
 ```
-1. Add to MEMORY/KNOWN_ISSUES.md
+1. Add to `standards/KNOWN_ISSUES.md`
 2. Do not fix it here
 3. Continue current task
 ```

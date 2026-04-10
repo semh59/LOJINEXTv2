@@ -74,6 +74,7 @@ def _mask_email(email: str) -> str:
 # Public utility helpers (promoted from private — used by admin router too)
 # ---------------------------------------------------------------------------
 
+
 def now_utc() -> datetime:
     return datetime.now(UTC)
 
@@ -382,12 +383,13 @@ async def _write_outbox(
         outbox_id=new_ulid(),
         aggregate_type=aggregate_type,
         aggregate_id=aggregate_id,
+        aggregate_version=1,
         event_name=event_name,
         event_version=1,
         payload_json=json.dumps(payload),
         publish_status="PENDING",
-        retry_count=0,
-        last_error=None,
+        attempt_count=0,
+        last_error_code=None,
         created_at_utc=now_utc(),
         next_attempt_at_utc=now_utc(),
         claim_expires_at_utc=None,
@@ -543,7 +545,8 @@ async def issue_token_pair(
         user_id=user.user_id,
         token_hash=hash_token(refresh_token),
         family_id=family_id or new_ulid(),
-        expires_at_utc=now_utc() + timedelta(seconds=settings.refresh_token_ttl_seconds),
+        expires_at_utc=now_utc()
+        + timedelta(seconds=settings.refresh_token_ttl_seconds),
         revoked_at_utc=None,
         created_at_utc=now_utc(),
     )
@@ -581,6 +584,7 @@ async def rotate_refresh_token(
             family_id = refresh_row.family_id
             user_id_for_log = refresh_row.user_id
             from identity_service.database import async_session_factory
+
             async with async_session_factory() as nuke_session:
                 await nuke_session.execute(
                     update(IdentityRefreshTokenModel)
@@ -596,12 +600,11 @@ async def rotate_refresh_token(
                 family_id,
                 user_id_for_log,
             )
-        raise ValueError("Token reuse detected. All sessions for this family have been invalidated.")
+        raise ValueError(
+            "Token reuse detected. All sessions for this family have been invalidated."
+        )
 
-    if (
-        refresh_row is None
-        or as_utc(refresh_row.expires_at_utc) <= now_utc()
-    ):
+    if refresh_row is None or as_utc(refresh_row.expires_at_utc) <= now_utc():
         raise ValueError("Refresh token is invalid or expired.")
 
     user = await session.get(IdentityUserModel, refresh_row.user_id)
@@ -654,9 +657,7 @@ async def issue_service_token(
                 "Set IDENTITY_AUTH_STRICT_AUDIENCE_CHECK=true to enable."
             )
         if audience not in settings.bootstrap_service_names:
-            raise ValueError(
-                "Requested audience is not a registered service."
-            )
+            raise ValueError("Requested audience is not a registered service.")
 
     signing_key = await ensure_active_signing_key(session)
     access_token = await _issue_service_access_token(
@@ -697,6 +698,7 @@ async def decode_access_token(session: AsyncSession, token: str):
 
     # JTI blocklist check (post-logout / post-deactivation revocation)
     from identity_service.blocklist import is_token_blocked
+
     jti = _extract_jti(claims)
     if jti and await is_token_blocked(jti):
         raise ValueError("Token has been revoked.")

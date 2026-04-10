@@ -25,6 +25,7 @@ class Settings(BaseSettings):
 
     # Upstream services
     trip_service_url: str = "http://localhost:8101"
+    fleet_service_url: str = "http://localhost:8102"
     driver_service_url: str = "http://localhost:8104"
     dependency_timeout_seconds: float = 10.0
 
