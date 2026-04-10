@@ -260,15 +260,6 @@ def enrichment_already_running() -> ProblemDetailError:
     )
 
 
-def enrichment_retry_not_allowed() -> ProblemDetailError:
-    return ProblemDetailError(
-        409,
-        "TRIP_ENRICHMENT_RETRY_NOT_ALLOWED",
-        "Retry not allowed",
-        "Enrichment can only be retried while pending or failed.",
-    )
-
-
 def enrichment_terminal_state() -> ProblemDetailError:
     return ProblemDetailError(
         409,
@@ -320,6 +311,15 @@ def trip_trailer_overlap(detail: str = "") -> ProblemDetailError:
         "TRIP_TRAILER_OVERLAP",
         "Trip overlap",
         detail or "Trailer is already assigned to another overlapping trip.",
+    )
+
+
+def driver_change_requires_reason() -> ProblemDetailError:
+    return ProblemDetailError(
+        422,
+        "TRIP_DRIVER_CHANGE_REQUIRES_REASON",
+        "Change reason required",
+        "A non-empty change_reason is required when reassigning drivers on imported trips.",
     )
 
 

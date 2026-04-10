@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from datetime import UTC, date
 from typing import TYPE_CHECKING, Any
@@ -46,9 +45,7 @@ from trip_service.errors import (
     has_empty_return_child,
     idempotency_payload_mismatch,
     internal_error,
-    trip_change_reason_required,
     trip_forbidden,
-    trip_source_locked_field,
     trip_source_reference_conflict,
     trip_version_mismatch,
 )
@@ -105,6 +102,7 @@ from trip_service.trip_helpers import (
     apply_trip_context,
     build_delete_audit,
     is_deleted_trip_status,
+    normalize_trip_status,
     trip_to_resource,
     utc_now,
 )
@@ -119,13 +117,7 @@ router = APIRouter(tags=["trips"])
 _REFERENCE_ALLOWED_SERVICES = {"driver-service", "fleet-service"}
 
 
-# Redundant local definition removed. Using trip_helpers implementation.
-
-
-def _canonicalize_body(body: dict[str, Any]) -> str:
-    """SHA-256 of a canonicalized request body."""
-    canonical = json.dumps(body, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+# _merged_payload_hash is used from trip_helpers instead of local _canonicalize_body.
 
 
 def _json_response(status_code: int, content: dict[str, Any], headers: dict[str, str] | None = None) -> JSONResponse:
@@ -138,10 +130,10 @@ def _json_response(status_code: int, content: dict[str, Any], headers: dict[str,
 
 def _response_headers_for_trip(trip: TripTrip) -> dict[str, str]:
     """Build the standard response headers for a trip resource."""
-    return {"ETag": make_etag(trip.id, trip.version)}
-
-
-# Redundant local definition removed. Using trip_helpers implementation.
+    return {
+        "ETag": make_etag(trip.id, trip.version),
+        "X-Trip-Status": normalize_trip_status(trip.status),
+    }
 
 
 def _require_admin(auth: AuthContext) -> AuthContext:
@@ -163,21 +155,6 @@ def _require_reference_service_access(auth: AuthContext) -> None:
     """Restrict internal reference endpoints to the known service callers."""
     if auth.role != ActorType.SERVICE.value or auth.service_name not in _REFERENCE_ALLOWED_SERVICES:
         raise trip_forbidden("Service token is not allowed for reference-check endpoints.")
-
-
-# Redundant local definition removed. Using trip_helpers implementation.
-
-
-# Redundant local definition removed. Using trip_helpers implementation.
-
-
-# Redundant local definition removed. Using trip_helpers implementation.
-
-
-# Redundant local definition removed. Using trip_helpers implementation.
-
-
-# Redundant local definition removed. Using trip_helpers implementation.
 
 
 def _apply_status_filter(stmt: Select[Any], status: TripStatus) -> Select[Any]:
@@ -235,9 +212,6 @@ async def _asset_reference_response(
     )
 
 
-# Redundant local definition removed. Using trip_helpers implementation.
-
-
 def _make_placeholder_trip_no(prefix: str) -> str:
     """Generate a unique placeholder trip number for fallback/minimal imports."""
     return f"{prefix}-{_generate_id()}"
@@ -277,47 +251,6 @@ def _timeline_item_rows(trip: TripTrip) -> TimelineResponse:
         for row in sorted(trip.timeline, key=lambda item: item.created_at_utc)
     ]
     return TimelineResponse(items=items)
-
-
-# Redundant local definition removed. Using trip_helpers implementation.
-
-
-def _set_enrichment_state(
-    trip: TripTrip,
-    enrichment: TripTripEnrichment,
-    *,
-    source_type: str,
-    route_ready: bool,
-    ocr_confidence: float | None = None,
-) -> None:
-    """Synchronize enrichment fields with the current trip payload completeness."""
-    enrichment.route_status = RouteStatus.READY if route_ready else RouteStatus.PENDING
-    enrichment.enrichment_status = EnrichmentStatus.READY if route_ready else EnrichmentStatus.PENDING
-    enrichment.data_quality_flag = _compute_data_quality_flag(source_type, ocr_confidence, route_resolved=route_ready)
-    enrichment.claim_token = None
-    enrichment.claim_expires_at_utc = None
-    enrichment.claimed_by_worker = None
-    enrichment.last_enrichment_error_code = None
-    enrichment.next_retry_at_utc = None
-    enrichment.updated_at_utc = utc_now()
-
-
-def _maybe_require_change_reason(
-    auth: AuthContext,
-    body: EditTripRequest,
-    trip: TripTrip,
-    new_driver_id: str | None,
-) -> None:
-    """Enforce source-aware driver edit rules for imported trips."""
-    if new_driver_id is None or new_driver_id == trip.driver_id:
-        return
-    if trip.source_type not in {SourceType.TELEGRAM_TRIP_SLIP, SourceType.EXCEL_IMPORT}:
-        return
-    if auth.is_super_admin:
-        if not body.change_reason or not body.change_reason.strip():
-            raise trip_change_reason_required("SUPER_ADMIN must provide change_reason to reassign imported driver.")
-        return
-    raise trip_source_locked_field("ADMIN cannot change driver_id on imported trips.")
 
 
 @router.get("/internal/v1/trips/driver-check/{driver_id}", status_code=200)
@@ -505,20 +438,19 @@ async def ingest_trip_slip_fallback(
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ) -> Any:
     """Create a fallback pending-review trip when Telegram parsing fails."""
-    request_body = body.model_dump(exclude_none=True, mode="json")
-    request_hash = _merged_payload_hash(request_body)
+    request_hash = _merged_payload_hash(body.model_dump())
     endpoint_fp = f"ingest_fallback:{body.source_reference_key}"
     replay = await _check_idempotency_key(session, idempotency_key, endpoint_fp, request_hash)
     if replay is not None:
         return replay
 
-    replay = await _maybe_replay_source_reference(
+    existing = await _maybe_replay_source_reference(
         session,
         source_reference_key=body.source_reference_key,
         request_hash=request_hash,
     )
-    if replay is not None:
-        return replay
+    if existing:
+        return existing
 
     await ensure_trip_references_valid(driver_id=body.driver_id, vehicle_id=None, trailer_id=None)
 
@@ -526,7 +458,7 @@ async def ingest_trip_slip_fallback(
     trip_id = _generate_id()
     trip = TripTrip(
         id=trip_id,
-        trip_no=_make_placeholder_trip_no("TG-FALLBACK"),
+        trip_no=_make_placeholder_trip_no("TEL"),
         source_type=SourceType.TELEGRAM_TRIP_SLIP,
         source_reference_key=body.source_reference_key,
         source_payload_hash=request_hash,
@@ -558,7 +490,7 @@ async def ingest_trip_slip_fallback(
             telegram_message_id=body.source_reference_key,
             file_key=body.file_key,
             raw_text_ref=body.raw_text_ref,
-            raw_payload_json=json.dumps(request_body, default=str),
+            raw_payload_json=json.dumps(body.model_dump(exclude_none=True), default=str),
             created_at_utc=now,
         )
     )
@@ -621,20 +553,19 @@ async def ingest_excel_trip(
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ) -> Any:
     """Ingest a structured Excel row as a pending-review trip."""
-    request_body = body.model_dump(exclude_none=True)
-    request_hash = _merged_payload_hash(request_body)
+    request_hash = _merged_payload_hash(body.model_dump())
     endpoint_fp = f"ingest_excel:{body.source_reference_key}"
     replay = await _check_idempotency_key(session, idempotency_key, endpoint_fp, request_hash)
     if replay is not None:
         return replay
 
-    replay = await _maybe_replay_source_reference(
+    existing = await _maybe_replay_source_reference(
         session,
         source_reference_key=body.source_reference_key,
         request_hash=request_hash,
     )
-    if replay is not None:
-        return replay
+    if existing:
+        return existing
 
     await ensure_trip_references_valid(
         driver_id=body.driver_id,
@@ -676,7 +607,7 @@ async def ingest_excel_trip(
             evidence_source=EvidenceSource.EXCEL_IMPORT,
             evidence_kind=EvidenceKind.IMPORT_ROW,
             row_number=body.row_number,
-            raw_payload_json=json.dumps(request_body, default=str),
+            raw_payload_json=json.dumps(body.model_dump(exclude_none=True), default=str),
             created_at_utc=now,
         )
     )
@@ -798,8 +729,8 @@ async def excel_export_feed(
 async def create_trip(
     body: ManualCreateRequest,
     service: TripService = Depends(get_trip_service),
-    idempotency_key: str | None = Header(None, alias="X-Idempotency-Key"),
-    legacy_idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    legacy_idempotency_key: str | None = Header(None, alias="X-Idempotency-Key"),
 ) -> Any:
     """Create a manual trip using route-pair context instead of raw route ids."""
     resource_dict, headers = await service.create_trip(
@@ -831,7 +762,7 @@ async def list_trips(
     if status is not None:
         stmt = _apply_status_filter(stmt, status)
     else:
-        stmt = stmt.where(TripTrip.status.not_in([TripStatus.SOFT_DELETED.value, "CANCELLED"]))
+        stmt = stmt.where(TripTrip.status.notin_([TripStatus.SOFT_DELETED.value, "CANCELLED"]))
     if source_type is not None:
         stmt = stmt.where(TripTrip.source_type == source_type)
     if driver_id is not None:

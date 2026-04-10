@@ -409,18 +409,25 @@ async def _process_single_enrichment(
 # ---------------------------------------------------------------------------
 
 
-async def run_enrichment_worker(worker_id: str | None = None) -> None:
+async def run_enrichment_worker(
+    worker_id: str | None = None,
+    shutdown_event: asyncio.Event | None = None,
+) -> None:
     """Main enrichment worker loop.
 
     Runs indefinitely, polling for work at configured intervals.
     Multiple instances are safe (claim locking).
+
+    Args:
+        worker_id: Unique identifier for this worker instance.
+        shutdown_event: Optional asyncio.Event to signal graceful shutdown.
     """
     if worker_id is None:
         worker_id = f"worker-{uuid.uuid4().hex[:8]}"
 
     logger.info("Enrichment worker %s starting", worker_id)
 
-    while True:
+    while not (shutdown_event and shutdown_event.is_set()):
         try:
             processed = await _claim_and_process_batch(worker_id)
             if processed > 0:
@@ -432,4 +439,18 @@ async def run_enrichment_worker(worker_id: str | None = None) -> None:
             else:
                 logger.error("Worker %s: batch error: %s", worker_id, e)
 
-        await asyncio.sleep(settings.enrichment_poll_interval_seconds)
+        # Use wait_for instead of sleep so shutdown signal interrupts promptly
+        if shutdown_event and shutdown_event.is_set():
+            break
+        try:
+            await asyncio.wait_for(
+                shutdown_event.wait() if shutdown_event else asyncio.sleep(settings.enrichment_poll_interval_seconds),
+                timeout=settings.enrichment_poll_interval_seconds,
+            )
+            # If we reach here, event was set → exit
+            break
+        except asyncio.TimeoutError:
+            # Normal timeout → continue polling
+            pass
+
+    logger.info("Enrichment worker %s shutting down gracefully", worker_id)

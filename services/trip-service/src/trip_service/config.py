@@ -45,6 +45,10 @@ class Settings(BaseSettings):
 
     idempotency_retention_hours: int = 24
 
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
+    db_pool_recycle_seconds: int = 1800
+
     # CORS — comma-separated list of allowed origins for browser frontends.
     # Dev default allows common local frontend ports. Set explicitly in prod.
     cors_allowed_origins: list[str] = [
