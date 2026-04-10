@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from platform_auth.claims import TokenClaims
 from platform_auth.errors import TokenInvalidError, TokenMissingError
-from platform_auth.jwt_codec import verify_token
+from platform_auth.jwt_codec import async_verify_token, verify_token
 from platform_auth.settings import AuthSettings
 
 
@@ -18,6 +18,15 @@ def parse_bearer_token(authorization: str | None) -> str:
     return value
 
 
-def decode_bearer_token(authorization: str | None, settings: AuthSettings) -> TokenClaims:
-    """Decode a bearer token using the shared codec."""
+async def async_decode_bearer_token(
+    authorization: str | None, settings: AuthSettings
+) -> TokenClaims:
+    """Decode a bearer token asynchronously using the shared codec."""
+    return await async_verify_token(parse_bearer_token(authorization), settings)
+
+
+def decode_bearer_token(
+    authorization: str | None, settings: AuthSettings
+) -> TokenClaims:
+    """Decode a bearer token using the shared codec (synchronously)."""
     return verify_token(parse_bearer_token(authorization), settings)

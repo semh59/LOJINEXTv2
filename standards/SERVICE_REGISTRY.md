@@ -3,8 +3,8 @@
 **This file is the single source of truth for all service identities.**
 PLATFORM_STANDARD.md references this file. No service name is hardcoded in the standard.
 
-Last updated: 2026-04-10
-Version: 1.0.0
+Last updated: 2026-04-11
+Version: 1.0.1
 
 ---
 
@@ -51,7 +51,7 @@ These call paths are locked by ADR. Changes require a new ADR in `docs/adr/`.
 | fleet.events.v1       | fleet-service    | fleet.vehicle_assigned                  |
 | location.events.v1    | location-service | location.route_updated                  |
 | driver.events.v1      | driver-service   | driver.created, driver.telegram_changed |
-| identity.events.v1    | identity-service | identity.user_created                   |
+| identity.events.v1    | identity-service | identity.user_created, identity.user_deactivated |
 
 ## Infrastructure
 

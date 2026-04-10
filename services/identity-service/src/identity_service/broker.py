@@ -2,6 +2,8 @@ import abc
 import asyncio
 import json
 import logging
+from decimal import Decimal
+from datetime import date, datetime
 from typing import Any, Literal
 
 from identity_service.config import settings
@@ -21,6 +23,17 @@ except ImportError:
         AIOProducer = None
 
 logger = logging.getLogger("identity_service.broker")
+
+
+class RobustEncoder(json.JSONEncoder):
+    """JSON encoder that handles datetime, date, and Decimal types."""
+
+    def default(self, obj: Any) -> Any:
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        if isinstance(obj, Decimal):
+            return str(obj)
+        return super().default(obj)
 
 
 class EventBroker(abc.ABC):
@@ -73,7 +86,7 @@ class LogBroker(EventBroker):
             topic,
             c_id,
             key,
-            json.dumps(payload),
+            json.dumps(payload, cls=RobustEncoder),
         )
 
     async def close(self) -> None:
@@ -109,7 +122,7 @@ class KafkaBroker(EventBroker):
         delivery_future = await self._producer.produce(
             topic,
             key=key.encode(),
-            value=json.dumps(payload).encode(),
+            value=json.dumps(payload, cls=RobustEncoder).encode(),
             headers=headers,
         )
         await delivery_future

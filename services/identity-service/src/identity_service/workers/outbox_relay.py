@@ -8,7 +8,8 @@ import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, not_, or_, select
+from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from identity_service.broker import EventBroker
@@ -87,6 +88,13 @@ async def _claim_batch(
     current_time = now or _now_utc()
     claim_expires_at = current_time + timedelta(minutes=5)
     claim_token = str(uuid.uuid4())
+    o2 = aliased(IdentityOutboxModel)
+    hol_subq = select(1).where(
+        o2.partition_key == IdentityOutboxModel.partition_key,
+        o2.publish_status != "PUBLISHED",
+        o2.created_at_utc < IdentityOutboxModel.created_at_utc,
+    )
+
     query = (
         select(IdentityOutboxModel)
         .where(
@@ -99,6 +107,7 @@ async def _claim_batch(
                 ),
             ),
             IdentityOutboxModel.next_attempt_at_utc <= current_time,
+            not_(hol_subq.exists()),
         )
         .order_by(IdentityOutboxModel.created_at_utc.asc())
         .limit(settings.outbox_publish_batch_size)

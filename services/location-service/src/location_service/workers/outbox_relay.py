@@ -9,7 +9,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, not_, or_, select, update
+from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from location_service.broker import EventBroker
@@ -48,6 +49,13 @@ async def _process_batch(session: AsyncSession, broker: EventBroker) -> int:
     claim_expiry = now + timedelta(minutes=5)
     claim_token = str(uuid.uuid4())
 
+    o2 = aliased(LocationOutboxModel)
+    hol_subq = select(1).where(
+        o2.partition_key == LocationOutboxModel.partition_key,
+        o2.publish_status != "PUBLISHED",
+        o2.created_at_utc < LocationOutboxModel.created_at_utc,
+    )
+
     query = (
         select(LocationOutboxModel.outbox_id)
         .where(
@@ -62,7 +70,8 @@ async def _process_batch(session: AsyncSession, broker: EventBroker) -> int:
                     LocationOutboxModel.claim_expires_at_utc.is_not(None),
                     LocationOutboxModel.claim_expires_at_utc <= now,
                 ),
-            )
+            ),
+            not_(hol_subq.exists()),
         )
         .order_by(LocationOutboxModel.created_at_utc.asc())
         .limit(settings.outbox_publish_batch_size)

@@ -8,7 +8,8 @@ import json
 import logging
 import secrets
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from datetime import UTC, date, datetime, timedelta
 from functools import partial
 from uuid import uuid4
 
@@ -47,6 +48,17 @@ from identity_service.password import hash_secret, verify_secret
 
 logger = logging.getLogger("identity_service.token_service")
 _executor = ThreadPoolExecutor(max_workers=10)
+
+
+class RobustEncoder(json.JSONEncoder):
+    """JSON encoder that handles datetime, date, and Decimal types."""
+
+    def default(self, obj: Any) -> Any:
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        if isinstance(obj, Decimal):
+            return str(obj)
+        return super().default(obj)
 
 
 class InvalidUserRoleAssignmentsError(ValueError):
@@ -359,8 +371,12 @@ async def write_audit(
         action_type=action_type,
         actor_id=actor_id,
         actor_role=actor_role,
-        old_snapshot_json=json.dumps(old_snapshot) if old_snapshot else None,
-        new_snapshot_json=json.dumps(new_snapshot) if new_snapshot else None,
+        old_snapshot_json=json.dumps(old_snapshot, cls=RobustEncoder)
+        if old_snapshot
+        else None,
+        new_snapshot_json=json.dumps(new_snapshot, cls=RobustEncoder)
+        if new_snapshot
+        else None,
         request_id=request_id,
         created_at_utc=now_utc(),
     )
@@ -386,7 +402,7 @@ async def _write_outbox(
         aggregate_version=1,
         event_name=event_name,
         event_version=1,
-        payload_json=json.dumps(payload),
+        payload_json=json.dumps(payload, cls=RobustEncoder),
         publish_status="PENDING",
         attempt_count=0,
         last_error_code=None,

@@ -78,7 +78,7 @@ async def ready(request: Request) -> JSONResponse:
             ready_state = False
             logger.warning("Readiness: worker heartbeat check failed for %s: %s", worker_name, exc)
 
-    checks["auth_verify"] = auth_verify_status()
+    checks["auth_verify"] = await auth_verify_status()
     if checks["auth_verify"] != "ok":
         ready_state = False
 

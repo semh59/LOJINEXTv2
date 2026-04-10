@@ -8,7 +8,10 @@ import jwt
 
 from platform_auth.claims import TokenClaims
 from platform_auth.errors import PlatformAuthError, TokenInvalidError
-from platform_auth.key_provider import build_signing_provider, build_verification_provider
+from platform_auth.key_provider import (
+    build_signing_provider,
+    build_verification_provider,
+)
 from platform_auth.settings import AuthSettings
 
 
@@ -29,20 +32,60 @@ def issue_token(
     )
 
 
+async def async_verify_token(
+    token: str,
+    settings: AuthSettings,
+    *,
+    required_claims: tuple[str, ...] = ("sub", "role"),
+) -> TokenClaims:
+    """Verify a JWT asynchronously and return normalized claims."""
+    try:
+        header = jwt.get_unverified_header(token)
+        provider = build_verification_provider(settings)
+        options = {"require": list(required_claims)}
+
+        # Await the key resolution (no blocking I/O)
+        key = await provider.async_verification_key(header)
+
+        payload = jwt.decode(
+            token,
+            key,
+            algorithms=[settings.algorithm],
+            issuer=settings.issuer or None,
+            audience=settings.normalized_audience(),
+            options=options,
+        )
+    except PlatformAuthError:
+        raise
+    except jwt.PyJWTError as exc:
+        raise TokenInvalidError(str(exc) or "Invalid token.") from exc
+    if not isinstance(payload, dict):
+        raise TokenInvalidError("Decoded token payload was not an object.")
+    return TokenClaims.from_payload(payload, header=header)
+
+
 def verify_token(
     token: str,
     settings: AuthSettings,
     *,
     required_claims: tuple[str, ...] = ("sub", "role"),
 ) -> TokenClaims:
-    """Verify a JWT and return normalized claims."""
+    """Verify a JWT (synchronously) and return normalized claims.
+
+    WARNING: This blocks the event loop if the JWKS cache is empty or expired.
+    Use async_verify_token in async contexts.
+    """
     try:
         header = jwt.get_unverified_header(token)
         provider = build_verification_provider(settings)
         options = {"require": list(required_claims)}
+
+        # Synchronous key resolution
+        key = provider.verification_key(header)
+
         payload = jwt.decode(
             token,
-            provider.verification_key(header),
+            key,
             algorithms=[settings.algorithm],
             issuer=settings.issuer or None,
             audience=settings.normalized_audience(),

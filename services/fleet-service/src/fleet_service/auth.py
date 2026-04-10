@@ -9,11 +9,10 @@ Auth model:
 
 from __future__ import annotations
 
-import json
-import urllib.error
-import urllib.request
+import logging
 from typing import Any
 
+import httpx
 from fastapi import Header
 
 from fleet_service.config import settings
@@ -26,9 +25,11 @@ from platform_auth import (
     ServiceTokenCache,
     TokenInvalidError,
     TokenMissingError,
-    decode_bearer_token,
+    async_decode_bearer_token,
 )
 from platform_auth.key_provider import build_verification_provider
+
+logger = logging.getLogger("fleet_service.auth")
 
 _TRIP_SERVICE_ALLOWLIST = {"trip-service"}
 _SERVICE_TOKEN_CACHE = ServiceTokenCache()
@@ -50,11 +51,13 @@ class AuthInvalidError(ProblemDetailError):
 
 
 def _platform_auth_settings(*, audience: str | None = None) -> AuthSettings:
-    """Build shared auth settings for inbound verification and outbound tokens.
-
-    Implements [2026-04-05] Recovery auth bridge fallback to PLATFORM_JWT_SECRET.
-    """
-    effective_audience = audience or settings.auth_audience or None
+    """Build shared auth settings for inbound verification and outbound tokens."""
+    if audience:
+        effective_audience: str | tuple[str, ...] | None = audience
+    elif settings.auth_audience:
+        effective_audience = (settings.auth_audience, settings.service_name)
+    else:
+        effective_audience = None
 
     fallback_secret = getattr(settings, "platform_jwt_secret", None)
     if fallback_secret and settings.environment != "prod":
@@ -80,25 +83,26 @@ def _service_token_audience(explicit_audience: str | None = None) -> str:
     return explicit_audience or settings.auth_audience or _DEFAULT_SERVICE_AUDIENCE
 
 
-def _probe_jwks_document(jwks_url: str) -> bool:
+async def _probe_jwks_document(jwks_url: str) -> bool:
     """Return whether the configured JWKS endpoint serves a usable keys array."""
-    request = urllib.request.Request(jwks_url, headers={"Accept": "application/json"})
     try:
-        with urllib.request.urlopen(request, timeout=5) as response:  # noqa: S310
-            payload = json.loads(response.read().decode("utf-8"))
-    except (OSError, ValueError, urllib.error.URLError):
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(jwks_url, headers={"Accept": "application/json"})
+            response.raise_for_status()
+            payload = response.json()
+    except Exception:
         return False
     return isinstance(payload, dict) and isinstance(payload.get("keys"), list) and bool(payload["keys"])
 
 
-def auth_verify_status() -> str:
+async def auth_verify_status() -> str:
     """Return `ok` when inbound auth config is live and coherent."""
     auth_settings = _platform_auth_settings()
     if auth_settings.algorithm.upper() != "RS256":
         return "fail"
     if not auth_settings.issuer or not auth_settings.audience or not auth_settings.jwks_url:
         return "fail"
-    if not _probe_jwks_document(auth_settings.jwks_url):
+    if not await _probe_jwks_document(auth_settings.jwks_url):
         return "fail"
     try:
         build_verification_provider(auth_settings)
@@ -123,10 +127,10 @@ async def auth_outbound_status(*, audience: str | None = None) -> str:
     return "ok"
 
 
-def _decode_claims(authorization: str | None) -> Any:
-    """Decode Authorization header into normalized claims."""
+async def _decode_claims(authorization: str | None) -> Any:
+    """Decode Authorization header into normalized claims using async verification."""
     try:
-        return decode_bearer_token(authorization, _platform_auth_settings())
+        return await async_decode_bearer_token(authorization, _platform_auth_settings())
     except TokenMissingError as exc:
         raise AuthRequiredError() from exc
     except TokenInvalidError as exc:
@@ -149,11 +153,11 @@ async def issue_service_token(*, audience: str | None = None) -> str:
         raise RuntimeError(str(exc)) from exc
 
 
-def require_admin_token(authorization: str | None) -> AuthContext:
+async def require_admin_token(authorization: str | None) -> AuthContext:
     """Validate a bearer token requiring ADMIN, MANAGER or SUPER_ADMIN role."""
     from fleet_service.errors import InsufficientRoleError
 
-    claims = _decode_claims(authorization)
+    claims = await _decode_claims(authorization)
     role = claims.role
     if role not in {PlatformRole.SUPER_ADMIN, PlatformRole.MANAGER}:
         raise InsufficientRoleError("SUPER_ADMIN")
@@ -163,11 +167,11 @@ def require_admin_token(authorization: str | None) -> AuthContext:
     return AuthContext(actor_id=actor_id, role=role)
 
 
-def require_super_admin_token(authorization: str | None) -> AuthContext:
+async def require_super_admin_token(authorization: str | None) -> AuthContext:
     """Validate a bearer token requiring SUPER_ADMIN role (hard-delete only)."""
     from fleet_service.errors import InsufficientRoleError
 
-    claims = _decode_claims(authorization)
+    claims = await _decode_claims(authorization)
     role = claims.role
     if role != PlatformRole.SUPER_ADMIN:
         raise InsufficientRoleError("SUPER_ADMIN")
@@ -177,11 +181,11 @@ def require_super_admin_token(authorization: str | None) -> AuthContext:
     return AuthContext(actor_id=actor_id, role=role)
 
 
-def require_service_token(authorization: str | None, *, allowed_services: set[str] | None = None) -> AuthContext:
+async def require_service_token(authorization: str | None, *, allowed_services: set[str] | None = None) -> AuthContext:
     """Validate a service bearer token for internal endpoints."""
     from fleet_service.errors import UnauthorizedInternalCallError
 
-    claims = _decode_claims(authorization)
+    claims = await _decode_claims(authorization)
     role = claims.role
     actor_id = claims.sub.strip()
     service_name = (claims.service or "").strip()
@@ -194,29 +198,29 @@ def require_service_token(authorization: str | None, *, allowed_services: set[st
     return AuthContext(actor_id=actor_id, role=PlatformRole.SERVICE, service_name=service_name)
 
 
-def admin_auth(
+async def admin_auth(
     authorization: str | None = Header(None, alias="Authorization"),
 ) -> AuthContext:
     """FastAPI dependency for ADMIN/SUPER_ADMIN endpoints."""
-    return require_admin_token(authorization)
+    return await require_admin_token(authorization)
 
 
-def super_admin_auth(
+async def super_admin_auth(
     authorization: str | None = Header(None, alias="Authorization"),
 ) -> AuthContext:
     """FastAPI dependency for SUPER_ADMIN-only endpoints (hard-delete)."""
-    return require_super_admin_token(authorization)
+    return await require_super_admin_token(authorization)
 
 
-def service_auth(
+async def service_auth(
     authorization: str | None = Header(None, alias="Authorization"),
 ) -> AuthContext:
     """FastAPI dependency for internal SERVICE endpoints."""
-    return require_service_token(authorization)
+    return await require_service_token(authorization)
 
 
-def trip_service_auth(
+async def trip_service_auth(
     authorization: str | None = Header(None, alias="Authorization"),
 ) -> AuthContext:
     """FastAPI dependency for Trip-owned Fleet internal endpoints."""
-    return require_service_token(authorization, allowed_services=_TRIP_SERVICE_ALLOWLIST)
+    return await require_service_token(authorization, allowed_services=_TRIP_SERVICE_ALLOWLIST)

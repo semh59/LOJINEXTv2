@@ -13,8 +13,8 @@ This file MUST NOT hardcode service names in rules, examples, or checklists.
 > and refer to services registered in `standards/SERVICE_REGISTRY.md`.
 > Rules themselves are generic and apply to all current and future services.
 
-Last updated: 2026-04-10
-Version: 3.0.0
+Last updated: 2026-04-11
+Version: 3.0.1
 
 ---
 
@@ -191,6 +191,8 @@ Audience     : lojinext-platform
 
 Required env vars (prod):
 ```
+# Hostname and port reference the auth authority service
+# Concrete values come from standards/SERVICE_REGISTRY.md
 {SVC}_AUTH_JWT_ALGORITHM=RS256
 {SVC}_AUTH_ISSUER=lojinext-platform
 {SVC}_AUTH_AUDIENCE=lojinext-platform
@@ -1154,6 +1156,16 @@ Exporter     : OTLP (to Jaeger, Tempo, or compatible backend)
 Propagation  : W3C TraceContext
 ```
 
+### 21.6 Open decisions
+
+These choices MUST be resolved before tracing is deployed:
+- Exporter backend selection (Jaeger vs Tempo vs other)
+- Sampling strategy (head-based vs tail-based)
+- Trace retention period
+- Resource requirements for the tracing backend
+
+Add a `standards/DECISIONS.md` entry when resolved.
+
 ---
 
 ## 22. DISTRIBUTED TRANSACTION AND COMPENSATION
@@ -1199,6 +1211,15 @@ started_at_utc      : Timestamptz
 completed_at_utc    : Timestamptz (nullable)
 compensation_reason : Text (nullable)
 ```
+
+### 22.6 Open decisions
+
+These choices MUST be resolved before a multi-service saga is implemented:
+- Which service acts as saga orchestrator for each multi-service flow
+- Whether saga state lives in a dedicated table or reuses the outbox model
+- Maximum allowed saga duration before automatic compensation
+
+Add a `standards/DECISIONS.md` entry when resolved.
 
 ---
 
@@ -1272,6 +1293,20 @@ but the ownership boundary is always enforced.
 - Production: each database instance has its own backup schedule.
 - Minimum: daily full backup, point-in-time recovery enabled.
 - Backup verification (restore test) MUST run at least monthly.
+
+### 24.6 Migration path
+
+Current state: all services share a single PostgreSQL instance with separate database names.
+This is acceptable for development (see §24.3) but MUST be resolved before production.
+
+Migration steps (in order):
+1. Provision separate PostgreSQL instances per service in the target environment.
+2. Migrate data using `pg_dump` / `pg_restore` per database.
+3. Update connection strings in service config.
+4. Verify all services connect to their own instance.
+5. Remove shared PostgreSQL instance.
+
+Each step requires a DECISIONS.md entry and a dedicated task.
 
 ---
 

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from location_service.auth import AuthContext, trip_service_auth_dependency
 from location_service.database import get_db
 from location_service.domain.normalization import normalize_en, normalize_tr
 from location_service.enums import PairStatus, ProcessingStatus
@@ -100,7 +101,7 @@ async def _collect_active_route_candidates(
 
         active_version = (
             await session.execute(
-                select(RouteVersion.route_id).where(
+                select(RouteVersion).where(
                     RouteVersion.route_id == route_id,
                     RouteVersion.version_no == version_no,
                     RouteVersion.processing_status == ProcessingStatus.ACTIVE,
@@ -121,6 +122,7 @@ async def _collect_active_route_candidates(
 async def resolve_route(
     payload: InternalRouteResolveRequest,
     session: AsyncSession = Depends(get_db),
+    _auth: Annotated[AuthContext, Depends(trip_service_auth_dependency)] = None,
 ) -> InternalRouteResolveResponse:
     """Resolve an active route by exact normalized origin/destination names."""
     attempts: list[tuple[str, str, bool]] = []
@@ -159,7 +161,11 @@ async def resolve_route(
 
 
 @router.get("/internal/v1/route-pairs/{pair_id}/trip-context", response_model=InternalTripContextResponse)
-async def get_trip_context(pair_id: str, session: AsyncSession = Depends(get_db)) -> InternalTripContextResponse:
+async def get_trip_context(
+    pair_id: str,
+    session: AsyncSession = Depends(get_db),
+    _auth: Annotated[AuthContext, Depends(trip_service_auth_dependency)] = None,
+) -> InternalTripContextResponse:
     """Return forward and reverse trip context for an active route pair."""
     pair = await session.get(RoutePair, pair_id)
     if pair is None:

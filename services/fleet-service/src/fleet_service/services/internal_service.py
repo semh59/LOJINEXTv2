@@ -1,6 +1,7 @@
-"""Internal service — business logic for service-to-service endpoints (Phase F).
+"""All operations are read-only (no transactions, no outbox/timeline writes).
 
-All operations are read-only (no transactions, no outbox/timeline writes).
+Telegram Flow (V2.1 Integration):
+- by_plate endpoints added for skip-flow compatibility.
 """
 
 from __future__ import annotations
@@ -33,11 +34,48 @@ from fleet_service.schemas.responses import (
     FuelMetadataSpecResponse,
     FuelMetadataTrailerSpecResponse,
     SelectableItemResponse,
+    TrailerByPlateResponse,
     ValidateBulkItemResponse,
     ValidateResponse,
+    VehicleByPlateResponse,
 )
 
 logger = logging.getLogger("fleet_service.internal_service")
+
+
+# === BY PLATE — LOOKUP ===
+
+
+async def get_vehicle_by_plate(
+    session: AsyncSession,
+    normalized_plate: str,
+) -> VehicleByPlateResponse:
+    """Lookup active vehicle by its normalized plate."""
+    stmt = select(FleetVehicle).where(
+        FleetVehicle.normalized_plate_current == normalized_plate,
+        FleetVehicle.soft_deleted_at_utc.is_(None),
+    )
+    result = await session.execute(stmt)
+    vehicle = result.scalar_one_or_none()
+    if not vehicle:
+        raise VehicleNotFoundError(f"Plate: {normalized_plate}")
+    return VehicleByPlateResponse(vehicle_id=vehicle.vehicle_id)
+
+
+async def get_trailer_by_plate(
+    session: AsyncSession,
+    normalized_plate: str,
+) -> TrailerByPlateResponse:
+    """Lookup active trailer by its normalized plate."""
+    stmt = select(FleetTrailer).where(
+        FleetTrailer.normalized_plate_current == normalized_plate,
+        FleetTrailer.soft_deleted_at_utc.is_(None),
+    )
+    result = await session.execute(stmt)
+    trailer = result.scalar_one_or_none()
+    if not trailer:
+        raise TrailerNotFoundError(f"Plate: {normalized_plate}")
+    return TrailerByPlateResponse(trailer_id=trailer.trailer_id)
 
 
 # === VALIDATE — SINGLE ===
@@ -176,7 +214,7 @@ async def validate_trip_compat(
             driver_ok = True
     except DependencyUnavailableError:
         warnings.append({"field": "driver_id", "code": "DRIVER_SERVICE_UNAVAILABLE"})
-        driver_ok = True  # Optimistic — allow trip with warning
+        # driver_ok remains False — NO optimistic fallback in V2.1 platform standards.
 
     # Vehicle check (local)
     vehicle_resp = await validate_single(session, "VEHICLE", vehicle_id)
@@ -244,7 +282,7 @@ async def validate_trip_compat_contract(
             driver_valid = True
     except DependencyUnavailableError:
         warnings.append({"field": "driver_id", "code": "DRIVER_SERVICE_UNAVAILABLE"})
-        driver_valid = True  # Optimistic fallback consistent with validate_trip_compat
+        # driver_valid remains False — NO optimistic fallback in V2.1 platform standards.
 
     if vehicle_id is not None:
         vehicle_resp = await validate_single(session, "VEHICLE", vehicle_id)

@@ -19,8 +19,10 @@ from fleet_service.schemas.requests import (
 from fleet_service.schemas.responses import (
     CursorResponse,
     FuelMetadataResolveResponse,
+    TrailerByPlateResponse,
     ValidateBulkItemResponse,
     ValidateResponse,
+    VehicleByPlateResponse,
 )
 from fleet_service.services import internal_service
 
@@ -40,6 +42,19 @@ async def validate_vehicle(
     return await internal_service.validate_single(session, "VEHICLE", vehicle_id)
 
 
+# --- GET /internal/v1/vehicles/by-plate/{plate} ---
+
+
+@router.get("/vehicles/by-plate/{plate}")
+async def get_vehicle_by_plate(
+    plate: str,
+    session: AsyncSessionDep,
+    _auth: Annotated[AuthContext, Depends(trip_service_auth)],
+) -> VehicleByPlateResponse:
+    """Lookup active vehicle by its normalized plate."""
+    return await internal_service.get_vehicle_by_plate(session, plate)
+
+
 # --- GET /internal/v1/trailers/{trailer_id}/validate ---
 
 
@@ -51,6 +66,19 @@ async def validate_trailer(
 ) -> ValidateResponse:
     """Validate a trailer — always 200."""
     return await internal_service.validate_single(session, "TRAILER", trailer_id)
+
+
+# --- GET /internal/v1/trailers/by-plate/{plate} ---
+
+
+@router.get("/trailers/by-plate/{plate}")
+async def get_trailer_by_plate(
+    plate: str,
+    session: AsyncSessionDep,
+    _auth: Annotated[AuthContext, Depends(trip_service_auth)],
+) -> TrailerByPlateResponse:
+    """Lookup active trailer by its normalized plate."""
+    return await internal_service.get_trailer_by_plate(session, plate)
 
 
 # --- POST /internal/v1/assets/validate-bulk ---

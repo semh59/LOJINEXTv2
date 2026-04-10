@@ -32,7 +32,13 @@ _DEFAULT_SERVICE_AUDIENCE = "lojinext-platform"
 
 def _platform_auth_settings(*, audience: str | None = None) -> AuthSettings:
     """Build shared auth settings for inbound or outbound token handling."""
-    effective_audience = audience or settings.auth_audience or None
+    if audience:
+        effective_audience: str | tuple[str, ...] | None = audience
+    elif settings.auth_audience:
+        effective_audience = (settings.auth_audience, settings.service_name)
+    else:
+        effective_audience = None
+
     return AuthSettings(
         algorithm=settings.auth_jwt_algorithm,
         issuer=settings.auth_issuer or None,

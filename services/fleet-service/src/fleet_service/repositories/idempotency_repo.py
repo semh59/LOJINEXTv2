@@ -40,4 +40,4 @@ async def cleanup_expired(session: AsyncSession, now: datetime.datetime | None =
         now = to_utc_naive(now)
     stmt = delete(FleetIdempotencyRecord).where(FleetIdempotencyRecord.expires_at_utc < now)
     result = await session.execute(stmt)
-        return result.rowcount or 0
+    return result.rowcount or 0

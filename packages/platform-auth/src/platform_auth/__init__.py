@@ -2,14 +2,18 @@
 
 from platform_auth.auth_context import AuthContext
 from platform_auth.claims import TokenClaims
-from platform_auth.dependencies import decode_bearer_token, parse_bearer_token
+from platform_auth.dependencies import (
+    async_decode_bearer_token,
+    decode_bearer_token,
+    parse_bearer_token,
+)
 from platform_auth.errors import (
     PlatformAuthError,
     TokenForbiddenError,
     TokenInvalidError,
     TokenMissingError,
 )
-from platform_auth.jwt_codec import issue_token, verify_token
+from platform_auth.jwt_codec import async_verify_token, issue_token, verify_token
 from platform_auth.principals import (
     ServicePrincipal,
     UserPrincipal,
@@ -35,6 +39,8 @@ __all__ = [
     "TokenInvalidError",
     "TokenMissingError",
     "UserPrincipal",
+    "async_decode_bearer_token",
+    "async_verify_token",
     "decode_bearer_token",
     "issue_token",
     "parse_bearer_token",

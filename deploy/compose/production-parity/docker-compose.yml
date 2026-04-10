@@ -23,24 +23,28 @@ x-identity-common: &identity-common
     IDENTITY_ENVIRONMENT: prod
     IDENTITY_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-lojinext}:${POSTGRES_PASSWORD}@postgres:5432/${IDENTITY_DB_NAME:-identity_service}
     IDENTITY_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    IDENTITY_REDIS_URL: redis://redis:6379/0
     IDENTITY_AUTH_JWT_ALGORITHM: RS256
     IDENTITY_AUTH_ISSUER: ${AUTH_ISSUER:-lojinext-platform}
     IDENTITY_AUTH_AUDIENCE: ${AUTH_AUDIENCE:-lojinext-platform}
-    IDENTITY_AUTH_STRICT_AUDIENCE_CHECK: ${IDENTITY_AUTH_STRICT_AUDIENCE_CHECK:-false}
+    IDENTITY_AUTH_STRICT_AUDIENCE_CHECK: ${IDENTITY_AUTH_STRICT_AUDIENCE_CHECK:-true}
     IDENTITY_KEY_ENCRYPTION_KEY_B64: ${IDENTITY_KEY_ENCRYPTION_KEY_B64:?IDENTITY_KEY_ENCRYPTION_KEY_B64 is required}
     IDENTITY_KEY_ENCRYPTION_KEY_VERSION: ${IDENTITY_KEY_ENCRYPTION_KEY_VERSION:?IDENTITY_KEY_ENCRYPTION_KEY_VERSION is required}
     IDENTITY_BOOTSTRAP_SUPERADMIN_USERNAME: ${IDENTITY_BOOTSTRAP_SUPERADMIN_USERNAME:-superadmin}
     IDENTITY_BOOTSTRAP_SUPERADMIN_EMAIL: ${IDENTITY_BOOTSTRAP_SUPERADMIN_EMAIL:-superadmin@example.com}
     IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD: ${IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD:?IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD is required}
-    IDENTITY_SERVICE_CLIENTS: trip-service,location-service,driver-service,fleet-service
+    IDENTITY_SERVICE_CLIENTS: trip-service,location-service,driver-service,fleet-service,telegram-service
     IDENTITY_SERVICE_CLIENT_SECRET__TRIP_SERVICE: ${TRIP_SERVICE_CLIENT_SECRET:?TRIP_SERVICE_CLIENT_SECRET is required}
     IDENTITY_SERVICE_CLIENT_SECRET__LOCATION_SERVICE: ${LOCATION_SERVICE_CLIENT_SECRET:?LOCATION_SERVICE_CLIENT_SECRET is required}
     IDENTITY_SERVICE_CLIENT_SECRET__DRIVER_SERVICE: ${DRIVER_SERVICE_CLIENT_SECRET:?DRIVER_SERVICE_CLIENT_SECRET is required}
     IDENTITY_SERVICE_CLIENT_SECRET__FLEET_SERVICE: ${FLEET_SERVICE_CLIENT_SECRET:?FLEET_SERVICE_CLIENT_SECRET is required}
+    IDENTITY_SERVICE_CLIENT_SECRET__TELEGRAM_SERVICE: ${TELEGRAM_SERVICE_CLIENT_SECRET:?TELEGRAM_SERVICE_CLIENT_SECRET is required}
   depends_on:
     postgres:
       condition: service_healthy
     redpanda:
+      condition: service_healthy
+    redis:
       condition: service_healthy
   restart: unless-stopped
   networks:
@@ -115,15 +119,22 @@ x-telegram-common: &telegram-common
     TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN is required}
     TELEGRAM_WEBHOOK_URL: ${TELEGRAM_WEBHOOK_URL:-https://api.lojinext.com/telegram/webhook}
     TELEGRAM_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-lojinext}:${POSTGRES_PASSWORD}@postgres:5432/${TELEGRAM_DB_NAME:-telegram_service}
+    TELEGRAM_REDIS_URL: redis://redis:6379/1
     TELEGRAM_TRIP_SERVICE_URL: http://trip-api:8101
     TELEGRAM_DRIVER_SERVICE_URL: http://driver-api:8104
+    TELEGRAM_FLEET_SERVICE_URL: http://fleet-api:8102
     TELEGRAM_AUTH_JWKS_URL: http://identity-api:8105/.well-known/jwks.json
+    TELEGRAM_AUTH_SERVICE_TOKEN_URL: http://identity-api:8105/auth/v1/token/service
+    TELEGRAM_AUTH_SERVICE_CLIENT_ID: telegram-service
+    TELEGRAM_AUTH_SERVICE_CLIENT_SECRET: ${TELEGRAM_SERVICE_CLIENT_SECRET:?TELEGRAM_SERVICE_CLIENT_SECRET is required}
   depends_on:
     postgres:
       condition: service_healthy
     trip-api:
       condition: service_healthy
     driver-api:
+      condition: service_healthy
+    fleet-api:
       condition: service_healthy
   restart: unless-stopped
   networks:
@@ -214,6 +225,20 @@ services:
     networks:
       - backend
 
+  redis:
+    <<: *deploy-common
+    image: redis:7.2-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - backend
+
   redpanda:
     <<: *deploy-common
     image: docker.redpanda.com/redpandadata/redpanda:v24.1.7
@@ -229,14 +254,14 @@ services:
       - internal://0.0.0.0:9092,external://0.0.0.0:19092
       - --advertise-kafka-addr
       - internal://redpanda:9092,external://localhost:19092
-      - --mode
-      - dev-container
+      - --check=false
     ports:
       - "${REDPANDA_EXTERNAL_PORT:-19092}:19092"
     volumes:
       - redpanda_data:/var/lib/redpanda/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9644/v1/status/ready || exit 1"]
+      test:
+        ["CMD-SHELL", "curl -f http://localhost:9644/v1/status/ready || exit 1"]
       interval: 5s
       timeout: 10s
       retries: 20
@@ -248,7 +273,11 @@ services:
     <<: *identity-common
     command: ["identity-api"]
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8105/ready')\""]
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8105/ready'')"',
+        ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -263,7 +292,11 @@ services:
     <<: *trip-common
     command: ["trip-api"]
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8101/ready')\""]
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8101/ready'')"',
+        ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -290,7 +323,11 @@ services:
     <<: *location-common
     command: ["location-api"]
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8103/ready')\""]
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8103/ready'')"',
+        ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -313,7 +350,11 @@ services:
     ports:
       - "${TELEGRAM_SERVICE_PORT:-8106}:8106"
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8106/ready')\""]
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8106/ready'')"',
+        ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -322,7 +363,11 @@ services:
     <<: *driver-common
     command: ["driver-api"]
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8104/ready')\""]
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8104/ready'')"',
+        ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -337,7 +382,11 @@ services:
     <<: *fleet-common
     command: ["fleet-api"]
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8102/ready')\""]
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8102/ready'')"',
+        ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -359,6 +408,7 @@ services:
       LOCATION_API_UPSTREAM: location-api:8103
       DRIVER_API_UPSTREAM: driver-api:8104
       FLEET_API_UPSTREAM: fleet-api:8102
+      TELEGRAM_SERVICE_UPSTREAM: telegram-service:8106
     ports:
       - "${NGINX_PORT:-80}:80"
     depends_on:

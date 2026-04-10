@@ -32,10 +32,14 @@ _SERVICE_TOKEN_CACHE = ServiceTokenCache()
 
 def _verification_auth_settings() -> AuthSettings:
     """Build shared auth settings for inbound RS256 verification."""
+    audience: str | tuple[str, ...] | None = None
+    if settings.auth_audience:
+        audience = (settings.auth_audience, settings.service_name)
+
     return AuthSettings(
         algorithm=settings.auth_jwt_algorithm,
         issuer=settings.auth_issuer or None,
-        audience=settings.auth_audience or None,
+        audience=audience,
         jwks_url=settings.auth_jwks_url or None,
         jwks_cache_ttl_seconds=settings.auth_jwks_cache_ttl_seconds,
     )
@@ -68,7 +72,7 @@ def auth_verify_status() -> str:
         provider = build_verification_provider(auth_settings)
         if not isinstance(provider, JWKSKeyProvider):
             return "fail"
-        provider._load_jwks()
+        provider._load_jwks_sync()
     except Exception:
         return "fail"
     return "ok"

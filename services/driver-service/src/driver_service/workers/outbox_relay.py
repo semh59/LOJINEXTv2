@@ -8,7 +8,8 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, not_, or_, select
+from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from driver_service import database
@@ -61,6 +62,13 @@ async def _process_batch(session: AsyncSession, broker: EventBroker) -> int:
     claim_expiry = now + timedelta(minutes=5)
     claim_token = str(uuid.uuid4())
 
+    o2 = aliased(DriverOutboxModel)
+    hol_subq = select(1).where(
+        o2.partition_key == DriverOutboxModel.partition_key,
+        o2.publish_status != "PUBLISHED",
+        o2.created_at_utc < DriverOutboxModel.created_at_utc,
+    )
+
     query = (
         select(DriverOutboxModel)
         .where(
@@ -72,6 +80,7 @@ async def _process_batch(session: AsyncSession, broker: EventBroker) -> int:
                 ),
             ),
             (DriverOutboxModel.next_attempt_at_utc.is_(None)) | (DriverOutboxModel.next_attempt_at_utc <= now),
+            not_(hol_subq.exists()),
         )
         .order_by(DriverOutboxModel.created_at_utc.asc())
         .limit(settings.outbox_publish_batch_size)

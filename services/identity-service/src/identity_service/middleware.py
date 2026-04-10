@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from uuid import uuid4
 
@@ -97,10 +98,29 @@ class PrometheusMiddleware:
         try:
             await self.app(scope, receive, wrapped_send)
         except Exception:
-            _record_metrics(method, endpoint, status_code[0], start_time)
+            _record_metrics(
+                method, _normalize_path(endpoint), status_code[0], start_time
+            )
             raise
         else:
-            _record_metrics(method, endpoint, status_code[0], start_time)
+            _record_metrics(
+                method, _normalize_path(endpoint), status_code[0], start_time
+            )
+
+
+def _normalize_path(path: str) -> str:
+    """Normalize path by replacing ULID, UUID and common numeric IDs with placeholders."""
+    # Replace ULIDs (26 chars, uppercase/alphanumeric)
+    path = re.sub(r"/[0-9A-HJKMNP-TV-Z]{26}", "/{id}", path)
+    # Replace UUIDs
+    path = re.sub(
+        r"/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+        "/{uuid}",
+        path,
+    )
+    # Replace numeric IDs
+    path = re.sub(r"/\d+", "/{id}", path)
+    return path
 
 
 def _record_metrics(

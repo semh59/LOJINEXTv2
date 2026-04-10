@@ -29,6 +29,18 @@ class CursorResponse(BaseModel):
     has_more: bool = False
 
 
+class VehicleByPlateResponse(BaseModel):
+    """GET /internal/v1/vehicles/by-plate/{plate} response."""
+
+    vehicle_id: str
+
+
+class TrailerByPlateResponse(BaseModel):
+    """GET /internal/v1/trailers/by-plate/{plate} response."""
+
+    trailer_id: str
+
+
 # --- Vehicle ---
 
 

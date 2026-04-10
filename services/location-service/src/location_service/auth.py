@@ -11,7 +11,7 @@ from platform_auth import (
     TokenClaims,
     TokenInvalidError,
     TokenMissingError,
-    decode_bearer_token,
+    async_decode_bearer_token,
 )
 from platform_auth.key_provider import build_verification_provider
 
@@ -25,10 +25,14 @@ _PUBLIC_USER_ROLES = {PlatformRole.MANAGER, PlatformRole.SUPER_ADMIN}
 
 def _platform_auth_settings() -> AuthSettings:
     """Build shared auth settings for inbound token verification."""
+    audience: str | tuple[str, ...] | None = None
+    if settings.auth_audience:
+        audience = (settings.auth_audience, "location-service")
+
     return AuthSettings(
         algorithm=settings.auth_jwt_algorithm,
         issuer=settings.auth_issuer or None,
-        audience=settings.auth_audience or None,
+        audience=audience,
         jwks_url=settings.auth_jwks_url or None,
         jwks_cache_ttl_seconds=settings.auth_jwks_cache_ttl_seconds,
     )
@@ -63,10 +67,10 @@ async def auth_verify_status() -> str:
     return "ok"
 
 
-def _decode_claims(authorization: str | None) -> TokenClaims:
+async def _decode_claims(authorization: str | None) -> TokenClaims:
     """Decode Authorization header into normalized claims."""
     try:
-        return decode_bearer_token(authorization, _platform_auth_settings())
+        return await async_decode_bearer_token(authorization, _platform_auth_settings())
     except TokenMissingError as exc:
         raise location_auth_required() from exc
     except TokenInvalidError as exc:  # pragma: no cover - exercised via router tests
@@ -74,9 +78,9 @@ def _decode_claims(authorization: str | None) -> TokenClaims:
         raise location_auth_invalid(detail) from exc
 
 
-def require_public_user_token(authorization: str | None) -> AuthContext:
+async def require_public_user_token(authorization: str | None) -> AuthContext:
     """Validate a user bearer token for public Location Service endpoints."""
-    claims = _decode_claims(authorization)
+    claims = await _decode_claims(authorization)
     role = claims.role.strip()
     actor_id = claims.sub.strip()
     if role not in _PUBLIC_USER_ROLES or not actor_id:
@@ -84,17 +88,17 @@ def require_public_user_token(authorization: str | None) -> AuthContext:
     return AuthContext(actor_id=actor_id, role=role)
 
 
-def require_super_admin_token(authorization: str | None) -> AuthContext:
+async def require_super_admin_token(authorization: str | None) -> AuthContext:
     """Validate that the caller is a SUPER_ADMIN user."""
-    auth = require_public_user_token(authorization)
+    auth = await require_public_user_token(authorization)
     if auth.role != PlatformRole.SUPER_ADMIN:
         raise location_forbidden("This action requires the SUPER_ADMIN role.")
     return auth
 
 
-def require_trip_service_token(authorization: str | None) -> AuthContext:
+async def require_trip_service_token(authorization: str | None) -> AuthContext:
     """Validate the internal trip-service bearer token."""
-    claims = _decode_claims(authorization)
+    claims = await _decode_claims(authorization)
     role = claims.role.strip()
     service_name = (claims.service or "").strip()
     actor_id = claims.sub.strip()
@@ -105,22 +109,22 @@ def require_trip_service_token(authorization: str | None) -> AuthContext:
     return AuthContext(actor_id=actor_id, role=role, service_name=service_name)
 
 
-def user_auth_dependency(
+async def user_auth_dependency(
     authorization: str | None = Header(None, alias="Authorization"),
 ) -> AuthContext:
     """FastAPI dependency for public admin-authenticated endpoints."""
-    return require_public_user_token(authorization)
+    return await require_public_user_token(authorization)
 
 
-def super_admin_auth_dependency(
+async def super_admin_auth_dependency(
     authorization: str | None = Header(None, alias="Authorization"),
 ) -> AuthContext:
     """FastAPI dependency for public SUPER_ADMIN-only endpoints."""
-    return require_super_admin_token(authorization)
+    return await require_super_admin_token(authorization)
 
 
-def trip_service_auth_dependency(
+async def trip_service_auth_dependency(
     authorization: str | None = Header(None, alias="Authorization"),
 ) -> AuthContext:
     """FastAPI dependency for Trip Service-owned internal endpoints."""
-    return require_trip_service_token(authorization)
+    return await require_trip_service_token(authorization)

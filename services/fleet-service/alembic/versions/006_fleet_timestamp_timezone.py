@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "006_fleet_timestamp_timezone"
-down_revision = "005_outbox_platform_standard_fields"
+down_revision = "005_outbox_std_fields"
 branch_labels = None
 depends_on = None
 
@@ -177,6 +177,12 @@ def _alter(
 ) -> None:
     new_type = NO_TZ if reverse else TZ
     old_type = TZ if reverse else NO_TZ
+
+    # Drop is_selectable if it exists (for fleet_vehicles and fleet_trailers)
+    has_selectable = table in ("fleet_vehicles", "fleet_trailers")
+    if has_selectable and not reverse:
+        op.drop_column(table, "is_selectable")
+
     for col_name, _nullable in columns:
         op.alter_column(
             table,
@@ -184,4 +190,15 @@ def _alter(
             type_=new_type,
             existing_type=old_type,
             postgresql_using=f"{col_name}::timestamptz" if not reverse else f"{col_name}::timestamp",
+        )
+
+    # Re-add is_selectable
+    if has_selectable and not reverse:
+        op.add_column(
+            table,
+            sa.Column(
+                "is_selectable",
+                sa.Boolean(),
+                sa.Computed("status = 'ACTIVE' AND soft_deleted_at_utc IS NULL", persisted=True),
+            ),
         )
