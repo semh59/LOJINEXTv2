@@ -114,6 +114,13 @@ HTTP_REQUESTS_TOTAL = Counter(
     METRICS_LABELS + ["method", "endpoint", "status_code"],
 )
 
+TRIP_CB_STATE_CHANGES_TOTAL = Counter(
+    "trip_cb_state_changes_total",
+    "Total circuit breaker state changes",
+    METRICS_LABELS + ["breaker_name", "state"],
+)
+
+
 SERVICE_INFO = Info("trip_service", "Trip Service version info")
 SERVICE_INFO.info({"version": settings.service_version, "service": settings.service_name, "env": settings.environment})
 

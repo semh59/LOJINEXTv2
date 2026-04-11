@@ -159,6 +159,12 @@ def _kafka_config() -> dict[str, Any]:
         "bootstrap.servers": settings.kafka_bootstrap_servers,
         "client.id": settings.kafka_client_id,
         "security.protocol": settings.kafka_security_protocol,
+        # Fine-tuned for production reliability and performance
+        "acks": settings.kafka_acks,
+        "enable.idempotence": settings.kafka_enable_idempotence,
+        "linger.ms": settings.kafka_linger_ms,
+        "batch.size": settings.kafka_batch_size,
+        "compression.type": settings.kafka_compression_type,
     }
     if settings.kafka_sasl_mechanism:
         config["sasl.mechanism"] = settings.kafka_sasl_mechanism

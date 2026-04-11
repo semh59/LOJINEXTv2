@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     environment: Literal["dev", "test", "prod"] = "dev"
 
     database_url: str = DEFAULT_DATABASE_URL
+    redis_url: str = "redis://localhost:6379/0"
+    redis_max_connections: int = 50
+    redis_socket_timeout: float = 1.0
+    redis_retry_on_timeout: bool = True
 
     fleet_service_url: str = "http://localhost:8102"
     location_service_url: str = "http://localhost:8103"
@@ -67,6 +71,16 @@ class Settings(BaseSettings):
     kafka_sasl_mechanism: str | None = None
     kafka_sasl_username: str | None = None
     kafka_sasl_password: str | None = None
+
+    # Kafka Fine-Tuning for Production Reliability and Performance
+    kafka_acks: str = "all"
+    kafka_enable_idempotence: bool = True
+    kafka_linger_ms: int = 5
+    kafka_batch_size: int = 32768
+    kafka_compression_type: str = "lz4"
+
+    # OpenTelemetry OTLP settings
+    otel_exporter_otlp_endpoint: str = "http://localhost:4317"
 
     @property
     def resolved_broker_type(self) -> Literal["kafka", "log", "noop"]:
