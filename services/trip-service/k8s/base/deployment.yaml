@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trip-service
+  labels:
+    app: trip-service
+    part-of: lojinext-platform
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: trip-service
+  template:
+    metadata:
+      labels:
+        app: trip-service
+    spec:
+      containers:
+        - name: api
+          image: lojinext/trip-service:latest
+          ports:
+            - containerPort: 8101
+          envFrom:
+            - configMapRef:
+                name: trip-service-config
+            - secretRef:
+                name: trip-service-secrets
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8101
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8101
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

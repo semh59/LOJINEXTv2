@@ -178,6 +178,11 @@ class EditTripRequest(BaseModel):
             raise ValueError("trip_timezone cannot be updated without trip_start_local.")
         return self
 
+    @model_validator(mode="after")
+    def validate_weight_triplet_patch(self) -> "EditTripRequest":
+        _validate_weight_triplet(self.tare_weight_kg, self.gross_weight_kg, self.net_weight_kg)
+        return self
+
 
 class ApproveRequest(BaseModel):
     """Approve a pending trip."""

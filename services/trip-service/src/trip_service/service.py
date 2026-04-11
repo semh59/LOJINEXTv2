@@ -28,6 +28,7 @@ from trip_service.errors import (
     invalid_base_for_empty_return,
     invalid_status_transition,
     route_required_for_completion,
+    trip_if_match_required,
     trip_version_mismatch,
 )
 from trip_service.middleware import make_etag, parse_etag_version
@@ -212,7 +213,11 @@ class TripService:
             await _create_outbox_event(self.session, trip, "trip.completed.v1")
             TRIP_COMPLETED_TOTAL.labels(**get_standard_labels()).inc()
 
-        await self.session.commit()
+        try:
+            await self.session.commit()
+        except IntegrityError as exc:
+            raise _map_integrity_error(exc, trip_no=trip.trip_no) from exc
+
         resource = trip_to_resource(trip)
         resource_dict = resource.model_dump(mode="json")
         headers = self._response_headers(trip)
@@ -233,15 +238,17 @@ class TripService:
     async def cancel_trip(self, trip_id: str, if_match: str | None = None) -> tuple[dict[str, Any], dict[str, str]]:
         """Soft-delete a trip."""
         trip = await _get_trip_or_404(self.session, trip_id)
-        if if_match:
-            parsed_version = parse_etag_version(if_match)
-            if parsed_version is None or parsed_version != trip.version:
-                raise trip_version_mismatch()
+        if not if_match:
+            raise trip_if_match_required()
+        parsed_version = parse_etag_version(if_match)
+        if parsed_version is None or parsed_version != trip.version:
+            raise trip_version_mismatch()
 
         if is_deleted_trip_status(trip.status):
             return trip_to_resource(trip).model_dump(mode="json"), self._response_headers(trip)
 
         now = datetime.now(UTC)
+        old_snapshot = serialize_trip_admin(trip)
         transition_trip(trip, TripStatus.SOFT_DELETED)
         trip.soft_deleted_at_utc = now
         trip.soft_deleted_by_actor_id = self.auth.actor_id
@@ -259,6 +266,17 @@ class TripService:
         await _create_outbox_event(self.session, trip, "trip.soft_deleted.v1")
         TRIP_CANCELLED_TOTAL.labels(**get_standard_labels()).inc()
 
+        await _write_audit(
+            self.session,
+            trip_id=trip.id,
+            action_type="SOFT_DELETE",
+            actor_id=self.auth.actor_id,
+            actor_role=str(self.auth.role),
+            old_snapshot=old_snapshot,
+            new_snapshot=serialize_trip_admin(trip),
+            reason="Trip soft deleted.",
+        )
+
         await self.session.commit()
         return trip_to_resource(trip).model_dump(mode="json"), self._response_headers(trip)
 
@@ -267,10 +285,11 @@ class TripService:
     ) -> tuple[dict[str, Any], dict[str, str]]:
         """Approve a pending-review trip."""
         trip = await _get_trip_or_404(self.session, trip_id)
-        if if_match:
-            parsed_version = parse_etag_version(if_match)
-            if parsed_version is None or parsed_version != trip.version:
-                raise trip_version_mismatch()
+        if not if_match:
+            raise trip_if_match_required()
+        parsed_version = parse_etag_version(if_match)
+        if parsed_version is None or parsed_version != trip.version:
+            raise trip_version_mismatch()
 
         if normalize_trip_status(trip.status) != TripStatus.PENDING_REVIEW.value:
             raise invalid_status_transition("Only PENDING_REVIEW trips can be approved.")
@@ -325,15 +344,17 @@ class TripService:
     ) -> tuple[dict[str, Any], dict[str, str]]:
         """Reject a pending-review trip."""
         trip = await _get_trip_or_404(self.session, trip_id)
-        if if_match:
-            parsed_version = parse_etag_version(if_match)
-            if parsed_version is None or parsed_version != trip.version:
-                raise trip_version_mismatch()
+        if not if_match:
+            raise trip_if_match_required()
+        parsed_version = parse_etag_version(if_match)
+        if parsed_version is None or parsed_version != trip.version:
+            raise trip_version_mismatch()
 
         if normalize_trip_status(trip.status) != TripStatus.PENDING_REVIEW.value:
             raise invalid_status_transition("Only PENDING_REVIEW trips can be rejected.")
 
         now = datetime.now(UTC)
+        old_snapshot = serialize_trip_admin(trip)
         transition_trip(trip, TripStatus.REJECTED)
         self.session.add(
             TripTripTimeline(
@@ -347,6 +368,18 @@ class TripService:
             )
         )
         await _create_outbox_event(self.session, trip, "trip.rejected.v1")
+
+        await _write_audit(
+            self.session,
+            trip_id=trip.id,
+            action_type="REJECT",
+            actor_id=self.auth.actor_id,
+            actor_role=str(self.auth.role),
+            old_snapshot=old_snapshot,
+            new_snapshot=serialize_trip_admin(trip),
+            reason=body.reason or "Trip rejected.",
+        )
+
         await self.session.commit()
 
         return trip_to_resource(trip).model_dump(mode="json"), self._response_headers(trip)
@@ -356,10 +389,11 @@ class TripService:
     ) -> tuple[dict[str, Any], dict[str, str]]:
         """Edit trip fields."""
         trip = await _get_trip_or_404(self.session, trip_id)
-        if if_match:
-            parsed_version = parse_etag_version(if_match)
-            if parsed_version is None or parsed_version != trip.version:
-                raise trip_version_mismatch()
+        if not if_match:
+            raise trip_if_match_required()
+        parsed_version = parse_etag_version(if_match)
+        if parsed_version is None or parsed_version != trip.version:
+            raise trip_version_mismatch()
 
         normalized_status = normalize_trip_status(trip.status)
         if normalized_status not in {TripStatus.PENDING_REVIEW.value, TripStatus.COMPLETED.value}:
@@ -608,7 +642,11 @@ class TripService:
             await _create_outbox_event(self.session, trip, "trip.completed.v1")
             TRIP_COMPLETED_TOTAL.labels(**get_standard_labels()).inc()
 
-        await self.session.commit()
+        try:
+            await self.session.commit()
+        except IntegrityError as exc:
+            raise _map_integrity_error(exc, trip_no=trip.trip_no) from exc
+
         resource_dict = trip_to_resource(trip).model_dump(mode="json")
         headers = self._response_headers(trip)
 

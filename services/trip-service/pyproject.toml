@@ -20,6 +20,11 @@ dependencies = [
     "PyJWT>=2.10.1",
     "platform-auth",
     "platform-common",
+    "opentelemetry-api>=1.24.0",
+    "opentelemetry-sdk>=1.24.0",
+    "opentelemetry-instrumentation-fastapi>=0.45b0",
+    "opentelemetry-instrumentation-httpx>=0.45b0",
+    "opentelemetry-exporter-otlp>=1.24.0",
 ]
 
 [project.scripts]

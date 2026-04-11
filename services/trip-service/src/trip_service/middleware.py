@@ -15,7 +15,7 @@ from typing import Any
 from fastapi import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from trip_service.errors import trip_if_match_required, trip_validation_error, trip_version_mismatch
+from trip_service.errors import trip_if_match_required, trip_validation_error
 from trip_service.observability import correlation_id
 from trip_service.timezones import InvalidTimezoneError, calendar_date_range_to_utc
 
@@ -79,12 +79,13 @@ class RequestIdMiddleware:
 
 
 def make_etag(trip_id: str, version: int) -> str:
-    """Generate ETag string per V8 Section 16.1: '"trip-<trip_id>-v<version>"'."""
-    return f'"trip-{trip_id}-v{version}"'
+    """Generate canonical ETag string as quoted version: '"{version}"'."""
+    _ = trip_id
+    return f'"{version}"'
 
 
-def parse_if_match(request: Request) -> tuple[str, int] | None:
-    """Parse If-Match header. Returns (trip_id, version) or None if not present."""
+def parse_if_match(request: Request) -> int | None:
+    """Parse If-Match header. Returns version or None if not present/invalid."""
     if_match = request.headers.get("if-match")
     if not if_match:
         return None
@@ -94,13 +95,16 @@ def parse_if_match(request: Request) -> tuple[str, int] | None:
         raw = iv[1:-1]
     else:
         raw = iv
-    match = re.match(r"^trip-(.+)-v(\d+)$", raw)
-    if not match:
-        return None
-    return match.group(1), int(match.group(2))
+    if raw.isdigit():
+        return int(raw)
+    # Backward compatibility for legacy trip-scoped format.
+    legacy = re.match(r"^trip-.+-v(\d+)$", raw)
+    if legacy:
+        return int(legacy.group(1))
+    return None
 
 
-def require_if_match(request: Request) -> tuple[str, int]:
+def require_if_match(request: Request) -> int:
     """Parse If-Match header or raise 428 per V8 Section 8.6."""
     result = parse_if_match(request)
     if result is None:
@@ -109,11 +113,9 @@ def require_if_match(request: Request) -> tuple[str, int]:
 
 
 def require_trip_if_match(request: Request, trip_id: str) -> int:
-    """Parse If-Match header and ensure it belongs to the requested trip."""
-    parsed_trip_id, version = require_if_match(request)
-    if parsed_trip_id != trip_id:
-        raise trip_version_mismatch()
-    return version
+    """Parse If-Match header and return the optimistic-lock version."""
+    _ = trip_id
+    return require_if_match(request)
 
 
 def parse_etag_version(etag_value: str) -> int | None:

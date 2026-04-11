@@ -5,9 +5,13 @@ from platform_common import OutboxPublishStatus
 
 
 class TripStatus(str, enum.Enum):
+    PLANNED = "PLANNED"
+    ASSIGNED = "ASSIGNED"
+    IN_PROGRESS = "IN_PROGRESS"
     PENDING_REVIEW = "PENDING_REVIEW"
     COMPLETED = "COMPLETED"
     REJECTED = "REJECTED"
+    CANCELLED = "CANCELLED"
     SOFT_DELETED = "SOFT_DELETED"
 
 

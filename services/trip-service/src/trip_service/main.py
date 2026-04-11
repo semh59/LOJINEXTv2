@@ -20,6 +20,7 @@ from trip_service.http_clients import close_http_clients
 from trip_service.middleware import PrometheusMiddleware, RequestIdMiddleware
 from trip_service.observability import setup_logging
 from trip_service.routers import driver_statement, health, removed_endpoints, trips
+from trip_service.tracing import instrument_app, setup_tracing, shutdown_tracing
 
 logger = logging.getLogger("trip_service")
 
@@ -28,6 +29,7 @@ logger = logging.getLogger("trip_service")
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: startup and shutdown hooks."""
     setup_logging()
+    setup_tracing()
     validate_prod_settings(settings)
 
     broker = create_broker(settings.resolved_broker_type)
@@ -37,6 +39,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         yield
     finally:
+        shutdown_tracing()
         await broker.close()
         await close_http_clients()
         await engine.dispose()
@@ -56,6 +59,7 @@ def create_app() -> FastAPI:
     # CORSMiddleware must be outermost so it can intercept OPTIONS preflight before the router.
     app.add_middleware(PrometheusMiddleware)
     app.add_middleware(RequestIdMiddleware)
+    instrument_app(app)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_allowed_origins,

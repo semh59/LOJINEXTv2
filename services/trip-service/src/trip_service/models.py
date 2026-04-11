@@ -316,7 +316,7 @@ class TripOutbox(Base):
     aggregate_version: Mapped[int] = mapped_column(Integer, nullable=False)
     event_name: Mapped[str] = mapped_column(String(50), nullable=False)
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    payload_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
     partition_key: Mapped[str] = mapped_column(String(100), nullable=False)
     publish_status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING")
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

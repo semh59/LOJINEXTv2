@@ -25,6 +25,7 @@ from ulid import ULID
 from trip_service.config import settings
 from trip_service.database import async_session_factory
 from trip_service.dependencies import LocationTripContext
+from platform_common import OutboxPublishStatus
 from trip_service.enums import ActorType, ReviewReasonCode, SourceType, TripStatus
 from trip_service.errors import (
     idempotency_in_flight,
@@ -49,17 +50,24 @@ from trip_service.observability import get_standard_labels  # noqa: F401
 from trip_service.schemas import EnrichmentSummary, EvidenceSummary, TripResource
 from trip_service.state_machine import TripStateMachine
 
-_REFERENCE_EXCLUDED_STATUSES = (TripStatus.REJECTED.value, TripStatus.SOFT_DELETED.value, "CANCELLED")
+_REFERENCE_EXCLUDED_STATUSES = (
+    TripStatus.REJECTED.value,
+    TripStatus.SOFT_DELETED.value,
+    TripStatus.CANCELLED.value,
+)
 _MANUAL_CREATE_WINDOW_MINUTES = 30
+_ALLOWED_OVERLAP_FIELDS = frozenset({"driver_id", "vehicle_id", "trailer_id"})
+_EMPTY_RETURN_SUFFIX = "-B"
+_IDEMPOTENCY_STALE_THRESHOLD_SECONDS = 60
 
 logger = logging.getLogger("trip_service.trip_helpers")
 
 
-def latest_evidence(trip: TripTrip) -> TripTripEvidence | None:
+def _latest_evidence(trip: TripTrip) -> TripTripEvidence | None:
     """Return the most recent piece of evidence for this trip without lazy-loading."""
     if "evidence" not in trip.__dict__ or not trip.evidence:
         return None
-    return sorted(trip.evidence, key=lambda e: (e.created_at_utc, e.id), reverse=True)[0]
+    return max(trip.evidence, key=lambda e: (e.created_at_utc, e.id))
 
 
 def normalize_trip_status(status: str | TripStatus) -> str:
@@ -90,7 +98,7 @@ def trip_to_resource(trip: TripTrip) -> TripResource:
         )
 
     evidence_summary = None
-    evidence = latest_evidence(trip)
+    evidence = _latest_evidence(trip)
     if evidence is not None:
         evidence_summary = EvidenceSummary(
             normalized_truck_plate=evidence.normalized_truck_plate,
@@ -107,7 +115,7 @@ def trip_to_resource(trip: TripTrip) -> TripResource:
         source_reference_key=trip.source_reference_key,
         review_reason_code=trip.review_reason_code,
         base_trip_id=trip.base_trip_id,
-        driver_id=trip.driver_id or "",
+        driver_id=trip.driver_id,
         vehicle_id=trip.vehicle_id,
         trailer_id=trip.trailer_id,
         route_pair_id=trip.route_pair_id,
@@ -138,18 +146,18 @@ def trip_complete_errors(trip: TripTrip) -> list[dict[str, str]]:
     """Return field-level completeness errors for approval/transition checks."""
     errors: list[dict[str, str]] = []
     required_fields: tuple[tuple[str, Any], ...] = (
-        ("body.vehicle_id", trip.vehicle_id),
-        ("body.route_pair_id", trip.route_pair_id),
-        ("body.route_id", trip.route_id),
-        ("body.origin_location_id", trip.origin_location_id),
-        ("body.origin_name_snapshot", trip.origin_name_snapshot),
-        ("body.destination_location_id", trip.destination_location_id),
-        ("body.destination_name_snapshot", trip.destination_name_snapshot),
-        ("body.tare_weight_kg", trip.tare_weight_kg),
-        ("body.gross_weight_kg", trip.gross_weight_kg),
-        ("body.net_weight_kg", trip.net_weight_kg),
-        ("body.planned_duration_s", trip.planned_duration_s),
-        ("body.planned_end_utc", trip.planned_end_utc),
+        ("vehicle_id", trip.vehicle_id),
+        ("route_pair_id", trip.route_pair_id),
+        ("route_id", trip.route_id),
+        ("origin_location_id", trip.origin_location_id),
+        ("origin_name_snapshot", trip.origin_name_snapshot),
+        ("destination_location_id", trip.destination_location_id),
+        ("destination_name_snapshot", trip.destination_name_snapshot),
+        ("tare_weight_kg", trip.tare_weight_kg),
+        ("gross_weight_kg", trip.gross_weight_kg),
+        ("net_weight_kg", trip.net_weight_kg),
+        ("planned_duration_s", trip.planned_duration_s),
+        ("planned_end_utc", trip.planned_end_utc),
     )
     for field_name, value in required_fields:
         if value is None:
@@ -240,6 +248,8 @@ async def _find_overlap(
     exclude_trip_id: str | None = None,
 ) -> TripTrip | None:
     """Return the first overlapping trip for the given resource window."""
+    if field_name not in _ALLOWED_OVERLAP_FIELDS:
+        raise ValueError(f"Invalid overlap field_name: {field_name!r}. Allowed: {sorted(_ALLOWED_OVERLAP_FIELDS)}")
     column = getattr(TripTrip, field_name)
     conditions = [
         column == field_value,
@@ -366,7 +376,7 @@ def _build_outbox_row(*, trip_id: str, aggregate_version: int, event_name: str, 
         schema_version=1,
         payload_json=json.dumps(payload, default=str),
         partition_key=trip_id,
-        publish_status="PENDING",
+        publish_status=OutboxPublishStatus.PENDING.value,
         attempt_count=0,
         next_attempt_at_utc=now,
         last_error_code=None,
@@ -534,7 +544,7 @@ async def _check_idempotency_key(
                     TripIdempotencyRecord.idempotency_key == idempotency_key,
                     TripIdempotencyRecord.endpoint_fingerprint == endpoint_fingerprint,
                 )
-                .with_for_update(nowait=True)
+                .with_for_update(skip_locked=True)
             )
         ).scalar_one()
     except (NoResultFound, IntegrityError, OperationalError, DBAPIError):
@@ -546,7 +556,7 @@ async def _check_idempotency_key(
     if record.response_status == 0:
         # If the placeholder is stale (> 60s), notify client to retry.
         # We cleanup the stale record in a separate session.
-        if (utc_now() - record.created_at_utc).total_seconds() > 60:
+        if (utc_now() - record.created_at_utc).total_seconds() > _IDEMPOTENCY_STALE_THRESHOLD_SECONDS:
             logger.warning(
                 "Idempotency %s: Stale in-flight record detected (created at %s)",
                 idempotency_key,
@@ -572,7 +582,7 @@ async def _check_idempotency_key(
     return response
 
 
-def get_actor_actor_role(claims: TokenClaims) -> tuple[str, str]:
+def get_actor_id_and_role(claims: TokenClaims) -> tuple[str, str]:
     """Extract actor ID and role from token claims."""
     return str(claims.sub), str(claims.role)
 
@@ -667,10 +677,10 @@ def _validate_trip_weights(tare_weight_kg: int | None, gross_weight_kg: int | No
         return
     errors: list[dict[str, str]] = []
     if gross_weight_kg < tare_weight_kg:
-        errors.append({"field": "body.gross_weight_kg", "message": "gross_weight_kg must be >= tare_weight_kg."})
+        errors.append({"field": "gross_weight_kg", "message": "gross_weight_kg must be >= tare_weight_kg."})
     if net_weight_kg != gross_weight_kg - tare_weight_kg:
         errors.append(
-            {"field": "body.net_weight_kg", "message": "net_weight_kg must equal gross_weight_kg - tare_weight_kg."}
+            {"field": "net_weight_kg", "message": "net_weight_kg must equal gross_weight_kg - tare_weight_kg."}
         )
     if errors:
         raise trip_validation_error("Trip weights are inconsistent.", errors=errors)

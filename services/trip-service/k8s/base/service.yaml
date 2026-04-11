@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: trip-service
+  labels:
+    app: trip-service
+spec:
+  selector:
+    app: trip-service
+  ports:
+    - port: 8101
+      targetPort: 8101
+      protocol: TCP
+  type: ClusterIP
