@@ -1,0 +1,31 @@
+# Alerting Rules for Prometheus
+
+groups:
+  - name: trip_service_alerts
+    rules:
+      - alert: TripServiceHighErrorRate
+        expr: rate(trip_http_requests_total{status_code=~"5.."}[5m]) / rate(trip_http_requests_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High HTTP 5xx error rate on {{ $labels.service }}"
+          description: "Error rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+
+      - alert: TripServiceCircuitOpen
+        expr: sum by (breaker_name) (rate(trip_cb_state_changes_total{state="OPEN"}[5m])) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Circuit Breaker OPEN: {{ $labels.breaker_name }}"
+          description: "The circuit breaker for {{ $labels.breaker_name }} has transitioned to OPEN due to high failure rates."
+
+      - alert: TripServiceRedisDown
+        expr: redis_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis is DOWN for Trip Service"
+          description: "The primary Redis instance is unreachable."
