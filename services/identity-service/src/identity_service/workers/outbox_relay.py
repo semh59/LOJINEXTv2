@@ -191,8 +191,13 @@ async def _mark_publish_failure(outbox_id: str, exc: Exception) -> None:
             )
         else:
             row.publish_status = "FAILED"
-            backoff = min(2**row.attempt_count, 300)
-            row.next_attempt_at_utc = now + timedelta(seconds=backoff)
+            # Exponential: 5, 10, 20, 40, 80, 160, 300...
+            base_delay = min(300, 5 * (2 ** (row.attempt_count - 1)))
+            jitter = base_delay * 0.1
+            import random
+
+            actual_delay = base_delay + random.uniform(-jitter, jitter)
+            row.next_attempt_at_utc = now + timedelta(seconds=max(1, actual_delay))
         await session.commit()
 
 

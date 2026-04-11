@@ -19,6 +19,7 @@ dependencies = [
     "PyJWT>=2.10.1",
     "platform-auth",
     "confluent-kafka>=2.5.0",
+    "redis>=7.2.0",
 ]
 
 [project.optional-dependencies]
@@ -63,4 +64,4 @@ python_version = "3.12"
 strict = true
 
 [tool.uv.sources]
-platform-auth = { path = "../../packages/platform-auth" }
+platform-auth = { workspace = true }

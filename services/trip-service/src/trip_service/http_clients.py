@@ -31,6 +31,8 @@ def _build_client() -> httpx.AsyncClient:
 async def get_dependency_client() -> httpx.AsyncClient:
     """Return the long-lived client used by request-time dependency calls."""
     global _dependency_client
+    if _dependency_client is not None and not _dependency_client.is_closed:
+        return _dependency_client
     async with _client_lock:
         if _dependency_client is None or _dependency_client.is_closed:
             _dependency_client = _build_client()
@@ -40,6 +42,8 @@ async def get_dependency_client() -> httpx.AsyncClient:
 async def get_worker_client() -> httpx.AsyncClient:
     """Return the long-lived client used by background workers."""
     global _worker_client
+    if _worker_client is not None and not _worker_client.is_closed:
+        return _worker_client
     async with _client_lock:
         if _worker_client is None or _worker_client.is_closed:
             _worker_client = _build_client()

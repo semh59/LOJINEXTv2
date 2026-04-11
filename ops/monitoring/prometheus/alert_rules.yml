@@ -21,6 +21,33 @@ groups:
           summary: "Circuit Breaker OPEN: {{ $labels.breaker_name }}"
           description: "The circuit breaker for {{ $labels.breaker_name }} has transitioned to OPEN due to high failure rates."
 
+      - alert: TripServiceHighLatencyP95
+        expr: histogram_quantile(0.95, sum by (endpoint, le) (rate(trip_http_request_duration_seconds_bucket[5m]))) > 1.0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High P95 Latency on {{ $labels.endpoint }}"
+          description: "P95 latency is {{ $value | humanizeDuration }} over the last 5 minutes."
+
+      - alert: TripServiceHighLatencyP99
+        expr: histogram_quantile(0.99, sum by (endpoint, le) (rate(trip_http_request_duration_seconds_bucket[5m]))) > 5.0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical P99 Latency Spike: {{ $labels.endpoint }}"
+          description: "P99 latency reached {{ $value | humanizeDuration }}."
+
+      - alert: TripServiceMemoryHigh
+        expr: (process_resident_memory_bytes / process_virtual_memory_bytes) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Memory Usage for {{ $labels.service }}"
+          description: "Memory utilization is above 80%."
+
       - alert: TripServiceRedisDown
         expr: redis_up == 0
         for: 1m

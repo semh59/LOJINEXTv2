@@ -678,7 +678,7 @@ async def excel_export_feed(
     per_page: int = Query(50, ge=1, le=100),
 ) -> TripListResponse:
     """Return structured trip rows for the separate Excel service."""
-    del auth
+    _ = auth
     pagination = parse_pagination(page, per_page)
     _deleted_statuses = [TripStatus.SOFT_DELETED.value, "CANCELLED"]
     stmt = (
@@ -756,7 +756,7 @@ async def list_trips(
     per_page: int = Query(50, ge=1, le=100),
 ) -> TripListResponse:
     """Return the admin trip list for Tauri screens."""
-    del auth
+    _ = auth
     pagination = parse_pagination(page, per_page)
     stmt = select(TripTrip).options(selectinload(TripTrip.enrichment), selectinload(TripTrip.evidence))
     if status is not None:
@@ -809,7 +809,7 @@ async def get_trip(
     auth: AuthContext = Depends(user_auth_dependency),
 ) -> Any:
     """Return a single trip resource with ETag."""
-    del auth
+    _ = auth
     trip = await _get_trip_or_404(session, trip_id)
     resource = trip_to_resource(trip)
     return _json_response(200, resource.model_dump(mode="json"), _response_headers_for_trip(trip))
@@ -822,7 +822,7 @@ async def get_trip_timeline(
     auth: AuthContext = Depends(user_auth_dependency),
 ) -> TimelineResponse:
     """Return a trip timeline ordered oldest to newest."""
-    del auth
+    _ = auth
     trip = await _get_trip_or_404(session, trip_id)
     return _timeline_item_rows(trip)
 
@@ -952,7 +952,7 @@ async def retry_enrichment(
     auth: AuthContext = Depends(user_auth_dependency),
 ) -> RetryEnrichmentResponse:
     """Manually re-queue enrichment for a non-terminal enrichment row."""
-    del auth
+    _ = auth
     trip = await _get_trip_or_404(session, trip_id)
     if trip.enrichment is None:
         raise internal_error(f"Trip {trip_id} has no enrichment record.")

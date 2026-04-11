@@ -65,10 +65,10 @@ class Settings(BaseSettings):
     processing_poll_interval_seconds: int = 5
     processing_claim_ttl_seconds: int = 300
     processing_max_attempts: int = 5
-    worker_heartbeat_timeout_seconds: int = 60
+    worker_heartbeat_timeout_seconds: int = 90
     outbox_poll_interval_seconds: int = 5
     outbox_publish_batch_size: int = 50
-    outbox_retry_max: int = 5
+    outbox_retry_max: int = 10
     kafka_topic: str = "location-events"
     kafka_bootstrap_servers: str = "localhost:9092"
     kafka_client_id: str = "location-service"
@@ -76,6 +76,8 @@ class Settings(BaseSettings):
     ignore_provider_health: bool = False
     platform_jwt_secret: str | None = None
     allow_plaintext_in_prod: bool = False
+    kafka_acks: str = "all"
+    kafka_enable_idempotence: bool = True
 
     @property
     def provider_timeout_seconds(self) -> float:

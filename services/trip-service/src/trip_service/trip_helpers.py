@@ -25,7 +25,7 @@ from ulid import ULID
 from trip_service.config import settings
 from trip_service.database import async_session_factory
 from trip_service.dependencies import LocationTripContext
-from platform_common import OutboxPublishStatus
+from platform_common import OutboxPublishStatus, compute_data_quality_flag
 from trip_service.enums import ActorType, ReviewReasonCode, SourceType, TripStatus
 from trip_service.errors import (
     idempotency_in_flight,
@@ -63,7 +63,7 @@ _IDEMPOTENCY_STALE_THRESHOLD_SECONDS = 60
 logger = logging.getLogger("trip_service.trip_helpers")
 
 
-def _latest_evidence(trip: TripTrip) -> TripTripEvidence | None:
+def latest_evidence(trip: TripTrip) -> TripTripEvidence | None:
     """Return the most recent piece of evidence for this trip without lazy-loading."""
     if "evidence" not in trip.__dict__ or not trip.evidence:
         return None
@@ -98,7 +98,7 @@ def trip_to_resource(trip: TripTrip) -> TripResource:
         )
 
     evidence_summary = None
-    evidence = _latest_evidence(trip)
+    evidence = latest_evidence(trip)
     if evidence is not None:
         evidence_summary = EvidenceSummary(
             normalized_truck_plate=evidence.normalized_truck_plate,
@@ -688,17 +688,7 @@ def _validate_trip_weights(tare_weight_kg: int | None, gross_weight_kg: int | No
 
 def _compute_data_quality_flag(source_type: str, ocr_confidence: float | None, route_resolved: bool) -> str:
     """Compute the trip data-quality flag using the locked source contract."""
-    from trip_service.enums import DataQualityFlag
-
-    if source_type in (SourceType.ADMIN_MANUAL, SourceType.EMPTY_RETURN_ADMIN, SourceType.EXCEL_IMPORT):
-        return DataQualityFlag.HIGH
-    if ocr_confidence is not None and ocr_confidence >= 0.90 and route_resolved:
-        return DataQualityFlag.HIGH
-    if ocr_confidence is not None and ocr_confidence >= 0.70:
-        return DataQualityFlag.MEDIUM
-    if not route_resolved:
-        return DataQualityFlag.MEDIUM
-    return DataQualityFlag.LOW
+    return compute_data_quality_flag(source_type, ocr_confidence, route_resolved)
 
 
 def _maybe_require_change_reason(

@@ -29,10 +29,12 @@ class Settings(BaseSettings):
     broker_backend: Literal["kafka", "log", "noop"] | None = None
     outbox_poll_interval_seconds: int = 5
     outbox_publish_batch_size: int = 50
-    outbox_retry_max: int = 5
+    outbox_retry_max: int = 10
     kafka_topic: str = "identity-events"
     kafka_bootstrap_servers: str = "localhost:9092"
     kafka_client_id: str = "identity-service"
+    kafka_acks: str = "all"
+    kafka_enable_idempotence: bool = True
 
     redis_url: str = "redis://localhost:6379/0"
     rate_limit_login_per_minute: int = 10
@@ -131,9 +133,7 @@ def validate_prod_settings(current: Settings) -> None:
     if current.bootstrap_service_clients_json:
         errors.append("IDENTITY_BOOTSTRAP_SERVICE_CLIENTS_JSON is not allowed in prod.")
     if current.redis_url == "redis://localhost:6379/0":
-        errors.append(
-            "IDENTITY_REDIS_URL must be set to a non-default value in prod."
-        )
+        errors.append("IDENTITY_REDIS_URL must be set to a non-default value in prod.")
     if not current.bootstrap_service_names:
         errors.append(
             "IDENTITY_SERVICE_CLIENTS must list bootstrap service clients in prod."

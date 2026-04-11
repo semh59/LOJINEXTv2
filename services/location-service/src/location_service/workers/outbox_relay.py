@@ -151,8 +151,15 @@ async def _process_batch(session: AsyncSession, broker: EventBroker) -> int:
                     row.publish_status = "DEAD_LETTER"
                 else:
                     row.publish_status = "FAILED"
-                    backoff = min(2**row.attempt_count, 300)
-                    row.next_attempt_at_utc = datetime.fromtimestamp(now.timestamp() + backoff, tz=timezone.utc)
+                    # Exponential: 5, 10, 20, 40, 80, 160, 300...
+                    base_delay = min(300, 5 * (2 ** (row.attempt_count - 1)))
+                    import random
+
+                    jitter = base_delay * 0.1
+                    actual_delay = base_delay + random.uniform(-jitter, jitter)
+                    row.next_attempt_at_utc = datetime.fromtimestamp(
+                        now.timestamp() + max(1, actual_delay), tz=timezone.utc
+                    )
 
                 await session.commit()
 

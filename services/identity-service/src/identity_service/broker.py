@@ -108,6 +108,9 @@ class KafkaBroker(EventBroker):
         config: dict[str, object] = {
             "bootstrap.servers": bootstrap_servers,
             "client.id": client_id,
+            "acks": "all",
+            "enable.idempotence": True,
+            "max.in.flight.requests.per.connection": 5,
         }
         config.update(kwargs)
         self._producer = AIOProducer(config)
@@ -117,7 +120,7 @@ class KafkaBroker(EventBroker):
         headers = []
         c_id = correlation_id.get()
         if c_id:
-            headers.append(("X-Correlation-ID", c_id.encode()))
+            headers.append(("x-correlation-id", c_id.encode()))
 
         delivery_future = await self._producer.produce(
             topic,

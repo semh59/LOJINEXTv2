@@ -228,6 +228,7 @@ services:
   redis:
     <<: *deploy-common
     image: redis:7.2-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
     ports:
       - "${REDIS_PORT:-6379}:6379"
     healthcheck:
@@ -248,7 +249,7 @@ services:
       - --smp
       - "1"
       - --memory
-      - 256M
+      - 400M
       - --overprovisioned
       - --kafka-addr
       - internal://0.0.0.0:9092,external://0.0.0.0:19092
@@ -271,7 +272,8 @@ services:
 
   identity-api:
     <<: *identity-common
-    command: ["identity-api"]
+    command: >
+      sh -c "alembic upgrade head && identity-api"
     healthcheck:
       test:
         [
@@ -290,7 +292,8 @@ services:
 
   trip-api:
     <<: *trip-common
-    command: ["trip-api"]
+    command: >
+      sh -c "alembic upgrade head && trip-api"
     healthcheck:
       test:
         [
@@ -321,7 +324,8 @@ services:
 
   location-api:
     <<: *location-common
-    command: ["location-api"]
+    command: >
+      sh -c "alembic upgrade head && location-api"
     healthcheck:
       test:
         [
@@ -361,7 +365,8 @@ services:
 
   driver-api:
     <<: *driver-common
-    command: ["driver-api"]
+    command: >
+      sh -c "alembic upgrade head && driver-api"
     healthcheck:
       test:
         [
@@ -380,7 +385,8 @@ services:
 
   fleet-api:
     <<: *fleet-common
-    command: ["fleet-api"]
+    command: >
+      sh -c "alembic upgrade head && fleet-api"
     healthcheck:
       test:
         [
@@ -429,6 +435,11 @@ services:
   prometheus:
     <<: *deploy-common
     image: prom/prometheus:v2.53.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=5GB
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus

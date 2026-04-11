@@ -9,12 +9,6 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from tenacity import (
-    retry,
-    retry_if_exception,
-    stop_after_attempt,
-    wait_exponential,
-)
 
 from trip_service.auth import AuthContext, issue_internal_service_token, user_auth_dependency
 from trip_service.config import settings
@@ -29,19 +23,6 @@ from trip_service.observability import correlation_id
 from trip_service.resiliency import CircuitBreakerError, CircuitState, fleet_breaker, location_breaker
 
 logger = logging.getLogger("trip_service.dependencies")
-
-
-def _is_retryable(exc: BaseException) -> bool:
-    """Return True for transient errors that are safe to retry."""
-    return isinstance(exc, httpx.TransportError)
-
-
-_retry_transient = retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=0.5, max=4),
-    retry=retry_if_exception(_is_retryable),
-    reraise=True,
-)
 
 
 @dataclass(frozen=True)
@@ -176,7 +157,6 @@ def _resolve_trip_compat_flag(
     return None
 
 
-@_retry_transient
 @fleet_breaker
 async def _fleet_validate_raw(payload: dict[str, Any]) -> httpx.Response:
     """Thin HTTP POST to Fleet validation; TransportError propagates for tenacity retry."""
@@ -261,7 +241,6 @@ async def ensure_trip_references_valid(
         raise trip_validation_error("Trip references are invalid.", errors=errors)
 
 
-@_retry_transient
 @location_breaker
 async def _location_resolve_raw(payload: dict[str, Any]) -> httpx.Response:
     """Thin HTTP POST to Location resolve; TransportError propagates for tenacity retry."""
@@ -319,7 +298,6 @@ async def resolve_route_by_names(
     )
 
 
-@_retry_transient
 @location_breaker
 async def _location_context_raw(pair_id: str) -> httpx.Response:
     """Thin HTTP GET to Location trip-context; TransportError propagates for tenacity retry."""

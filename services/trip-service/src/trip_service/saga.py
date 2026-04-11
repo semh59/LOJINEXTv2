@@ -77,7 +77,7 @@ class TripBookingSagaOrchestrator:
     async def start(self) -> None:
         """Initiate the saga by emitting TripCreated event."""
         await self._update_status(SagaStatus.PENDING)
-        broker = create_broker(settings.broker_type)
+        broker = create_broker(settings.resolved_broker_type)
         try:
             await broker.publish(
                 self._build_compensation_event("trip.booking.started.v1", {})
@@ -98,7 +98,7 @@ class TripBookingSagaOrchestrator:
         await self._update_status(SagaStatus.COMPENSATING)
         logger.warning("SAGA [%s] compensating due to: %s", self.trip_id, reason)
 
-        broker = create_broker(settings.broker_type)
+        broker = create_broker(settings.resolved_broker_type)
         try:
             # Step 1: Release vehicle reservation via Fleet Service
             try:

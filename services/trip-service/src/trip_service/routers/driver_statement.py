@@ -34,7 +34,7 @@ async def driver_statement(
     per_page: int = Query(50, ge=1, le=100),
 ) -> dict[str, Any]:
     """Return completed non-empty-return trips for Telegram PDF generation."""
-    del auth
+    _ = auth
     if date_from is not None and date_to is not None and (date_to - date_from).days > 30:
         raise trip_date_range_too_large("Driver statement range cannot exceed 31 days.")
 

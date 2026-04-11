@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: location-service
+  labels:
+    app: location-service
+    part-of: lojinext-platform
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: location-service
+  template:
+    metadata:
+      labels:
+        app: location-service
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 2000
+      containers:
+        - name: api
+          image: lojinext/location-service:latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - containerPort: 8103
+          envFrom:
+            - configMapRef:
+                name: location-service-config
+            - secretRef:
+                name: location-service-secrets
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8103
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: location-service-isolation
+spec:
+  podSelector:
+    matchLabels:
+      app: location-service
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app: nginx-gateway }
+        - podSelector:
+            matchLabels: { part-of: lojinext-platform }
+      ports:
+        - { protocol: TCP, port: 8103 }
+  egress:
+    - to:
+        - podSelector: { matchLabels: { app: redis } }
+        - podSelector: { matchLabels: { app: kafka } }
+        - podSelector: { matchLabels: { app: postgres } }
+    - to:
+        [{ ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }] }]

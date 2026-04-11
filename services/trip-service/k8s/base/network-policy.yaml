@@ -1,0 +1,48 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: trip-service-allow-gateway
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: trip-service
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow traffic from Nginx Gateway
+    - from:
+        - podSelector:
+            matchLabels:
+              app: nginx-gateway
+      ports:
+        - protocol: TCP
+          port: 8101
+    # Allow traffic from other trusted internal services (e.g., identity, location)
+    - from:
+        - podSelector:
+            matchLabels:
+              part-of: lojinext-platform
+      ports:
+        - protocol: TCP
+          port: 8101
+  egress:
+    # Allow egress to external dependencies (Redis, Kafka, Postgres)
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+        - podSelector:
+            matchLabels:
+              app: kafka
+        - podSelector:
+            matchLabels:
+              app: postgres
+    # Allow DNS
+    - to:
+        - ports:
+            - protocol: UDP
+              port: 53
+            - protocol: TCP
+              port: 53

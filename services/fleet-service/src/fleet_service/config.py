@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     # --- Outbox ---
     outbox_poll_interval_seconds: int = 5
     outbox_batch_size: int = 50
-    outbox_max_retries: int = 5
+    outbox_max_retries: int = 10
     outbox_worker_enabled: bool = True
     schema_event_version: int = 1
 
@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     heartbeat_stale_seconds: int = 90
 
     # --- Idempotency ---
-    idempotency_ttl_hours: int = 72
+    idempotency_ttl_hours: int = 24
     idempotency_cleanup_interval_hours: int = 6
 
     # --- Pagination ---
@@ -80,6 +80,8 @@ class Settings(BaseSettings):
     kafka_client_id: str = "fleet-service"
     kafka_security_protocol: str = "PLAINTEXT"
     allow_plaintext_in_prod: bool = False
+    kafka_acks: str = "all"
+    kafka_enable_idempotence: bool = True
     kafka_sasl_mechanism: str | None = None
     kafka_sasl_username: str | None = None
     kafka_sasl_password: str | None = None

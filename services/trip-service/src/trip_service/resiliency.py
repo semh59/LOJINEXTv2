@@ -48,6 +48,11 @@ class CircuitBreaker:
         self._local_count = 0
         self._local_last_time = 0.0
 
+    @property
+    def state(self) -> CircuitState:
+        """Expose current local breaker state for probe callers."""
+        return self._local_state
+
     async def _get_state_and_count(self) -> tuple[CircuitState, int, float]:
         """Fetch state, failure count, and last failure time from Redis, with local fallback."""
         try:

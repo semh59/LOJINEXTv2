@@ -12,7 +12,6 @@ CRITICAL DIFFERENCES FROM ENRICHMENT WORKER:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -39,20 +38,20 @@ logger = logging.getLogger("trip_service.outbox_relay")
 # V8 Section 14.2 - Outbox relay backoff (NOT enrichment backoff)
 # ---------------------------------------------------------------------------
 
-OUTBOX_BACKOFF_SECONDS: list[int] = [
-    5,
-    10,
-    30,
-    60,
-    300,
-]
+import random
+
+OUTBOX_BASE_BACKOFF = 5
+OUTBOX_MAX_BACKOFF = 300
 
 
 def _outbox_next_attempt_at(consecutive_failures: int) -> datetime:
-    """Calculate next retry time for outbox relay."""
-    idx = min(max(consecutive_failures - 1, 0), len(OUTBOX_BACKOFF_SECONDS) - 1)
-    delay = OUTBOX_BACKOFF_SECONDS[idx]
-    return _now_utc() + timedelta(seconds=delay)
+    """Calculate next retry time for outbox relay using exponential backoff + jitter."""
+    # Exponential: 5, 10, 20, 40, 80, 160, 300...
+    delay = min(OUTBOX_MAX_BACKOFF, OUTBOX_BASE_BACKOFF * (2 ** (consecutive_failures - 1)))
+    # Add +/- 10% jitter
+    jitter = delay * 0.1
+    actual_delay = delay + random.uniform(-jitter, jitter)
+    return _now_utc() + timedelta(seconds=max(1, actual_delay))
 
 
 def _now_utc() -> datetime:
@@ -75,7 +74,7 @@ def _build_message(row: TripOutbox) -> OutboxMessage:
         event_id=row.event_id,
         event_name=row.event_name,
         partition_key=row.partition_key,
-        payload=json.dumps(row.payload_json, default=str),
+        payload=row.payload_json,
         schema_version=row.schema_version,
         aggregate_type=row.aggregate_type,
         aggregate_id=row.aggregate_id,

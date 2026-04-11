@@ -26,14 +26,17 @@ logger = logging.getLogger("fleet_service.outbox_relay")
 
 # --- Backoff schedule (Section 15.2) ---
 
-OUTBOX_BACKOFF_SECONDS: list[int] = [5, 10, 30, 60, 300]
+OUTBOX_BASE_BACKOFF = 5
+OUTBOX_MAX_BACKOFF = 300
 
 
 def _next_attempt_at(attempt_count: int) -> datetime:
-    """Calculate next retry time based on attempt count."""
-    idx = min(max(attempt_count - 1, 0), len(OUTBOX_BACKOFF_SECONDS) - 1)
-    delay = OUTBOX_BACKOFF_SECONDS[idx]
-    return _now_utc() + timedelta(seconds=delay)
+    """Calculate next retry time using jittered exponential backoff."""
+    # Exponential: 5, 10, 20, 40, 80, 160, 300...
+    delay = min(OUTBOX_MAX_BACKOFF, OUTBOX_BASE_BACKOFF * (2 ** (attempt_count - 1)))
+    jitter = delay * 0.1
+    actual_delay = delay + random.uniform(-jitter, jitter)
+    return _now_utc() + timedelta(seconds=max(1, actual_delay))
 
 
 def _now_utc() -> datetime:

@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from datetime import UTC, date, datetime, timedelta
 from functools import partial
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import jwt
@@ -192,9 +193,7 @@ async def ensure_active_signing_key(session: AsyncSession) -> IdentitySigningKey
 
     private_key, public_key = generate_rsa_keypair()
     kid = new_ulid()
-    private_key_ciphertext = await _run_blocking(
-        encrypt_private_key, private_key, aad=kid
-    )
+    private_key_ciphertext = await _run_blocking(encrypt_private_key, private_key, aad=kid)
     key = IdentitySigningKeyModel(
         kid=kid,
         algorithm=settings.auth_jwt_algorithm,
@@ -219,9 +218,7 @@ async def seed_bootstrap_state(session: AsyncSession) -> None:
     ):
         await ensure_group(session, group_name)
 
-    user_count = await session.scalar(
-        select(func.count()).select_from(IdentityUserModel)
-    )
+    user_count = await session.scalar(select(func.count()).select_from(IdentityUserModel))
     if not user_count:
         super_admin = IdentityUserModel(
             user_id=new_ulid(),
@@ -282,16 +279,11 @@ async def seed_bootstrap_state(session: AsyncSession) -> None:
     sa_group = await session.get(IdentityGroupModel, str(PlatformRole.SUPER_ADMIN))
     if sa_group:
         for p_key in ALL_CORE_PERMISSIONS:
-            gp = await session.get(
-                IdentityGroupPermissionModel, (sa_group.group_id, p_key)
-            )
+            gp = await session.get(IdentityGroupPermissionModel, (sa_group.group_id, p_key))
             if not gp:
-                gp = IdentityGroupPermissionModel(
-                    group_id=sa_group.group_id, permission_key=p_key
-                )
+                gp = IdentityGroupPermissionModel(group_id=sa_group.group_id, permission_key=p_key)
                 session.add(gp)
 
-    await session.commit()
     logger.info("Bootstrap state synchronized (Users, Groups, Permissions).")
 
 
@@ -324,9 +316,7 @@ async def _user_groups(session: AsyncSession, user_id: str) -> list[str]:
     return [str(name) for name in result.scalars().all()]
 
 
-async def _permissions_for_groups(
-    session: AsyncSession, group_names: list[str]
-) -> list[str]:
+async def _permissions_for_groups(session: AsyncSession, group_names: list[str]) -> list[str]:
     if not group_names:
         return []
     query = (
@@ -342,9 +332,7 @@ async def _permissions_for_groups(
 
 
 def _role_for_groups(group_names: list[str]) -> str:
-    invalid_groups = sorted(
-        {item for item in group_names if item not in USER_ROLE_NAMES}
-    )
+    invalid_groups = sorted({item for item in group_names if item not in USER_ROLE_NAMES})
     if invalid_groups:
         raise InvalidUserRoleAssignmentsError("User role assignments invalid.")
     if not group_names:
@@ -371,12 +359,8 @@ async def write_audit(
         action_type=action_type,
         actor_id=actor_id,
         actor_role=actor_role,
-        old_snapshot_json=json.dumps(old_snapshot, cls=RobustEncoder)
-        if old_snapshot
-        else None,
-        new_snapshot_json=json.dumps(new_snapshot, cls=RobustEncoder)
-        if new_snapshot
-        else None,
+        old_snapshot_json=json.dumps(old_snapshot, cls=RobustEncoder) if old_snapshot else None,
+        new_snapshot_json=json.dumps(new_snapshot, cls=RobustEncoder) if new_snapshot else None,
         request_id=request_id,
         created_at_utc=now_utc(),
     )
@@ -429,12 +413,8 @@ def serialize_user(
         "username": user.username,
         "email": email,
         "is_active": user.is_active,
-        "created_at_utc": user.created_at_utc.isoformat()
-        if user.created_at_utc
-        else None,
-        "updated_at_utc": user.updated_at_utc.isoformat()
-        if user.updated_at_utc
-        else None,
+        "created_at_utc": user.created_at_utc.isoformat() if user.created_at_utc else None,
+        "updated_at_utc": user.updated_at_utc.isoformat() if user.updated_at_utc else None,
     }
     if groups is not None:
         data["groups"] = sorted(groups)
@@ -443,9 +423,7 @@ def serialize_user(
     return data
 
 
-async def build_user_profile(
-    session: AsyncSession, user: IdentityUserModel
-) -> dict[str, object]:
+async def build_user_profile(session: AsyncSession, user: IdentityUserModel) -> dict[str, object]:
     """Return a normalized user profile used by /me and admin endpoints."""
     groups = await _user_groups(session, user.user_id)
     permissions = await _permissions_for_groups(session, groups)
@@ -495,6 +473,7 @@ async def _issue_user_access_token(
         "iss": settings.auth_issuer,
         "aud": settings.auth_audience,
         "iat": ts,
+        "nbf": ts,
         "exp": ts + settings.access_token_ttl_seconds,
         "jti": uuid4().hex,
     }
@@ -502,7 +481,7 @@ async def _issue_user_access_token(
         issue_token,
         payload,
         _signing_auth_settings(private_key_pem, signing_key.public_key_pem),
-        headers={"kid": signing_key.kid},
+        headers={"kid": signing_key.kid, "typ": "JWT"},
     )
 
 
@@ -521,6 +500,7 @@ async def _issue_service_access_token(
         "iss": settings.auth_issuer,
         "aud": audience or settings.auth_audience,
         "iat": ts,
+        "nbf": ts,
         "exp": ts + settings.service_token_ttl_seconds,
         "jti": uuid4().hex,
         "typ": "S2S",
@@ -529,7 +509,7 @@ async def _issue_service_access_token(
         issue_token,
         payload,
         _signing_auth_settings(private_key_pem, signing_key.public_key_pem),
-        headers={"kid": signing_key.kid},
+        headers={"kid": signing_key.kid, "typ": "JWT"},
     )
 
 
@@ -561,8 +541,7 @@ async def issue_token_pair(
         user_id=user.user_id,
         token_hash=hash_token(refresh_token),
         family_id=family_id or new_ulid(),
-        expires_at_utc=now_utc()
-        + timedelta(seconds=settings.refresh_token_ttl_seconds),
+        expires_at_utc=now_utc() + timedelta(seconds=settings.refresh_token_ttl_seconds),
         revoked_at_utc=None,
         created_at_utc=now_utc(),
     )
@@ -576,9 +555,7 @@ async def issue_token_pair(
     }
 
 
-async def rotate_refresh_token(
-    session: AsyncSession, raw_refresh_token: str
-) -> dict[str, object]:
+async def rotate_refresh_token(session: AsyncSession, raw_refresh_token: str) -> dict[str, object]:
     """Consume a refresh token and issue a replacement pair.
 
     Stolen token detection: if the presented token is already revoked,
@@ -586,9 +563,7 @@ async def rotate_refresh_token(
     """
     token_hash = hash_token(raw_refresh_token)
     result = await session.execute(
-        select(IdentityRefreshTokenModel).where(
-            IdentityRefreshTokenModel.token_hash == token_hash
-        )
+        select(IdentityRefreshTokenModel).where(IdentityRefreshTokenModel.token_hash == token_hash)
     )
     refresh_row = result.scalar_one_or_none()
 
@@ -637,9 +612,7 @@ async def revoke_refresh_token(session: AsyncSession, raw_refresh_token: str) ->
     """Revoke a refresh token if it exists."""
     token_hash = hash_token(raw_refresh_token)
     result = await session.execute(
-        select(IdentityRefreshTokenModel).where(
-            IdentityRefreshTokenModel.token_hash == token_hash
-        )
+        select(IdentityRefreshTokenModel).where(IdentityRefreshTokenModel.token_hash == token_hash)
     )
     refresh_row = result.scalar_one_or_none()
     if refresh_row is not None and refresh_row.revoked_at_utc is None:
@@ -722,16 +695,13 @@ async def decode_access_token(session: AsyncSession, token: str):
     return claims
 
 
-def _extract_jti(claims) -> str | None:
-    """Extract jti from a claims object regardless of its concrete type."""
-    try:
-        return str(claims.jti) if hasattr(claims, "jti") and claims.jti else None
-    except Exception:
-        pass
-    try:
-        return str(claims["jti"]) if claims.get("jti") else None
-    except Exception:
-        return None
+def _extract_jti(claims: Any) -> str | None:
+    """Extract jti from a claims object robustly."""
+    if hasattr(claims, "jti") and claims.jti:
+        return str(claims.jti)
+    if isinstance(claims, dict):
+        return str(claims.get("jti")) if claims.get("jti") else None
+    return None
 
 
 async def assign_groups(
@@ -739,9 +709,7 @@ async def assign_groups(
 ) -> None:
     """Replace a user's group memberships and emit outbox event."""
     await session.execute(
-        delete(IdentityUserGroupModel).where(
-            IdentityUserGroupModel.user_id == user.user_id
-        )
+        delete(IdentityUserGroupModel).where(IdentityUserGroupModel.user_id == user.user_id)
     )
     for group_name in group_names:
         group = await ensure_group(session, group_name)
@@ -767,9 +735,7 @@ async def assign_groups(
 async def jwks_document(session: AsyncSession) -> dict[str, object]:
     """Return the published JWKS document (active, non-retired keys only)."""
     result = await session.execute(
-        select(IdentitySigningKeyModel).where(
-            IdentitySigningKeyModel.retired_at_utc.is_(None)
-        )
+        select(IdentitySigningKeyModel).where(IdentitySigningKeyModel.retired_at_utc.is_(None))
     )
     keys = [
         public_key_to_jwk(row.public_key_pem, row.kid, row.algorithm)

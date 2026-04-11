@@ -41,9 +41,11 @@ class Settings(BaseSettings):
 
     # --- Outbox ---
     outbox_publish_batch_size: int = 100
-    outbox_retry_max: int = 20
+    outbox_retry_max: int = 10
     outbox_worker_enabled: bool = True
     outbox_poll_interval_seconds: int = 5
+    idempotency_ttl_hours: int = 24
+    worker_heartbeat_timeout_seconds: int = 90
 
     # --- Pagination ---
     default_page_size: int = 50
@@ -67,6 +69,8 @@ class Settings(BaseSettings):
     platform_jwt_secret: str | None = None
     kafka_security_protocol: str = "PLAINTEXT"
     allow_plaintext_in_prod: bool = False
+    kafka_acks: str = "all"
+    kafka_enable_idempotence: bool = True
     kafka_sasl_mechanism: str | None = None
     kafka_sasl_username: str | None = None
     kafka_sasl_password: str | None = None

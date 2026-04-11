@@ -47,7 +47,7 @@ testpaths = ["tests"]
 pythonpath = ["src", "../../packages/platform-auth/src"]
 
 [tool.uv.sources]
-platform-auth = { path = "../../packages/platform-auth" }
+platform-auth = { workspace = true }
 
 [tool.mypy]
 python_version = "3.12"

@@ -54,7 +54,7 @@ async def readiness(request: Request) -> JSONResponse:
             checks["broker"] = "unavailable"
             overall = False
 
-    checks["auth_verify"] = auth_verify_status()
+    checks["auth_verify"] = await auth_verify_status()
     overall = overall and checks["auth_verify"] == "ok"
 
     checks["auth_outbound"] = await auth_outbound_status()

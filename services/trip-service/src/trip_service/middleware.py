@@ -250,7 +250,7 @@ class PrometheusMiddleware:
 
         import time
 
-        from trip_service.observability import REQUEST_DURATION, get_standard_labels
+        from trip_service.observability import HTTP_REQUESTS_TOTAL, REQUEST_DURATION, get_standard_labels
 
         start_time = time.perf_counter()
         method = scope["method"]
@@ -272,6 +272,12 @@ class PrometheusMiddleware:
             REQUEST_DURATION.labels(
                 method=method,
                 endpoint=endpoint,
-                status_code=status_code[0],
+                status_code=str(status_code[0]),
                 **labels,
             ).observe(duration)
+            HTTP_REQUESTS_TOTAL.labels(
+                method=method,
+                endpoint=endpoint,
+                status_code=str(status_code[0]),
+                **labels,
+            ).inc()

@@ -5,6 +5,8 @@ import urllib.error
 import urllib.request
 from typing import Any, cast
 
+import anyio
+
 from fastapi import Header
 from platform_auth import (
     AuthContext,
@@ -53,25 +55,33 @@ def _service_token_audience(explicit_audience: str | None = None) -> str:
     return explicit_audience or settings.auth_audience or _DEFAULT_SERVICE_AUDIENCE
 
 
-def _probe_jwks_document(jwks_url: str) -> bool:
-    """Return whether the configured JWKS endpoint serves a usable keys array."""
+def _fetch_jwks_payload_sync(jwks_url: str) -> dict[str, Any] | None:
+    """Synchronously fetch JWKS payload (to be called in worker thread)."""
     request = urllib.request.Request(jwks_url, headers={"Accept": "application/json"})
     try:
         with urllib.request.urlopen(request, timeout=5) as response:  # noqa: S310
             payload = json.loads(response.read().decode("utf-8"))
     except (OSError, ValueError, urllib.error.URLError):
-        return False
+        return None
+    if isinstance(payload, dict):
+        return payload
+    return None
+
+
+async def _probe_jwks_document(jwks_url: str) -> bool:
+    """Return whether the configured JWKS endpoint serves a usable keys array."""
+    payload = await anyio.to_thread.run_sync(_fetch_jwks_payload_sync, jwks_url)
     return isinstance(payload, dict) and isinstance(payload.get("keys"), list) and bool(payload["keys"])
 
 
-def auth_verify_status() -> str:
+async def auth_verify_status() -> str:
     """Return `ok` when inbound auth settings are live and coherent."""
     auth_settings = _platform_auth_settings()
     if auth_settings.algorithm.upper() != "RS256":
         return "fail"
     if not auth_settings.issuer or not auth_settings.audience or not auth_settings.jwks_url:
         return "fail"
-    if not _probe_jwks_document(auth_settings.jwks_url):
+    if not await _probe_jwks_document(auth_settings.jwks_url):
         return "fail"
     try:
         build_verification_provider(auth_settings)
@@ -102,7 +112,7 @@ def _decode_claims(authorization: str | None) -> TokenClaims:
         return decode_bearer_token(authorization, _platform_auth_settings())
     except TokenMissingError as exc:
         raise trip_auth_required() from exc
-    except TokenInvalidError as exc:  # pragma: no cover - exercised through router tests
+    except Exception as exc:  # noqa: BLE001
         detail = str(exc).strip() or "Token invalid"
         raise trip_auth_invalid(detail) from exc
 

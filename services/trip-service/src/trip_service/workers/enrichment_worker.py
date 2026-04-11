@@ -18,21 +18,21 @@ import asyncio
 import logging
 import random
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import DBAPIError
 
+from platform_common import compute_data_quality_flag
 from trip_service.config import settings
 from trip_service.database import async_session_factory
-from trip_service.dependencies import _location_service_headers, _problem_code
+from trip_service.dependencies import fetch_trip_context, resolve_route_by_names
 from trip_service.enums import (
-    DataQualityFlag,
     EnrichmentStatus,
     RouteStatus,
-    SourceType,
 )
-from trip_service.http_clients import get_worker_client
+from trip_service.errors import ProblemDetailError
 from trip_service.models import TripTrip, TripTripEnrichment, TripTripEvidence
 from trip_service.observability import (
     ENRICHMENT_CLAIMED_TOTAL,
@@ -40,6 +40,7 @@ from trip_service.observability import (
     ENRICHMENT_FAILED_TOTAL,
     get_standard_labels,
 )
+from trip_service.trip_helpers import apply_trip_context
 from trip_service.worker_heartbeats import record_worker_heartbeat
 
 logger = logging.getLogger("trip_service.enrichment_worker")
@@ -87,38 +88,6 @@ def _is_schema_not_ready(exc: Exception) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# V8 Section 6.3 — data_quality_flag recomputation
-# ---------------------------------------------------------------------------
-
-
-def _compute_data_quality_flag(
-    source_type: str,
-    ocr_confidence: float | None,
-    route_resolved: bool,
-) -> str:
-    """Compute data_quality_flag per V8 Section 6.3 priority rules.
-
-    Called at enrichment row creation AND when enrichment completes.
-    ocr_confidence is read from trip_trip_evidence.
-    """
-    if source_type in (SourceType.ADMIN_MANUAL, SourceType.EMPTY_RETURN_ADMIN, SourceType.EXCEL_IMPORT):
-        return DataQualityFlag.HIGH
-    # TELEGRAM_TRIP_SLIP truth table (V8 Section 6.3):
-    # ocr>=0.90 AND route_resolved → HIGH
-    # ocr>=0.70                    → MEDIUM (regardless of route)
-    # not route_resolved           → MEDIUM (regardless of confidence)
-    # ocr<0.70 AND route_resolved  → LOW
-    # ocr=None AND route_resolved  → LOW (no confidence signal)
-    if ocr_confidence is not None and ocr_confidence >= 0.90 and route_resolved:
-        return DataQualityFlag.HIGH
-    if ocr_confidence is not None and ocr_confidence >= 0.70:
-        return DataQualityFlag.MEDIUM
-    if not route_resolved:
-        return DataQualityFlag.MEDIUM
-    return DataQualityFlag.LOW
-
-
-# ---------------------------------------------------------------------------
 # V8 Section 13.8 — Final enrichment status derivation
 # ---------------------------------------------------------------------------
 
@@ -141,48 +110,18 @@ def _derive_final_enrichment_status(route_status: str) -> str:
     return EnrichmentStatus.PENDING
 
 
-# ---------------------------------------------------------------------------
-# External Service Clients (injectable, abstract)
-# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class _EnrichmentContext:
+    """Snapshot of enrichment inputs loaded in a short DB session."""
 
-
-async def _resolve_route(origin_name: str, destination_name: str) -> tuple[str | None, str]:
-    """Call Location Service to resolve route.
-
-    V8 Section 7.2: POST /internal/v1/routes/resolve
-    Returns (route_id, status) where status is READY/FAILED.
-    """
-    try:
-        client = await get_worker_client()
-        resp = await client.post(
-            f"{settings.location_service_url}/internal/v1/routes/resolve",
-            json={
-                "origin_name": origin_name,
-                "destination_name": destination_name,
-                "profile_code": "TIR",
-                "language_hint": "AUTO",
-            },
-            headers=await _location_service_headers(),
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            return data.get("route_id"), RouteStatus.READY
-        problem_code = _problem_code(resp)
-        if resp.status_code in {404, 422} and problem_code in {
-            "LOCATION_ROUTE_RESOLUTION_NOT_FOUND",
-            "ROUTE_AMBIGUOUS",
-        }:
-            logger.info(
-                "Route resolution skipped as business-invalid: status=%d code=%s",
-                resp.status_code,
-                problem_code,
-            )
-            return None, RouteStatus.SKIPPED
-        logger.warning("Route resolution failed: status=%d code=%s", resp.status_code, problem_code)
-        return None, RouteStatus.FAILED
-    except Exception as e:
-        logger.error("Route resolution error: %s", e)
-        return None, RouteStatus.FAILED
+    enrichment_id: str
+    trip_id: str
+    source_type: str
+    route_status: str
+    route_already_set: bool
+    ocr_confidence: float | None
+    origin_name_raw: str | None
+    destination_name_raw: str | None
 
 
 # ---------------------------------------------------------------------------
@@ -269,6 +208,184 @@ async def _claim_and_process_batch(worker_id: str, batch_size: int = 10) -> int:
     return processed
 
 
+async def _load_enrichment_context(
+    *,
+    trip_id: str,
+    enrichment_id: str,
+    claim_token: str,
+) -> _EnrichmentContext | None:
+    """Load enrichment inputs in a short-lived DB session before HTTP calls."""
+    async with async_session_factory() as session:
+        stmt = select(TripTripEnrichment).where(
+            TripTripEnrichment.id == enrichment_id,
+            TripTripEnrichment.claim_token == claim_token,
+        )
+        enrichment = (await session.execute(stmt)).scalar_one_or_none()
+        if enrichment is None:
+            logger.warning("Enrichment %s: claim lost (token mismatch), skipping", enrichment_id)
+            return None
+
+        trip = (await session.execute(select(TripTrip).where(TripTrip.id == trip_id))).scalar_one_or_none()
+        if trip is None:
+            logger.warning("Enrichment %s: trip %s not found, skipping", enrichment_id, trip_id)
+            return None
+
+        evidence = (
+            await session.execute(
+                select(TripTripEvidence)
+                .where(TripTripEvidence.trip_id == trip_id)
+                .order_by(TripTripEvidence.created_at_utc.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+        return _EnrichmentContext(
+            enrichment_id=enrichment_id,
+            trip_id=trip_id,
+            source_type=trip.source_type,
+            route_status=enrichment.route_status,
+            route_already_set=trip.route_id is not None,
+            ocr_confidence=evidence.ocr_confidence if evidence else None,
+            origin_name_raw=evidence.origin_name_raw if evidence else None,
+            destination_name_raw=evidence.destination_name_raw if evidence else None,
+        )
+
+
+async def _resolve_route_context(context: _EnrichmentContext) -> tuple[str, object | None]:
+    """Resolve route+pair externally without holding a DB session."""
+    if context.route_status != RouteStatus.PENDING:
+        return context.route_status, None
+
+    if not context.origin_name_raw or not context.destination_name_raw:
+        return RouteStatus.FAILED, None
+
+    try:
+        resolution = await resolve_route_by_names(
+            origin_name=context.origin_name_raw,
+            destination_name=context.destination_name_raw,
+        )
+        trip_context = await fetch_trip_context(resolution.pair_id, field_name="evidence.origin_name_raw")
+        return RouteStatus.READY, trip_context
+    except ProblemDetailError as exc:
+        if exc.status == 422:
+            logger.info("Enrichment %s: route resolution skipped: %s", context.enrichment_id, exc.code)
+            return RouteStatus.SKIPPED, None
+        logger.warning(
+            "Enrichment %s: route resolution failed with problem status=%s code=%s",
+            context.enrichment_id,
+            exc.status,
+            exc.code,
+        )
+        return RouteStatus.FAILED, None
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error("Enrichment %s: route resolution error: %s", context.enrichment_id, exc)
+        return RouteStatus.FAILED, None
+
+
+async def _mark_processing_error(*, trip_id: str, enrichment_id: str, claim_token: str, error_text: str) -> None:
+    """Persist failed enrichment state and release claim after unexpected errors."""
+    async with async_session_factory() as session:
+        enrichment = (
+            await session.execute(
+                select(TripTripEnrichment).where(
+                    TripTripEnrichment.id == enrichment_id,
+                    TripTripEnrichment.claim_token == claim_token,
+                )
+            )
+        ).scalar_one_or_none()
+        if enrichment is None:
+            return
+
+        now = _now_utc()
+        enrichment.enrichment_status = EnrichmentStatus.FAILED
+        enrichment.claim_token = None
+        enrichment.claim_expires_at_utc = None
+        enrichment.claimed_by_worker = None
+        enrichment.last_enrichment_error_code = error_text[:100]
+        enrichment.updated_at_utc = now
+
+        labels = get_standard_labels()
+        if enrichment.enrichment_attempt_count < settings.enrichment_max_attempts:
+            enrichment.next_retry_at_utc = _enrichment_next_retry_at(enrichment.enrichment_attempt_count)
+        else:
+            enrichment.next_retry_at_utc = None
+            ENRICHMENT_FAILED_TOTAL.labels(**labels).inc()
+        enrichment.enrichment_attempt_count += 1
+        await session.commit()
+
+
+async def _save_enrichment_result(
+    *,
+    context: _EnrichmentContext,
+    claim_token: str,
+    route_status: str,
+    trip_context: object | None,
+) -> None:
+    """Persist route/enrichment result in a short DB session."""
+    async with async_session_factory() as session:
+        enrichment = (
+            await session.execute(
+                select(TripTripEnrichment).where(
+                    TripTripEnrichment.id == context.enrichment_id,
+                    TripTripEnrichment.claim_token == claim_token,
+                )
+            )
+        ).scalar_one_or_none()
+        if enrichment is None:
+            logger.warning("Enrichment %s: claim lost before save, skipping", context.enrichment_id)
+            return
+
+        trip = (await session.execute(select(TripTrip).where(TripTrip.id == context.trip_id))).scalar_one_or_none()
+        if trip is None:
+            logger.warning("Enrichment %s: trip %s not found during save", context.enrichment_id, context.trip_id)
+            return
+
+        route_resolved = False
+        if route_status == RouteStatus.READY:
+            if trip_context is not None:
+                apply_trip_context(trip, trip_context, reverse=False)
+            route_resolved = trip.route_id is not None or context.route_already_set
+        elif context.route_status == RouteStatus.READY and context.route_already_set:
+            route_resolved = True
+
+        now = _now_utc()
+        enrichment.route_status = route_status
+        enrichment.enrichment_status = _derive_final_enrichment_status(route_status)
+        enrichment.data_quality_flag = compute_data_quality_flag(
+            context.source_type,
+            context.ocr_confidence,
+            route_resolved=route_resolved,
+        )
+        enrichment.claim_token = None
+        enrichment.claim_expires_at_utc = None
+        enrichment.claimed_by_worker = None
+        enrichment.last_enrichment_error_code = None
+        enrichment.updated_at_utc = now
+
+        labels = get_standard_labels()
+        if enrichment.enrichment_status in (EnrichmentStatus.PENDING, EnrichmentStatus.FAILED):
+            if enrichment.enrichment_attempt_count < settings.enrichment_max_attempts:
+                enrichment.next_retry_at_utc = _enrichment_next_retry_at(enrichment.enrichment_attempt_count)
+            else:
+                enrichment.enrichment_status = EnrichmentStatus.FAILED
+                enrichment.next_retry_at_utc = None
+                ENRICHMENT_FAILED_TOTAL.labels(**labels).inc()
+        else:
+            enrichment.next_retry_at_utc = None
+        enrichment.enrichment_attempt_count += 1
+
+        await session.commit()
+        ENRICHMENT_COMPLETED_TOTAL.labels(result=enrichment.enrichment_status, **labels).inc()
+
+        logger.info(
+            "Enrichment %s: completed — route=%s enrichment=%s quality=%s",
+            context.enrichment_id,
+            enrichment.route_status,
+            enrichment.enrichment_status,
+            enrichment.data_quality_flag,
+        )
+
+
 async def _process_single_enrichment(
     trip_id: str,
     enrichment_id: str,
@@ -283,123 +400,26 @@ async def _process_single_enrichment(
 
     token = correlation_id.set(trip_id)
     try:
-        async with async_session_factory() as session:
-            # Reload enrichment row with trip
-            stmt = select(TripTripEnrichment).where(
-                TripTripEnrichment.id == enrichment_id,
-                TripTripEnrichment.claim_token == claim_token,
-            )
-            result = await session.execute(stmt)
-            enrichment = result.scalar_one_or_none()
+        _ = worker_id
+        context = await _load_enrichment_context(trip_id=trip_id, enrichment_id=enrichment_id, claim_token=claim_token)
+        if context is None:
+            return
 
-            if enrichment is None:
-                logger.warning("Enrichment %s: claim lost (token mismatch), skipping", enrichment_id)
-                return
-
-            # Load trip for context
-            trip_result = await session.execute(select(TripTrip).where(TripTrip.id == trip_id))
-            trip = trip_result.scalar_one_or_none()
-            if trip is None:
-                logger.warning("Enrichment %s: trip %s not found, skipping", enrichment_id, trip_id)
-                return
-
-            # Load evidence for ocr_confidence (for data_quality_flag recomputation)
-            ev_result = await session.execute(
-                select(TripTripEvidence)
-                .where(TripTripEvidence.trip_id == trip_id)
-                .order_by(TripTripEvidence.created_at_utc.desc())
-                .limit(1)
-            )
-            evidence = ev_result.scalar_one_or_none()
-            ocr_confidence = evidence.ocr_confidence if evidence else None
-
-            now = _now_utc()
-            route_resolved = False
-
-            try:
-                # --- Route resolution ---
-                if enrichment.route_status == RouteStatus.PENDING:
-                    if evidence and evidence.origin_name_raw and evidence.destination_name_raw:
-                        route_id, route_status = await _resolve_route(
-                            evidence.origin_name_raw,
-                            evidence.destination_name_raw,
-                        )
-                        enrichment.route_status = route_status
-                        if route_id:
-                            trip.route_id = route_id
-                            route_resolved = True
-                    else:
-                        # No evidence for route resolution
-                        enrichment.route_status = RouteStatus.FAILED
-                elif enrichment.route_status == RouteStatus.READY:
-                    route_resolved = True
-
-                # --- Derive final enrichment status (V8 Section 13.8) ---
-                enrichment.enrichment_status = _derive_final_enrichment_status(enrichment.route_status)
-
-                # --- Recompute data_quality_flag (V8 Section 6.3) ---
-                enrichment.data_quality_flag = _compute_data_quality_flag(
-                    trip.source_type,
-                    ocr_confidence,
-                    route_resolved=route_resolved,
-                )
-
-                # --- Step 5: Clear claim fields on finish ---
-                enrichment.claim_token = None
-                enrichment.claim_expires_at_utc = None
-                enrichment.claimed_by_worker = None
-                enrichment.last_enrichment_error_code = None
-                enrichment.updated_at_utc = now
-
-                labels = get_standard_labels()
-
-                # If still need retries (PENDING or FAILED with attempts left)
-                # BUG-07 fix: compute retry time BEFORE incrementing attempt_count so
-                # attempt 0 → index 0 → 60s (V8 Section 13.7: first retry = 1 minute).
-                if enrichment.enrichment_status in (EnrichmentStatus.PENDING, EnrichmentStatus.FAILED):
-                    if enrichment.enrichment_attempt_count < settings.enrichment_max_attempts:
-                        enrichment.next_retry_at_utc = _enrichment_next_retry_at(enrichment.enrichment_attempt_count)
-                    else:
-                        # Max attempts reached → FAILED
-                        enrichment.enrichment_status = EnrichmentStatus.FAILED
-                        enrichment.next_retry_at_utc = None
-                        ENRICHMENT_FAILED_TOTAL.labels(**labels).inc()
-                else:
-                    enrichment.next_retry_at_utc = None
-                enrichment.enrichment_attempt_count += 1
-
-                await session.commit()
-                ENRICHMENT_COMPLETED_TOTAL.labels(result=enrichment.enrichment_status, **labels).inc()
-
-                logger.info(
-                    "Enrichment %s: completed — route=%s enrichment=%s quality=%s",
-                    enrichment_id,
-                    enrichment.route_status,
-                    enrichment.enrichment_status,
-                    enrichment.data_quality_flag,
-                )
-
-            except Exception as e:
-                logger.error("Enrichment %s: processing error: %s", enrichment_id, e)
-                # On error: clear claim, mark FAILED, schedule retry
-                enrichment.enrichment_status = EnrichmentStatus.FAILED
-                enrichment.claim_token = None
-                enrichment.claim_expires_at_utc = None
-                enrichment.claimed_by_worker = None
-                enrichment.last_enrichment_error_code = str(e)[:100]
-                enrichment.updated_at_utc = now
-
-                labels = get_standard_labels()
-
-                # BUG-07 fix: compute retry using current count (before increment)
-                if enrichment.enrichment_attempt_count < settings.enrichment_max_attempts:
-                    enrichment.next_retry_at_utc = _enrichment_next_retry_at(enrichment.enrichment_attempt_count)
-                else:
-                    enrichment.next_retry_at_utc = None
-                    ENRICHMENT_FAILED_TOTAL.labels(**labels).inc()
-                enrichment.enrichment_attempt_count += 1
-
-                await session.commit()
+        route_status, trip_context = await _resolve_route_context(context)
+        await _save_enrichment_result(
+            context=context,
+            claim_token=claim_token,
+            route_status=route_status,
+            trip_context=trip_context,
+        )
+    except Exception as exc:
+        logger.error("Enrichment %s: processing error: %s", enrichment_id, exc)
+        await _mark_processing_error(
+            trip_id=trip_id,
+            enrichment_id=enrichment_id,
+            claim_token=claim_token,
+            error_text=str(exc),
+        )
     finally:
         correlation_id.reset(token)
 

@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     enrichment_claim_ttl_seconds: int = 300
     enrichment_max_attempts: int = 5
     enrichment_poll_interval_seconds: int = 10
-    worker_heartbeat_timeout_seconds: int = 30
+    worker_heartbeat_timeout_seconds: int = 90
 
     outbox_relay_poll_interval_seconds: int = 5
     outbox_relay_claim_ttl_seconds: int = 60
