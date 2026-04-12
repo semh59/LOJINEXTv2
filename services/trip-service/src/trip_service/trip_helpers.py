@@ -15,9 +15,6 @@ from sqlalchemy.dialects.postgresql import INTERVAL
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DBAPIError, IntegrityError, NoResultFound, OperationalError
 
-if TYPE_CHECKING:
-    from trip_service.auth import AuthContext
-    from trip_service.schemas import EditTripRequest
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from ulid import ULID
@@ -603,8 +600,12 @@ def get_actor_id_and_role(claims: TokenClaims) -> tuple[str, str]:
     return str(claims.sub), str(claims.role)
 
 
-async def _get_trip_or_404(session: AsyncSession, trip_id: str) -> TripTrip:
-    """Fetch a trip by ID or raise a 404 NOT FOUND error."""
+async def _get_trip_or_404(session: AsyncSession, trip_id: str, *, for_update: bool = False) -> TripTrip:
+    """Fetch a trip by ID or raise a 404 NOT FOUND error.
+
+    If for_update=True, acquires a row-level lock (SELECT FOR UPDATE) to prevent
+    lost updates during high-concurrency mutations.
+    """
     stmt = (
         select(TripTrip)
         .where(TripTrip.id == trip_id)
@@ -615,6 +616,9 @@ async def _get_trip_or_404(session: AsyncSession, trip_id: str) -> TripTrip:
             selectinload(TripTrip.empty_return_children),
         )
     )
+    if for_update:
+        stmt = stmt.with_for_update()
+
     trip = (await session.execute(stmt)).unique().scalar_one_or_none()
     if trip is None:
         raise trip_not_found(f"Trip {trip_id} not found.")

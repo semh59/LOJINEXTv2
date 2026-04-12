@@ -6,9 +6,7 @@ from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
-DEFAULT_DATABASE_URL = (
-    "postgresql+asyncpg://postgres:postgres@localhost:5432/identity_service"
-)
+DEFAULT_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/identity_service"
 
 
 class Settings(BaseSettings):
@@ -35,6 +33,10 @@ class Settings(BaseSettings):
     kafka_client_id: str = "identity-service"
     kafka_acks: str = "all"
     kafka_enable_idempotence: bool = True
+    kafka_security_protocol: str | None = None
+    kafka_sasl_mechanism: str | None = None
+    kafka_sasl_username: str | None = None
+    kafka_sasl_password: str | None = None
 
     redis_url: str = "redis://localhost:6379/0"
     rate_limit_login_per_minute: int = 10
@@ -46,24 +48,19 @@ class Settings(BaseSettings):
     bootstrap_superadmin_username: str = "superadmin"
     bootstrap_superadmin_email: str = "superadmin@example.com"
     bootstrap_superadmin_password: str = "change-me-now"
-    bootstrap_service_clients: str = Field(
-        default="", validation_alias="IDENTITY_SERVICE_CLIENTS"
-    )
+    bootstrap_service_clients: str = Field(default="", validation_alias="IDENTITY_SERVICE_CLIENTS")
     bootstrap_service_clients_json: str = ""
     key_encryption_key_b64: str = ""
     key_encryption_key_version: str = ""
     auth_strict_audience_check: bool = False
+    otel_exporter_otlp_endpoint: str = "http://localhost:4317"
 
     model_config = {"env_prefix": "IDENTITY_", "env_file": ".env", "extra": "ignore"}
 
     @property
     def bootstrap_service_names(self) -> list[str]:
         """Return the configured bootstrap service client names."""
-        return [
-            item.strip()
-            for item in self.bootstrap_service_clients.split(",")
-            if item.strip()
-        ]
+        return [item.strip() for item in self.bootstrap_service_clients.split(",") if item.strip()]
 
     @staticmethod
     def service_client_secret_env_name(service_name: str) -> str:
@@ -111,9 +108,7 @@ def validate_prod_settings(current: Settings) -> None:
     if current.resolved_broker_backend != "kafka":
         errors.append("IDENTITY_BROKER_BACKEND must resolve to kafka in prod.")
     if not current.database_url or current.database_url == DEFAULT_DATABASE_URL:
-        errors.append(
-            "IDENTITY_DATABASE_URL must be set to a non-default value in prod."
-        )
+        errors.append("IDENTITY_DATABASE_URL must be set to a non-default value in prod.")
     if current.kafka_bootstrap_servers == "localhost:9092":
         errors.append(
             "IDENTITY_KAFKA_BOOTSTRAP_SERVERS must be set to a non-default value in prod."
@@ -123,9 +118,7 @@ def validate_prod_settings(current: Settings) -> None:
     if not current.auth_audience:
         errors.append("IDENTITY_AUTH_AUDIENCE must be set in prod.")
     if current.bootstrap_superadmin_password == "change-me-now":
-        errors.append(
-            "IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD must be overridden in prod."
-        )
+        errors.append("IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD must be overridden in prod.")
     if not current.key_encryption_key_b64:
         errors.append("IDENTITY_KEY_ENCRYPTION_KEY_B64 must be set in prod.")
     if not current.key_encryption_key_version:
@@ -135,9 +128,7 @@ def validate_prod_settings(current: Settings) -> None:
     if current.redis_url == "redis://localhost:6379/0":
         errors.append("IDENTITY_REDIS_URL must be set to a non-default value in prod.")
     if not current.bootstrap_service_names:
-        errors.append(
-            "IDENTITY_SERVICE_CLIENTS must list bootstrap service clients in prod."
-        )
+        errors.append("IDENTITY_SERVICE_CLIENTS must list bootstrap service clients in prod.")
     for service_name in current.bootstrap_service_names:
         if not current.service_client_secret(service_name):
             errors.append(

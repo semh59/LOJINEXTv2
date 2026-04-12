@@ -6,23 +6,40 @@ import asyncio
 import logging
 import signal
 
+from location_service.broker import create_broker
+from location_service.config import settings, validate_prod_settings
 from location_service.observability import setup_logging
-from location_service.outbox_relay import run_outbox_relay
+from location_service.workers.outbox_relay import run_outbox_relay
+from platform_common import setup_tracing, shutdown_tracing
 
 logger = logging.getLogger("location_service.entrypoints.outbox_worker")
 
 
 async def _run_worker(shutdown_event: asyncio.Event) -> None:
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, shutdown_event.set)
+    broker = create_broker()
+    try:
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, shutdown_event.set)
 
-    await run_outbox_relay(shutdown_event=shutdown_event)
+        await run_outbox_relay(broker, shutdown_event=shutdown_event)
+    finally:
+        await broker.close()
+        shutdown_tracing()
 
 
 def main() -> None:
     """Run the dedicated outbox relay loop with graceful shutdown support."""
     setup_logging()
+    validate_prod_settings(settings)
+
+    setup_tracing(
+        service_name="location-service-worker",
+        service_version="0.1.0",
+        environment=settings.environment,
+        otlp_endpoint=settings.otel_exporter_otlp_endpoint,
+    )
+
     logger.info("Starting Location Outbox Worker")
 
     shutdown_event = asyncio.Event()

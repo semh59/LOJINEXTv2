@@ -1,4 +1,4 @@
-# ── Stage 1: Build ──────────────────────────────────────────────
+# BUILDER STAGE
 FROM python:3.12-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -6,36 +6,40 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /build
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libc-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY packages/platform-auth /build/packages/platform-auth
 COPY packages/platform-common /build/packages/platform-common
-COPY services/trip-service/pyproject.toml ./pyproject.toml
-COPY services/trip-service/src ./src
+COPY services/trip-service/ /build/services/trip-service/
 
-RUN python -m pip install --upgrade pip \
-    && python -m pip install --no-cache-dir /build/packages/platform-auth \
-    && python -m pip install --no-cache-dir /build/packages/platform-common \
-    && python -m pip install --no-cache-dir . \
-    && python -m pip list --format=freeze > /build/requirements.txt
+RUN pip install uv
+RUN uv pip install --no-cache --prefix=/install /build/packages/platform-auth \
+    /build/packages/platform-common \
+    /build/services/trip-service
 
-# ── Stage 2: Production (distroless) ────────────────────────────
-FROM python:3.12-slim AS production
+# RUNTIME STAGE
+FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PATH="/install/bin:${PATH}" \
+    PYTHONPATH="/install/lib/python3.12/site-packages:${PYTHONPATH}"
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends tzdata ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tzdata \
+    ca-certificates \
+    tini \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 RUN useradd --create-home --shell /usr/sbin/nologin appuser
-
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=builder /install /install
 COPY services/trip-service/alembic.ini ./alembic.ini
 COPY services/trip-service/alembic ./alembic
-COPY services/trip-service/src ./src
 
 USER appuser
 
@@ -44,4 +48,5 @@ EXPOSE 8101
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8101/health', timeout=3)" || exit 1
 
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["trip-api"]

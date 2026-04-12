@@ -30,9 +30,21 @@ logger = logging.getLogger("driver_service")
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: startup and shutdown hooks."""
     from driver_service.observability import setup_logging
+    from driver_service.redis_client import setup_redis
+    from platform_common import setup_tracing, instrument_app, shutdown_tracing
 
     setup_logging(logging.INFO)
     validate_prod_settings(settings)
+
+    # Initialise Core Platform Components
+    setup_tracing(
+        service_name="driver-service",
+        service_version="0.1.0",
+        environment=settings.environment,
+        otlp_endpoint=settings.otel_exporter_otlp_endpoint,
+    )
+    instrument_app(app)
+    await setup_redis()
 
     broker = create_broker(settings.resolved_broker_type)
     app.state.broker = broker
@@ -47,6 +59,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     await broker.close()
+    from driver_service.redis_client import close_redis
+
+    await close_redis()
+    shutdown_tracing()
     await close_http_client()
     await engine.dispose()
     logger.info("Shutdown complete")

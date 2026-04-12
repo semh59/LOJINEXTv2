@@ -10,8 +10,8 @@ x-deploy-common: &deploy-common
   logging:
     driver: "json-file"
     options:
-      max-size: "10m"
-      max-file: "3"
+      max-size: "50m"
+      max-file: "5"
 
 x-identity-common: &identity-common
   <<: *deploy-common
@@ -28,11 +28,15 @@ x-identity-common: &identity-common
     IDENTITY_AUTH_ISSUER: ${AUTH_ISSUER:-lojinext-platform}
     IDENTITY_AUTH_AUDIENCE: ${AUTH_AUDIENCE:-lojinext-platform}
     IDENTITY_AUTH_STRICT_AUDIENCE_CHECK: ${IDENTITY_AUTH_STRICT_AUDIENCE_CHECK:-true}
+    IDENTITY_ALLOW_PLAINTEXT_IN_PROD: ${IDENTITY_ALLOW_PLAINTEXT_IN_PROD:-true}
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://prometheus:9090
     IDENTITY_KEY_ENCRYPTION_KEY_B64: ${IDENTITY_KEY_ENCRYPTION_KEY_B64:?IDENTITY_KEY_ENCRYPTION_KEY_B64 is required}
     IDENTITY_KEY_ENCRYPTION_KEY_VERSION: ${IDENTITY_KEY_ENCRYPTION_KEY_VERSION:?IDENTITY_KEY_ENCRYPTION_KEY_VERSION is required}
     IDENTITY_BOOTSTRAP_SUPERADMIN_USERNAME: ${IDENTITY_BOOTSTRAP_SUPERADMIN_USERNAME:-superadmin}
     IDENTITY_BOOTSTRAP_SUPERADMIN_EMAIL: ${IDENTITY_BOOTSTRAP_SUPERADMIN_EMAIL:-superadmin@example.com}
     IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD: ${IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD:?IDENTITY_BOOTSTRAP_SUPERADMIN_PASSWORD is required}
+    LOG_FORMAT: JSON
+    SERVICE_NAME: identity-service
     IDENTITY_SERVICE_CLIENTS: trip-service,location-service,driver-service,fleet-service,telegram-service
     IDENTITY_SERVICE_CLIENT_SECRET__TRIP_SERVICE: ${TRIP_SERVICE_CLIENT_SECRET:?TRIP_SERVICE_CLIENT_SECRET is required}
     IDENTITY_SERVICE_CLIENT_SECRET__LOCATION_SERVICE: ${LOCATION_SERVICE_CLIENT_SECRET:?LOCATION_SERVICE_CLIENT_SECRET is required}
@@ -59,6 +63,7 @@ x-trip-common: &trip-common
   environment:
     TRIP_ENVIRONMENT: prod
     TRIP_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-lojinext}:${POSTGRES_PASSWORD}@postgres:5432/${TRIP_DB_NAME:-trip_service}
+    TRIP_REDIS_URL: redis://redis:6379/0
     TRIP_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
     TRIP_LOCATION_SERVICE_URL: http://location-api:8103
     TRIP_FLEET_SERVICE_URL: http://fleet-api:8102
@@ -69,7 +74,10 @@ x-trip-common: &trip-common
     TRIP_AUTH_SERVICE_TOKEN_URL: http://identity-api:8105/auth/v1/token/service
     TRIP_AUTH_SERVICE_CLIENT_ID: trip-service
     TRIP_AUTH_SERVICE_CLIENT_SECRET: ${TRIP_SERVICE_CLIENT_SECRET:?TRIP_SERVICE_CLIENT_SECRET is required}
-    TRIP_ALLOW_PLAINTEXT_IN_PROD: ${TRIP_ALLOW_PLAINTEXT_IN_PROD:-false}
+    TRIP_ALLOW_PLAINTEXT_IN_PROD: "true"
+    TRIP_OTEL_EXPORTER_OTLP_ENDPOINT: http://prometheus:9090
+    LOG_FORMAT: JSON
+    SERVICE_NAME: trip-service
     TRIP_CORS_ALLOWED_ORIGINS: '["http://localhost"]'
   depends_on:
     postgres:
@@ -97,6 +105,9 @@ x-location-common: &location-common
     LOCATION_AUTH_JWKS_URL: http://identity-api:8105/.well-known/jwks.json
     LOCATION_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
     LOCATION_IGNORE_PROVIDER_HEALTH: "true"
+    LOCATION_ALLOW_PLAINTEXT_IN_PROD: "true"
+    LOCATION_OTEL_EXPORTER_OTLP_ENDPOINT: http://prometheus:9090
+    SERVICE_NAME: location-service
   depends_on:
     postgres:
       condition: service_healthy
@@ -126,6 +137,7 @@ x-telegram-common: &telegram-common
     TELEGRAM_AUTH_SERVICE_TOKEN_URL: http://identity-api:8105/auth/v1/token/service
     TELEGRAM_AUTH_SERVICE_CLIENT_ID: telegram-service
     TELEGRAM_AUTH_SERVICE_CLIENT_SECRET: ${TELEGRAM_SERVICE_CLIENT_SECRET:?TELEGRAM_SERVICE_CLIENT_SECRET is required}
+    TELEGRAM_ALLOW_PLAINTEXT_IN_PROD: ${TELEGRAM_ALLOW_PLAINTEXT_IN_PROD:-true}
   depends_on:
     trip-api:
       condition: service_healthy
@@ -156,7 +168,10 @@ x-driver-common: &driver-common
     DRIVER_AUTH_SERVICE_TOKEN_URL: http://identity-api:8105/auth/v1/token/service
     DRIVER_AUTH_SERVICE_CLIENT_ID: driver-service
     DRIVER_AUTH_SERVICE_CLIENT_SECRET: ${DRIVER_SERVICE_CLIENT_SECRET:?DRIVER_SERVICE_CLIENT_SECRET is required}
-    DRIVER_ALLOW_PLAINTEXT_IN_PROD: ${DRIVER_ALLOW_PLAINTEXT_IN_PROD:-false}
+    DRIVER_ALLOW_PLAINTEXT_IN_PROD: "true"
+    DRIVER_OTEL_EXPORTER_OTLP_ENDPOINT: http://prometheus:9090
+    LOG_FORMAT: JSON
+    SERVICE_NAME: driver-service
   depends_on:
     postgres:
       condition: service_healthy
@@ -187,8 +202,11 @@ x-fleet-common: &fleet-common
     FLEET_AUTH_JWKS_URL: http://identity-api:8105/.well-known/jwks.json
     FLEET_AUTH_SERVICE_TOKEN_URL: http://identity-api:8105/auth/v1/token/service
     FLEET_AUTH_SERVICE_CLIENT_ID: fleet-service
+    FLEET_ALLOW_PLAINTEXT_IN_PROD: "true"
     FLEET_AUTH_SERVICE_CLIENT_SECRET: ${FLEET_SERVICE_CLIENT_SECRET:?FLEET_SERVICE_CLIENT_SECRET is required}
-    FLEET_ALLOW_PLAINTEXT_IN_PROD: ${FLEET_ALLOW_PLAINTEXT_IN_PROD:-false}
+    FLEET_OTEL_EXPORTER_OTLP_ENDPOINT: http://prometheus:9090
+    LOG_FORMAT: JSON
+    SERVICE_NAME: fleet-service
   depends_on:
     postgres:
       condition: service_healthy
@@ -277,9 +295,9 @@ services:
           "CMD-SHELL",
           'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8105/ready'')"',
         ]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+      interval: 20s
+      timeout: 10s
+      retries: 5
 
   identity-outbox:
     <<: *identity-common
@@ -297,9 +315,9 @@ services:
           "CMD-SHELL",
           'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8101/ready'')"',
         ]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+      interval: 20s
+      timeout: 10s
+      retries: 5
 
   trip-enrichment:
     <<: *trip-common
@@ -329,9 +347,9 @@ services:
           "CMD-SHELL",
           'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8103/ready'')"',
         ]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+      interval: 20s
+      timeout: 10s
+      retries: 5
 
   location-processing:
     <<: *location-common
@@ -356,9 +374,9 @@ services:
           "CMD-SHELL",
           'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8106/ready'')"',
         ]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+      interval: 20s
+      timeout: 10s
+      retries: 5
 
   driver-api:
     <<: *driver-common
@@ -370,9 +388,9 @@ services:
           "CMD-SHELL",
           'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8104/ready'')"',
         ]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+      interval: 20s
+      timeout: 10s
+      retries: 5
 
   driver-worker:
     <<: *driver-common
@@ -390,9 +408,9 @@ services:
           "CMD-SHELL",
           'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8102/ready'')"',
         ]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+      interval: 20s
+      timeout: 10s
+      retries: 5
 
   fleet-worker:
     <<: *fleet-common

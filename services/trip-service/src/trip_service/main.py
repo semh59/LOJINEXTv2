@@ -1,4 +1,6 @@
-"""Trip Service FastAPI application entry point."""
+"""Trip Service FastAPI application entry point — standardized with platform-common."""
+
+from __future__ import annotations
 
 import logging
 from collections.abc import AsyncGenerator
@@ -18,9 +20,14 @@ from trip_service.errors import (
 )
 from trip_service.http_clients import close_http_clients
 from trip_service.middleware import PrometheusMiddleware, RequestIdMiddleware
-from trip_service.observability import setup_logging
+from trip_service.redis_client import close_redis, setup_redis
 from trip_service.routers import driver_statement, health, removed_endpoints, trips
-from trip_service.tracing import instrument_app, setup_tracing, shutdown_tracing
+from platform_common import (
+    instrument_app,
+    setup_logging,
+    setup_tracing,
+    shutdown_tracing,
+)
 
 logger = logging.getLogger("trip_service")
 
@@ -28,20 +35,36 @@ logger = logging.getLogger("trip_service")
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: startup and shutdown hooks."""
-    setup_logging()
-    setup_tracing()
+    setup_logging(logging.INFO)
     validate_prod_settings(settings)
+
+    # Initialise Core Platform Components
+    setup_tracing(
+        service_name="trip-service",
+        service_version="0.1.0",
+        environment=settings.environment,
+        otlp_endpoint=settings.otel_exporter_otlp_endpoint,
+    )
+    instrument_app(app)
+    await setup_redis()
 
     broker = create_broker(settings.resolved_broker_type)
     app.state.broker = broker
-    logger.info("API startup complete; dedicated workers are expected to run separately")
+
+    logger.info(
+        "Trip Service starting on port %s (env=%s, broker=%s)",
+        settings.service_port,
+        settings.environment,
+        settings.resolved_broker_type,
+    )
 
     try:
         yield
     finally:
-        shutdown_tracing()
         await broker.close()
+        await close_redis()
         await close_http_clients()
+        shutdown_tracing()
         await engine.dispose()
         logger.info("Shutdown complete")
 
@@ -53,13 +76,13 @@ def create_app() -> FastAPI:
         version="0.1.0",
         description="Trip lifecycle management microservice",
         lifespan=lifespan,
+        docs_url=None if settings.environment == "prod" else "/docs",
     )
 
-    # Middleware is applied in reverse add order (last added = outermost = first to receive request).
-    # CORSMiddleware must be outermost so it can intercept OPTIONS preflight before the router.
+    # Standard Middleware
     app.add_middleware(PrometheusMiddleware)
     app.add_middleware(RequestIdMiddleware)
-    instrument_app(app)
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_allowed_origins,
@@ -83,6 +106,11 @@ app = create_app()
 
 
 if __name__ == "__main__":
-    from trip_service.entrypoints.api import main
+    import uvicorn
 
-    main()
+    uvicorn.run(
+        "trip_service.main:app",
+        host="0.0.0.0",
+        port=settings.service_port,
+        reload=settings.environment == "dev",
+    )

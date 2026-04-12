@@ -20,6 +20,7 @@ dependencies = [
     "confluent-kafka>=2.5.0",
     "redis[asyncio]>=5.0.0",
     "platform-auth",
+    "platform-common",
 ]
 
 [project.scripts]
@@ -46,8 +47,6 @@ asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
 pythonpath = ["src", "../../packages/platform-auth/src"]
 
-[tool.uv.sources]
-platform-auth = { workspace = true }
 
 [tool.mypy]
 python_version = "3.12"

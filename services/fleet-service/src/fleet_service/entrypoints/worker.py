@@ -57,6 +57,18 @@ async def _idempotency_cleanup_loop(shutdown_event: asyncio.Event | None = None)
 async def worker_main() -> None:
     """Start all background worker loops with graceful shutdown support."""
     setup_logging(logging.INFO)
+
+    from fleet_service.redis_client import setup_redis
+    from platform_common import setup_tracing, shutdown_tracing
+
+    setup_tracing(
+        service_name="fleet-service-worker",
+        service_version="0.1.0",
+        environment=settings.environment,
+        otlp_endpoint=settings.otel_exporter_otlp_endpoint,
+    )
+    await setup_redis()
+
     logger.info("Fleet Service worker starting (env=%s)", settings.environment)
 
     broker = create_broker(settings.resolved_broker_type)
@@ -78,6 +90,10 @@ async def worker_main() -> None:
         logger.exception("Worker process encountered an error")
     finally:
         await broker.close()
+        from fleet_service.redis_client import close_redis
+
+        await close_redis()
+        shutdown_tracing()
         await engine.dispose()
         logger.info("Worker shutdown complete")
 

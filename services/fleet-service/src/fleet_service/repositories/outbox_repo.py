@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import datetime
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
-from ulid import ULID
 
 from fleet_service.config import settings
 from fleet_service.models import FleetOutbox
-from fleet_service.timestamps import to_utc_aware, utc_now_aware
 
 
 def _claim_deadline(now: datetime.datetime) -> datetime.datetime:
@@ -49,132 +47,3 @@ async def dead_letter_by_aggregate(session: AsyncSession, aggregate_type: str, a
     )
     result = await session.execute(stmt)
     return result.rowcount or 0
-
-
-async def claim_batch(
-    session: AsyncSession, batch_size: int = 50, now: datetime.datetime | None = None
-) -> list[FleetOutbox]:
-    """Claim a batch of outbox rows for publishing (FOR UPDATE SKIP LOCKED).
-
-    Only rows with next_attempt_at_utc <= now and status in (PENDING, FAILED),
-    or rows stuck in PUBLISHING where claim_expires_at_utc < now.
-    """
-    if now is None:
-        now = utc_now_aware()
-    else:
-        now = to_utc_aware(now)
-    # -----------------------------------------------------------------------
-    # Head-of-Line (HOL) blocking:
-    # Ensures only the earliest available event for a partition is claimed.
-    # -----------------------------------------------------------------------
-    from sqlalchemy import not_
-    from sqlalchemy.orm import aliased
-
-    o2 = aliased(FleetOutbox)
-    hol_subq = select(1).where(
-        o2.partition_key == FleetOutbox.partition_key,
-        o2.publish_status != "PUBLISHED",
-        o2.created_at_utc < FleetOutbox.created_at_utc,
-    )
-
-    stmt = (
-        select(FleetOutbox)
-        .where(
-            or_(
-                and_(
-                    FleetOutbox.publish_status.in_(["PENDING", "FAILED"]),
-                    FleetOutbox.next_attempt_at_utc <= now,
-                ),
-                and_(
-                    FleetOutbox.publish_status == "PUBLISHING",
-                    FleetOutbox.claim_expires_at_utc.is_not(None),
-                    FleetOutbox.claim_expires_at_utc < now,
-                ),
-            ),
-            not_(hol_subq.exists()),
-        )
-        .order_by(FleetOutbox.created_at_utc)
-        .limit(batch_size)
-        .with_for_update(skip_locked=True)
-    )
-    result = await session.execute(stmt)
-    rows = list(result.scalars().all())
-    if not rows:
-        return rows
-
-    claimed_until = _claim_deadline(now)
-    row_ids = [row.outbox_id for row in rows]
-    claim_token = str(ULID())
-    await session.execute(
-        update(FleetOutbox)
-        .where(FleetOutbox.outbox_id.in_(row_ids))
-        .values(
-            publish_status="PUBLISHING",
-            next_attempt_at_utc=claimed_until,
-            claim_expires_at_utc=claimed_until,
-            claim_token=claim_token,
-            claimed_by_worker=settings.service_name,
-        )
-    )
-    return rows
-
-
-async def mark_published(session: AsyncSession, outbox_id: str, now: datetime.datetime | None = None) -> None:
-    """Mark an outbox row as PUBLISHED."""
-    if now is None:
-        now = utc_now_aware()
-    else:
-        now = to_utc_aware(now)
-    stmt = (
-        update(FleetOutbox)
-        .where(FleetOutbox.outbox_id == outbox_id)
-        .values(
-            publish_status="PUBLISHED",
-            published_at_utc=now,
-            claim_expires_at_utc=None,
-            claim_token=None,
-            claimed_by_worker=None,
-        )
-    )
-    await session.execute(stmt)
-
-
-async def mark_failed(
-    session: AsyncSession,
-    outbox_id: str,
-    error_code: str,
-    error_message: str,
-    next_attempt_at: datetime.datetime,
-) -> None:
-    """Mark an outbox row as FAILED with error details and next retry time."""
-    normalized_next_attempt_at = to_utc_aware(next_attempt_at)
-    stmt = (
-        update(FleetOutbox)
-        .where(FleetOutbox.outbox_id == outbox_id)
-        .values(
-            publish_status="FAILED",
-            attempt_count=FleetOutbox.attempt_count + 1,
-            last_error_code=error_code,
-            last_error_message=error_message,
-            next_attempt_at_utc=normalized_next_attempt_at,
-            claim_expires_at_utc=None,
-            claim_token=None,
-            claimed_by_worker=None,
-        )
-    )
-    await session.execute(stmt)
-
-
-async def mark_dead_letter(session: AsyncSession, outbox_id: str) -> None:
-    """Move an outbox row to DEAD_LETTER status."""
-    stmt = (
-        update(FleetOutbox)
-        .where(FleetOutbox.outbox_id == outbox_id)
-        .values(
-            publish_status="DEAD_LETTER",
-            claim_expires_at_utc=None,
-            claim_token=None,
-            claimed_by_worker=None,
-        )
-    )
-    await session.execute(stmt)

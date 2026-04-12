@@ -49,8 +49,8 @@ spec:
             periodSeconds: 30
           resources:
             requests:
-              cpu: 100m
-              memory: 128Mi
+              cpu: 500m
+              memory: 512Mi
             limits:
               cpu: 500m
               memory: 512Mi
@@ -93,8 +93,8 @@ spec:
                 name: identity-service-secrets
           resources:
             requests:
-              cpu: 50m
-              memory: 64Mi
+              cpu: 200m
+              memory: 256Mi
             limits:
               cpu: 200m
               memory: 256Mi

@@ -53,6 +53,3 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W"]
-
-[tool.uv.sources]
-platform-auth = { workspace = true }

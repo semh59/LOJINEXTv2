@@ -62,7 +62,3 @@ select = ["E", "F", "I", "N", "W"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-
-[tool.uv.sources]
-platform-auth = { workspace = true }
-platform-common = { workspace = true }

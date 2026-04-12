@@ -1,31 +1,36 @@
-"""Redis connection management for Identity Service."""
+"""Pooled Redis client for Identity Service — standardized to platform-common."""
 
 from __future__ import annotations
 
-import redis.asyncio as aioredis
-
 from identity_service.config import settings
+from platform_common import (
+    RedisConfig,
+    init_redis,
+    get_redis as _platform_get_redis,
+    close_redis as _platform_close_redis,
+)
 
-_redis: aioredis.Redis | None = None
+
+async def setup_redis() -> None:
+    """Initialise the pooled Redis connection."""
+    config = RedisConfig(
+        url=settings.redis_url,
+    )
+    await init_redis(config)
 
 
-async def get_redis() -> aioredis.Redis:
-    """Return the shared Redis client, initialising it on first call."""
-    global _redis
-    if _redis is None:
-        _redis = aioredis.from_url(settings.redis_url, decode_responses=True)
-    return _redis
+async def get_redis():
+    """Compatibility wrapper for identity-service to get Redis client."""
+    return await _platform_get_redis()
 
 
 async def close_redis() -> None:
-    """Close the Redis connection on application shutdown."""
-    global _redis
-    if _redis is not None:
-        await _redis.aclose()
-        _redis = None
+    """Compatibility wrapper for identity-service to close Redis."""
+    await _platform_close_redis()
 
 
-def override_redis(client: aioredis.Redis) -> None:
-    """Replace the Redis client — used in tests to inject fakeredis."""
-    global _redis
-    _redis = client
+def override_redis(client) -> None:
+    """Compatibility wrapper for tests to override Redis."""
+    from platform_common import override_redis as _platform_override_redis
+
+    _platform_override_redis(client)

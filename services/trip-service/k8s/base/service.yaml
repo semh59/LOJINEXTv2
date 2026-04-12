@@ -4,6 +4,10 @@ metadata:
   name: trip-service
   labels:
     app: trip-service
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8101"
+    prometheus.io/path: "/metrics"
 spec:
   selector:
     app: trip-service

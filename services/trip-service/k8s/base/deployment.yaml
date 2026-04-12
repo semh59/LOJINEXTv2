@@ -19,6 +19,7 @@ spec:
         runAsNonRoot: true
         runAsUser: 1000
         fsGroup: 2000
+      terminationGracePeriodSeconds: 60
       containers:
         - name: api
           image: lojinext/trip-service:latest
@@ -49,8 +50,8 @@ spec:
             periodSeconds: 30
           resources:
             requests:
-              cpu: 100m
-              memory: 128Mi
+              cpu: 500m
+              memory: 512Mi
             limits:
               cpu: 500m
               memory: 512Mi

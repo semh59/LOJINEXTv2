@@ -24,9 +24,21 @@ logger = logging.getLogger("fleet_service")
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: startup and shutdown hooks."""
     from fleet_service.observability import setup_logging
+    from fleet_service.redis_client import setup_redis
+    from platform_common import setup_tracing, instrument_app, shutdown_tracing
 
     setup_logging(logging.INFO)
     validate_prod_settings(settings)
+
+    # Initialise Core Platform Components
+    setup_tracing(
+        service_name="fleet-service",
+        service_version="0.1.0",
+        environment=settings.environment,
+        otlp_endpoint=settings.otel_exporter_otlp_endpoint,
+    )
+    instrument_app(app)
+    await setup_redis()
 
     logger.info(
         "Fleet Service starting on port %s (env=%s, broker=%s)",
@@ -41,10 +53,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         yield
     finally:
         from fleet_service.clients import driver_client, trip_client
+        from fleet_service.redis_client import close_redis
 
         await driver_client.close()
         await trip_client.close()
         await broker.close()
+        await close_redis()
+        shutdown_tracing()
         await engine.dispose()
         logger.info("Shutdown complete")
 

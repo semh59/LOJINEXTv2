@@ -237,7 +237,7 @@ class TripService:
 
     async def cancel_trip(self, trip_id: str, if_match: str | None = None) -> tuple[dict[str, Any], dict[str, str]]:
         """Soft-delete a trip."""
-        trip = await _get_trip_or_404(self.session, trip_id)
+        trip = await _get_trip_or_404(self.session, trip_id, for_update=True)
         if not if_match:
             raise trip_if_match_required()
         parsed_version = parse_etag_version(if_match)
@@ -284,7 +284,7 @@ class TripService:
         self, trip_id: str, body: ApproveRequest, if_match: str | None = None
     ) -> tuple[dict[str, Any], dict[str, str]]:
         """Approve a pending-review trip."""
-        trip = await _get_trip_or_404(self.session, trip_id)
+        trip = await _get_trip_or_404(self.session, trip_id, for_update=True)
         if not if_match:
             raise trip_if_match_required()
         parsed_version = parse_etag_version(if_match)
@@ -343,7 +343,7 @@ class TripService:
         self, trip_id: str, body: RejectRequest, if_match: str | None = None
     ) -> tuple[dict[str, Any], dict[str, str]]:
         """Reject a pending-review trip."""
-        trip = await _get_trip_or_404(self.session, trip_id)
+        trip = await _get_trip_or_404(self.session, trip_id, for_update=True)
         if not if_match:
             raise trip_if_match_required()
         parsed_version = parse_etag_version(if_match)
@@ -388,7 +388,7 @@ class TripService:
         self, trip_id: str, body: EditTripRequest, if_match: str | None = None
     ) -> tuple[dict[str, Any], dict[str, str]]:
         """Edit trip fields."""
-        trip = await _get_trip_or_404(self.session, trip_id)
+        trip = await _get_trip_or_404(self.session, trip_id, for_update=True)
         if not if_match:
             raise trip_if_match_required()
         parsed_version = parse_etag_version(if_match)

@@ -6,6 +6,9 @@ data:
   ENVIRONMENT: "production"
   LOG_LEVEL: "INFO"
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.observability:4317"
-  OTEL_TRACES_SAMPLER: "parentbased_traceidratio"
+  OTEL_TRACES_SAMPLER: "always_on" # Forensic precision requires 100% sampling in critical paths
+  OTEL_TRACES_SAMPLER_ARG: "1.0"
+  KAFKA_MAX_RETRY_DELAY_SECONDS: "300"
+  OUTBOX_CLAIM_TTL_SECONDS: "60"
   CORS_ALLOWED_ORIGINS: '["https://lojinext.com"]'
   CORS_ENABLED: "true"

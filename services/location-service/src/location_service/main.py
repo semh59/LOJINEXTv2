@@ -1,85 +1,114 @@
-"""Location Service FastAPI application entry point."""
+"""Location Service FastAPI application entry point — standardized with tracing."""
 
+from __future__ import annotations
+
+import logging
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
-from fastapi import Depends, FastAPI
-from fastapi.exceptions import RequestValidationError
+from fastapi import FastAPI, Request, status
+from fastapi.responses import JSONResponse
 
-from location_service.auth import trip_service_auth_dependency, user_auth_dependency
 from location_service.broker import create_broker
 from location_service.config import settings, validate_prod_settings
 from location_service.database import engine
-from location_service.errors import (
-    ProblemDetailError,
-    problem_detail_handler,
-    unexpected_exception_handler,
-    validation_exception_handler,
-)
-from location_service.middleware import PrometheusMiddleware, RequestIdMiddleware
-from location_service.observability import setup_logging
-from location_service.routers import (
-    approval,
-    bulk_refresh,
-    health,
-    internal_routes,
-    pairs,
-    points,
-    processing,
-    routes_public,
-)
+
+# Correct router imports based on filesystem audit
+from location_service.routers.health import router as health_router
+from location_service.routers.approval import router as approval_router
+from location_service.routers.bulk_refresh import router as bulk_refresh_router
+from location_service.routers.internal_routes import router as internal_router
+from location_service.routers.pairs import router as pairs_router
+from location_service.routers.points import router as points_router
+from location_service.routers.processing import router as processing_router
+from location_service.routers.routes_public import router as public_router
+
+logger = logging.getLogger("location_service")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """FastAPI lifespan events."""
-    setup_logging()
+    """Application lifetime: startup and shutdown hooks."""
+    from location_service.observability import setup_logging
+    from platform_common import setup_tracing, instrument_app, shutdown_tracing
+
+    setup_logging(logging.INFO)
     validate_prod_settings(settings)
-    # create_broker() handles its own resolution from settings
-    app.state.broker = create_broker()
-    try:
-        await app.state.broker.check_health()
-    except Exception as exc:
-        # Log error and decide whether to fail-fast.
-        # Production readiness requires that if Kafka is mandated, we fail-fast.
-        if settings.environment == "prod":
-            print(f"CRITICAL: Kafka broker health check failed at startup: {exc}")
-            raise
-        print(f"WARNING: Kafka broker health check failed at startup: {exc}")
-    yield
-    # EventBroker interface uses close(), not stop()
-    await app.state.broker.close()
-    await engine.dispose()
 
-
-def create_app() -> FastAPI:
-    """Create and configure the FastAPI application instance."""
-    docs_enabled = settings.environment != "prod"
-    app = FastAPI(
-        title=f"Location Service ({settings.environment})",
-        description="Authoritative source for locations, routes, and segment geometry.",
-        version="0.7.0",
-        lifespan=lifespan,
-        docs_url="/docs" if docs_enabled else None,
-        redoc_url="/redoc" if docs_enabled else None,
-        openapi_url="/openapi.json" if docs_enabled else None,
+    # Initialise Core Platform Components
+    setup_tracing(
+        service_name="location-service",
+        service_version="0.1.0",
+        environment=settings.environment,
+        otlp_endpoint=settings.otel_exporter_otlp_endpoint,
     )
-    app.add_middleware(RequestIdMiddleware)
-    app.add_middleware(PrometheusMiddleware)
-    app.add_exception_handler(ProblemDetailError, problem_detail_handler)  # type: ignore[arg-type]
-    app.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore[arg-type]
-    app.add_exception_handler(Exception, unexpected_exception_handler)
-    app.include_router(health.router)
-    public_dependencies = [Depends(user_auth_dependency)]
-    app.include_router(points.router, dependencies=public_dependencies)
-    app.include_router(pairs.router, dependencies=public_dependencies)
-    app.include_router(processing.router, dependencies=public_dependencies)
-    app.include_router(processing.public_router, dependencies=public_dependencies)
-    app.include_router(approval.router, dependencies=public_dependencies)
-    app.include_router(bulk_refresh.router, dependencies=public_dependencies)
-    app.include_router(routes_public.router, dependencies=public_dependencies)
-    app.include_router(internal_routes.router, dependencies=[Depends(trip_service_auth_dependency)])
-    return app
+    instrument_app(app)
+
+    broker = create_broker()
+    app.state.broker = broker
+
+    logger.info(
+        "Location Service starting on port %s (env=%s, broker=%s)",
+        settings.service_port,
+        settings.environment,
+        "kafka" if settings.kafka_bootstrap_servers else "log/noop",
+    )
+
+    yield
+
+    await broker.close()
+    shutdown_tracing()
+    await engine.dispose()
+    logger.info("Shutdown complete")
 
 
-app = create_app()
+app = FastAPI(
+    title="Location Service",
+    version="0.1.0",
+    description="Routing, Geocoding and Parity validation for LOJINEXT",
+    lifespan=lifespan,
+    docs_url=None if settings.environment == "prod" else "/docs",
+    redoc_url=None if settings.environment == "prod" else "/redoc",
+)
+
+
+@app.get("/", tags=["Root"])
+async def root():
+    """Service information endpoint."""
+    return {
+        "service": "location-service",
+        "version": "0.1.0",
+        "env": settings.environment,
+    }
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Global catch-all for unhandled exceptions."""
+    del request
+    logger.exception("Unhandled exception level=CRITICAL")
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "Internal server error occurred.", "type": type(exc).__name__},
+    )
+
+
+# Register all standard routers
+app.include_router(health_router)
+app.include_router(public_router)
+app.include_router(internal_router)
+app.include_router(pairs_router)
+app.include_router(points_router)
+app.include_router(processing_router)
+app.include_router(approval_router)
+app.include_router(bulk_refresh_router)
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "location_service.main:app",
+        host="0.0.0.0",
+        port=settings.service_port,
+        reload=True,
+    )

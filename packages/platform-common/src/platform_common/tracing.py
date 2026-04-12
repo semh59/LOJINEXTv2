@@ -1,8 +1,10 @@
-"""OpenTelemetry tracing setup for Trip Service.
+"""OpenTelemetry tracing setup for LOJINEXT services.
 
-Initialises a TracerProvider with an OTLP exporter (gRPC) and
-provides helper functions for manual span creation and attribute
-injection.
+Provides:
+- ``setup_tracing(service_name, ...)`` — configures TracerProvider + OTLP exporter
+- ``instrument_app(app)`` — auto-instruments FastAPI + httpx
+- ``get_tracer()`` — returns the global tracer
+- ``shutdown_tracing()`` — flushes pending spans
 """
 
 from __future__ import annotations
@@ -21,15 +23,20 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 if TYPE_CHECKING:
     from fastapi import FastAPI
 
-from trip_service.config import settings
-
-logger = logging.getLogger("trip_service")
+logger = logging.getLogger("platform_common.tracing")
 
 _tracer: trace.Tracer | None = None
 
 
-def setup_tracing() -> None:
-    """Configure the global TracerProvider and OTLP exporter.
+def setup_tracing(
+    *,
+    service_name: str,
+    service_version: str = "0.0.0",
+    environment: str = "development",
+    otlp_endpoint: str = "http://localhost:4317",
+    insecure: bool = True,
+) -> None:
+    """Configure the global TracerProvider and OTLP/gRPC exporter.
 
     Safe to call in dev/test environments — if the OTLP endpoint is
     unreachable, spans are queued and flushed in the background.
@@ -38,29 +45,23 @@ def setup_tracing() -> None:
 
     resource = Resource.create(
         {
-            "service.name": settings.service_name,
-            "service.version": settings.service_version,
-            "deployment.environment": settings.environment,
+            "service.name": service_name,
+            "service.version": service_version,
+            "deployment.environment": environment,
         }
     )
 
     provider = TracerProvider(resource=resource)
-
-    otlp_exporter = OTLPSpanExporter(
-        endpoint=settings.otel_exporter_otlp_endpoint,
-        insecure=True,
-    )
-    provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
+    exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=insecure)
+    provider.add_span_processor(BatchSpanProcessor(exporter))
 
     trace.set_tracer_provider(provider)
-    _tracer = trace.get_tracer(
-        settings.service_name,
-        settings.service_version,
-    )
+    _tracer = trace.get_tracer(service_name, service_version)
 
     logger.info(
-        "OTEL tracing initialised — endpoint=%s",
-        settings.otel_exporter_otlp_endpoint,
+        "OTEL tracing initialised — service=%s endpoint=%s",
+        service_name,
+        otlp_endpoint,
     )
 
 
@@ -72,9 +73,12 @@ def instrument_app(app: FastAPI) -> None:
 
 
 def get_tracer() -> trace.Tracer:
-    """Return the global tracer. Must call setup_tracing() first."""
+    """Return the global tracer.
+
+    If ``setup_tracing()`` has not been called, returns a no-op tracer.
+    """
     if _tracer is None:
-        return trace.get_tracer(settings.service_name)
+        return trace.get_tracer("platform_common")
     return _tracer
 
 

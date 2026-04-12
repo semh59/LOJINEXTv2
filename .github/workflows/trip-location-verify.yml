@@ -375,6 +375,16 @@ jobs:
           FLEET_SERVICE_CLIENT_SECRET: fleet-client-secret
           AUTH_AUDIENCE: lojinext-platform
         run: python ops/trip_location/smoke_stack.py --identity-url http://localhost:8105
+      - name: Forensic Schema Audit
+        env:
+          IDENTITY_DATABASE_URL: postgresql+asyncpg://lojinext:lojinext-ci-password@localhost:5432/lojinext
+          TRIP_DATABASE_URL: postgresql+asyncpg://lojinext:lojinext-ci-password@localhost:5432/lojinext
+          LOCATION_DATABASE_URL: postgresql+asyncpg://lojinext:lojinext-ci-password@localhost:5432/lojinext
+          DRIVER_DATABASE_URL: postgresql+asyncpg://lojinext:lojinext-ci-password@localhost:5432/lojinext
+          FLEET_DATABASE_URL: postgresql+asyncpg://lojinext:lojinext-ci-password@localhost:5432/lojinext
+        run: |
+          pip install sqlalchemy psycopg2-binary
+          python ops/forensic_schema_audit.py
       - name: Collect logs on failure
         if: failure()
         working-directory: deploy/compose/trip-location

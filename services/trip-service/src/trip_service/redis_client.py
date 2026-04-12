@@ -1,37 +1,40 @@
-"""Redis connection management for Trip Service."""
+"""Redis client management for Trip Service — standardized to platform-common."""
 
 from __future__ import annotations
 
-import redis.asyncio as aioredis
+import logging
+from typing import TYPE_CHECKING
+
 from trip_service.config import settings
+from platform_common import (
+    RedisConfig,
+    init_redis as _platform_init_redis,
+    get_redis as _platform_get_redis,
+    close_redis as _platform_close_redis,
+)
 
-_redis: aioredis.Redis | None = None
+if TYPE_CHECKING:
+    from redis.asyncio import Redis
+
+logger = logging.getLogger("trip_service.redis")
 
 
-async def get_redis() -> aioredis.Redis:
-    """Return the shared Redis client, initialising it on first call."""
-    global _redis
-    if _redis is None:
-        pool = aioredis.ConnectionPool.from_url(
-            settings.redis_url,
-            max_connections=settings.redis_max_connections,
-            socket_timeout=settings.redis_socket_timeout,
-            retry_on_timeout=settings.redis_retry_on_timeout,
-            decode_responses=True,
-        )
-        _redis = aioredis.Redis(connection_pool=pool)
-    return _redis
+async def setup_redis() -> None:
+    """Initialise the global standardized Redis connection pool."""
+    config = RedisConfig(
+        url=settings.redis_url,
+        max_connections=settings.redis_max_connections,
+        socket_timeout=settings.redis_socket_timeout,
+        retry_on_timeout=settings.redis_retry_on_timeout,
+    )
+    await _platform_init_redis(config)
+
+
+async def get_redis() -> Redis:
+    """Return the global standardized Redis client."""
+    return await _platform_get_redis()
 
 
 async def close_redis() -> None:
-    """Close the Redis connection on application shutdown."""
-    global _redis
-    if _redis is not None:
-        await _redis.aclose()
-        _redis = None
-
-
-def override_redis(client: aioredis.Redis) -> None:
-    """Replace the Redis client — used in tests."""
-    global _redis
-    _redis = client
+    """Gracefully close the global standardized Redis pool."""
+    await _platform_close_redis()

@@ -63,6 +63,3 @@ known-first-party = ["fleet_service", "platform_auth"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-
-[tool.uv.sources]
-platform-auth = { workspace = true }

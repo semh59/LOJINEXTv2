@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import signal
 
 from identity_service.broker import create_broker
@@ -12,6 +13,22 @@ from identity_service.workers.outbox_relay import run_outbox_relay
 
 
 async def _run() -> None:
+    from identity_service.config import validate_prod_settings
+    from identity_service.observability import setup_logging
+    from identity_service.redis_client import setup_redis
+    from platform_common import setup_tracing, shutdown_tracing
+
+    setup_logging("INFO")
+    validate_prod_settings(settings)
+
+    setup_tracing(
+        service_name="identity-service-worker",
+        service_version="0.1.0",
+        environment=settings.environment,
+        otlp_endpoint=settings.otel_exporter_otlp_endpoint,
+    )
+    await setup_redis()
+
     broker = create_broker(settings.resolved_broker_backend)
     shutdown_event = asyncio.Event()
 
@@ -25,6 +42,11 @@ async def _run() -> None:
             tg.create_task(run_cleanup(shutdown_event=shutdown_event))
     finally:
         await broker.close()
+        await setup_redis()  # Need to call close_redis instead? No, setup_redis is init.
+        from identity_service.redis_client import close_redis
+
+        await close_redis()
+        shutdown_tracing()
 
 
 def main() -> None:

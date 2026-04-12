@@ -1,6 +1,9 @@
+"""Telegram Service FastAPI application entry point — standardized with tracing."""
+
 import asyncio
 import logging
 import uuid
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from aiogram.types import Update
@@ -11,20 +14,34 @@ from telegram_service.bot import build_bot, build_dispatcher
 from telegram_service.config import settings, validate_prod_settings
 from telegram_service.http_clients import http_manager
 from telegram_service.middleware import PrometheusMiddleware, RequestIdMiddleware
-from telegram_service.observability import setup_logging
+from platform_common import setup_tracing, instrument_app, shutdown_tracing
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("telegram_service")
 
+# Bot/Dispatcher instances
 _bot = build_bot()
 _dp = build_dispatcher()
 _polling_task: asyncio.Task[None] | None = None
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):  # type: ignore[type-arg]
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Application lifespan: startup and shutdown hooks."""
     global _polling_task
-    setup_logging(settings.log_level)
+    from telegram_service.observability import setup_logging
+
+    setup_logging(settings.environment == "dev" and logging.DEBUG or logging.INFO)
     validate_prod_settings(settings)
+
+    # Initialise Core Platform Components
+    setup_tracing(
+        service_name="telegram-service",
+        service_version=settings.service_version,
+        environment=settings.environment,
+        otlp_endpoint=settings.otel_exporter_otlp_endpoint,
+    )
+    instrument_app(app)
+
     await http_manager.start()
 
     if settings.webhook_url:
@@ -41,6 +58,7 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
 
     yield
 
+    # Shutdown sequence
     if _polling_task and not _polling_task.done():
         _polling_task.cancel()
         try:
@@ -53,6 +71,7 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
 
     await http_manager.stop()
     await _bot.session.close()
+    shutdown_tracing()
     logger.info("Telegram-service shutdown complete")
 
 
@@ -64,22 +83,26 @@ async def _run_polling() -> None:
 
 
 app = FastAPI(
-    title="telegram-service",
+    title="Telegram Service",
     version=settings.service_version,
+    description="Notification gateway and Telegram bot interface for LOJINEXT",
     lifespan=lifespan,
+    docs_url=None if settings.environment == "prod" else "/docs",
 )
+
+# Standard Middleware
 app.add_middleware(RequestIdMiddleware)
 app.add_middleware(PrometheusMiddleware)
 
 
-@app.get("/health")
+@app.get("/health", tags=["Infra"])
 async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/ready")
+@app.get("/ready", tags=["Infra"])
 async def ready() -> Response:
-    """Readiness probe — checks trip-service and driver-service reachability."""
+    """Readiness probe checking upstream dependencies."""
     checks: dict[str, str] = {}
     all_ok = True
     client = http_manager.get_client()
@@ -100,13 +123,12 @@ async def ready() -> Response:
     return JSONResponse({"status": "ok" if all_ok else "fail", "checks": checks}, status_code=status_code)
 
 
-@app.post("/webhook")
+@app.post("/webhook", tags=["Telegram"])
 async def webhook(request: Request) -> Response:
-    """Aiogram webhook receiver — only active when TELEGRAM_WEBHOOK_URL is set."""
+    """Aiogram webhook receiver."""
     if not settings.webhook_url:
         return Response(status_code=404)
 
-    # Verify secret token header if configured
     if settings.webhook_secret:
         token = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
         if token != settings.webhook_secret:
@@ -119,9 +141,8 @@ async def webhook(request: Request) -> Response:
 
 
 def run() -> None:
+    """Console entrypoint."""
     import uvicorn
-
-    setup_logging(settings.log_level)
 
     uvicorn.run(
         "telegram_service.main:app",

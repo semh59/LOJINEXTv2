@@ -296,6 +296,7 @@ class FleetOutbox(Base):
     outbox_id: Mapped[str] = mapped_column(String(26), primary_key=True)
     aggregate_type: Mapped[str] = mapped_column(String(16), nullable=False)
     aggregate_id: Mapped[str] = mapped_column(String(26), nullable=False)
+    correlation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     causation_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     event_name: Mapped[str] = mapped_column(String(80), nullable=False)
     event_version: Mapped[int] = mapped_column(Integer, nullable=False)

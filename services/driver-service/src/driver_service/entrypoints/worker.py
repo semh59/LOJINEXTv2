@@ -18,6 +18,18 @@ logger = logging.getLogger("driver_service.entrypoints.worker")
 async def worker_main() -> None:
     setup_logging(logging.INFO)
     validate_prod_settings(settings)
+
+    from driver_service.redis_client import setup_redis
+    from platform_common import setup_tracing, shutdown_tracing
+
+    setup_tracing(
+        service_name="driver-service-worker",
+        service_version="0.1.0",
+        environment=settings.environment,
+        otlp_endpoint=settings.otel_exporter_otlp_endpoint,
+    )
+    await setup_redis()
+
     logger.info("Driver Service worker starting (env=%s)", settings.environment)
 
     broker = create_broker(settings.resolved_broker_type)
@@ -35,6 +47,10 @@ async def worker_main() -> None:
         logger.exception("Worker process encountered an error")
     finally:
         await broker.close()
+        from driver_service.redis_client import close_redis
+
+        await close_redis()
+        shutdown_tracing()
         await engine.dispose()
         logger.info("Worker shutdown complete")
 

@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     max_date_range_days: int = 31  # Mirrors trip-service limit
     driver_cache_ttl_seconds: int = 300  # In-memory driver lookup cache TTL
     ocr_confidence_threshold: float = 0.5  # Below → fallback ingest
+    otel_exporter_otlp_endpoint: str = "http://localhost:4317"
 
     model_config = {"env_prefix": "TELEGRAM_", "env_file": ".env", "extra": "ignore"}
 

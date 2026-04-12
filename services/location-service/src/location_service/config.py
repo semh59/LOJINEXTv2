@@ -78,6 +78,7 @@ class Settings(BaseSettings):
     allow_plaintext_in_prod: bool = False
     kafka_acks: str = "all"
     kafka_enable_idempotence: bool = True
+    otel_exporter_otlp_endpoint: str = "http://localhost:4317"
 
     @property
     def provider_timeout_seconds(self) -> float:

@@ -69,9 +69,6 @@ markers = [
     "dbgate: real or ephemeral database gate tests",
 ]
 
-[tool.uv.sources]
-platform-auth = { workspace = true }
-platform-common = { workspace = true }
 
 [tool.ruff]
 target-version = "py312"

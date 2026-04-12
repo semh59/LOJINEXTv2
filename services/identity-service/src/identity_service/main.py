@@ -39,8 +39,26 @@ logger = logging.getLogger("identity_service")
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application startup/shutdown hooks."""
-    del app
+    from platform_common import (
+        setup_logging,
+        setup_tracing,
+        instrument_app,
+        shutdown_tracing,
+    )
+    from identity_service.redis_client import setup_redis
+
+    setup_logging(logging.INFO)
     validate_prod_settings(settings)
+
+    # Initialise Core Platform Components
+    setup_tracing(
+        service_name="identity-service",
+        service_version="0.1.0",
+        environment=settings.environment,
+        otlp_endpoint=settings.otel_exporter_otlp_endpoint,
+    )
+    instrument_app(app)
+    await setup_redis()
 
     async with async_session_factory() as session:
         try:
@@ -59,10 +77,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
-    await engine.dispose()
     from identity_service.redis_client import close_redis
 
     await close_redis()
+    shutdown_tracing()
+    await engine.dispose()
     _executor.shutdown(wait=True)
     logger.info("Identity Service shutdown complete")
 
@@ -98,9 +117,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 
 @app.exception_handler(RequestValidationError)
-async def validation_exception_handler_route(
-    request: Request, exc: RequestValidationError
-):
+async def validation_exception_handler_route(request: Request, exc: RequestValidationError):
     return await validation_exception_handler(request, exc)
 
 

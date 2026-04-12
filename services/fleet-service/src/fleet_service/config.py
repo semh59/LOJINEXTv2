@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     service_version: str = "0.1.0"
     service_port: int = 8102
     environment: Literal["dev", "test", "prod"] = "dev"
+    otel_exporter_otlp_endpoint: str | None = None
 
     # --- Database ---
     database_url: str = DEFAULT_DATABASE_URL
