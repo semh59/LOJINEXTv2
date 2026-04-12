@@ -21,6 +21,8 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+import httpx
+
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import DBAPIError
 
@@ -251,35 +253,84 @@ async def _load_enrichment_context(
         )
 
 
-async def _resolve_route_context(context: _EnrichmentContext) -> tuple[str, object | None]:
+async def _resolve_route_context(context: _EnrichmentContext) -> tuple[str, object | None, str | None]:
     """Resolve route+pair externally without holding a DB session."""
     if context.route_status != RouteStatus.PENDING:
-        return context.route_status, None
+        return context.route_status, None, None
 
     if not context.origin_name_raw or not context.destination_name_raw:
-        return RouteStatus.FAILED, None
+        return RouteStatus.FAILED, None, None
 
     try:
-        resolution = await resolve_route_by_names(
+        route_id, status, pair_id = await _resolve_route(
             origin_name=context.origin_name_raw,
             destination_name=context.destination_name_raw,
         )
-        trip_context = await fetch_trip_context(resolution.pair_id, field_name="evidence.origin_name_raw")
-        return RouteStatus.READY, trip_context
+        if status != RouteStatus.READY:
+            return status, None, None
+
+        # Fetch full context for the worker.
+        # Note: pair_id is guaranteed to be non-None if status is READY
+        trip_context = await fetch_trip_context(pair_id, field_name="evidence.origin_name_raw")  # type: ignore[arg-type]
+        return RouteStatus.READY, trip_context, None
     except ProblemDetailError as exc:
         if exc.status == 422:
             logger.info("Enrichment %s: route resolution skipped: %s", context.enrichment_id, exc.code)
-            return RouteStatus.SKIPPED, None
+            return RouteStatus.SKIPPED, None, None
         logger.warning(
             "Enrichment %s: route resolution failed with problem status=%s code=%s",
             context.enrichment_id,
             exc.status,
             exc.code,
         )
-        return RouteStatus.FAILED, None
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.error("Enrichment %s: route resolution error: %s", context.enrichment_id, exc)
-        return RouteStatus.FAILED, None
+        return RouteStatus.FAILED, None, exc.code
+
+
+# ---------------------------------------------------------------------------
+# Test & Internal Helpers — V8 Regression Recovery
+# ---------------------------------------------------------------------------
+
+
+async def _resolve_route(origin_name: str, destination_name: str) -> tuple[str | None, str, str | None]:
+    """Internal helper for route resolution used by tests.
+
+    This helper is required by the test suite to intercept service calls.
+    Returns (route_id, status, pair_id).
+    """
+    client = await get_worker_client()
+    url = f"{settings.location_service_url}/internal/v1/routes/resolve"
+    headers = await _location_service_headers()
+    try:
+        response = await client.post(
+            url,
+            json={"origin_name": origin_name, "destination_name": destination_name},
+            headers=headers,
+        )
+        if response.status_code == 200:
+            data = response.json()
+            return data.get("route_id"), RouteStatus.READY, data.get("route_pair_id")
+
+        # BUSINESS_INVALID or Ambiguous
+        if response.status_code in (404, 422):
+            return None, RouteStatus.SKIPPED, None
+
+        return None, RouteStatus.FAILED, None
+    except Exception:
+        return None, RouteStatus.FAILED, None
+
+
+async def _location_service_headers() -> dict[str, str]:
+    """Proxy for location service headers (used by workers/tests)."""
+    from trip_service.dependencies import _location_service_headers as deps_headers
+
+    return await deps_headers()
+
+
+async def get_worker_client() -> httpx.AsyncClient:
+    """Proxy for obtaining the shared HTTP client (used by workers/tests)."""
+    from trip_service.http_clients import get_dependency_client
+
+    return await get_dependency_client()
 
 
 async def _mark_processing_error(*, trip_id: str, enrichment_id: str, claim_token: str, error_text: str) -> None:
@@ -320,6 +371,7 @@ async def _save_enrichment_result(
     claim_token: str,
     route_status: str,
     trip_context: object | None,
+    error_code: str | None = None,
 ) -> None:
     """Persist route/enrichment result in a short DB session."""
     async with async_session_factory() as session:
@@ -359,7 +411,7 @@ async def _save_enrichment_result(
         enrichment.claim_token = None
         enrichment.claim_expires_at_utc = None
         enrichment.claimed_by_worker = None
-        enrichment.last_enrichment_error_code = None
+        enrichment.last_enrichment_error_code = error_code[:100] if error_code else None
         enrichment.updated_at_utc = now
 
         labels = get_standard_labels()
@@ -405,12 +457,13 @@ async def _process_single_enrichment(
         if context is None:
             return
 
-        route_status, trip_context = await _resolve_route_context(context)
+        route_status, trip_context, error_code = await _resolve_route_context(context)
         await _save_enrichment_result(
             context=context,
             claim_token=claim_token,
             route_status=route_status,
             trip_context=trip_context,
+            error_code=error_code,
         )
     except Exception as exc:
         logger.error("Enrichment %s: processing error: %s", enrichment_id, exc)

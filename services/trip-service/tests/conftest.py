@@ -32,8 +32,36 @@ from pathlib import Path  # noqa: E402
 from typing import Any  # noqa: E402
 from zoneinfo import ZoneInfo  # noqa: E402
 
+import os  # noqa: E402
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
+import asyncio  # noqa: E402
+
+if os.name == "nt":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+
+@pytest.fixture(scope="session")
+def event_loop():
+    """Create a session-scoped event loop for Windows compatibility."""
+    import asyncio
+    import sys
+
+    if sys.platform == "win32":
+        # Force SelectorEventLoop for robustness in tests if Proactor is default
+        if isinstance(asyncio.get_event_loop_policy(), asyncio.WindowsProactorEventLoopPolicy):
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+    loop = asyncio.new_event_loop()
+    yield loop
+    # Small grace period for Windows to clean up sockets/proactor resources
+    if sys.platform == "win32":
+        import time
+
+        time.sleep(0.1)
+    loop.close()
+
+
 from alembic.config import Config  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
 from fastapi.exceptions import RequestValidationError  # noqa: E402
@@ -48,6 +76,7 @@ from testcontainers.postgres import PostgresContainer  # noqa: E402
 from alembic import command  # noqa: E402
 from trip_service.broker import NoOpBroker  # noqa: E402
 from trip_service.config import settings  # noqa: E402
+from trip_service.http_clients import close_http_clients  # noqa: E402
 from trip_service.database import get_session  # noqa: E402
 from trip_service.dependencies import LocationRouteResolution, LocationTripContext  # noqa: E402
 from trip_service.errors import ProblemDetailError, problem_detail_handler, validation_exception_handler  # noqa: E402
@@ -192,7 +221,7 @@ async def _truncate_all(engine) -> None:  # noqa: ANN001
 @pytest_asyncio.fixture
 async def db_engine(migrated_database: str):
     """Create an engine for the current test using the migrated schema."""
-    engine = create_async_engine(migrated_database, echo=False, poolclass=NullPool)
+    engine = create_async_engine(migrated_database, echo=True, poolclass=NullPool)
     yield engine
     await engine.dispose()
 
@@ -203,6 +232,7 @@ async def reset_database(db_engine) -> AsyncGenerator[None, None]:  # noqa: ANN0
     await _truncate_all(db_engine)
     yield
     await _truncate_all(db_engine)
+    await close_http_clients()
 
 
 @pytest_asyncio.fixture
@@ -212,6 +242,74 @@ async def test_session(db_engine) -> AsyncGenerator[AsyncSession, None]:  # noqa
     async with session_factory() as session:
         yield session
         await session.rollback()
+
+
+async def stub_fetch_trip_context(pair_id: str, field_name: str = "body.route_pair_id") -> LocationTripContext:
+    """Stub implementation of Location Service trip context fetching."""
+    del field_name
+    pair = PAIR_CONTEXTS.get(pair_id)
+    if pair is None:
+        raise AssertionError(f"Unknown test pair_id: {pair_id}")
+    return LocationTripContext(
+        pair_id=pair.pair_id,
+        origin_location_id=pair.origin_location_id,
+        origin_name=pair.origin_name,
+        destination_location_id=pair.destination_location_id,
+        destination_name=pair.destination_name,
+        forward_route_id=pair.forward_route_id,
+        forward_duration_s=pair.forward_duration_s,
+        reverse_route_id=pair.reverse_route_id,
+        reverse_duration_s=pair.reverse_duration_s,
+        profile_code="TIR",
+        pair_status="ACTIVE",
+    )
+
+
+async def stub_resolve_route_by_names(
+    *,
+    origin_name: str,
+    destination_name: str,
+    profile_code: str = "TIR",
+    language_hint: str = "AUTO",
+) -> LocationRouteResolution:
+    """Stub implementation of Location Service route resolution."""
+    del profile_code, language_hint
+    pair_id = NAME_TO_PAIR.get((origin_name, destination_name))
+    if pair_id is None:
+        raise AssertionError(f"Unknown resolve pair for {(origin_name, destination_name)}")
+    pair = PAIR_CONTEXTS[pair_id]
+    return LocationRouteResolution(route_id=pair.forward_route_id, pair_id=pair_id, resolution="EXACT_TR")
+
+
+async def allow_all_trip_references(**kwargs: Any) -> None:
+    """Service stub that always allows trip references."""
+    return None
+
+
+async def healthy_dependency_probe() -> bool:
+    """Health probe stub that always returns True."""
+    return True
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _apply_global_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Apply mandatory stubs to all tests to prevent real side effects."""
+    # App Router dependencies
+    monkeypatch.setattr("trip_service.routers.trips.fetch_trip_context", stub_fetch_trip_context)
+    monkeypatch.setattr("trip_service.routers.trips.resolve_route_by_names", stub_resolve_route_by_names)
+    monkeypatch.setattr("trip_service.routers.trips.ensure_trip_references_valid", allow_all_trip_references)
+
+    # Worker dependencies
+    monkeypatch.setattr("trip_service.workers.enrichment_worker.fetch_trip_context", stub_fetch_trip_context)
+    monkeypatch.setattr("trip_service.workers.enrichment_worker.resolve_route_by_names", stub_resolve_route_by_names)
+
+    # Service layer dependencies
+    monkeypatch.setattr("trip_service.service.fetch_trip_context", stub_fetch_trip_context)
+    monkeypatch.setattr("trip_service.service.ensure_trip_references_valid", allow_all_trip_references)
+
+    # Health probes
+    monkeypatch.setattr("trip_service.routers.health.probe_fleet_service", healthy_dependency_probe)
+    monkeypatch.setattr("trip_service.routers.health.probe_location_service", healthy_dependency_probe)
 
 
 @pytest_asyncio.fixture
@@ -299,15 +397,6 @@ async def client(db_engine, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[A
     monkeypatch.setattr("trip_service.workers.enrichment_worker.async_session_factory", session_factory)
     monkeypatch.setattr("trip_service.workers.outbox_relay.async_session_factory", session_factory)
     monkeypatch.setattr("trip_service.worker_heartbeats.async_session_factory", session_factory)
-    monkeypatch.setattr("trip_service.routers.health.probe_fleet_service", healthy_dependency_probe)
-    monkeypatch.setattr("trip_service.routers.health.probe_location_service", healthy_dependency_probe)
-    monkeypatch.setattr("trip_service.routers.trips.ensure_trip_references_valid", allow_all_trip_references)
-    monkeypatch.setattr("trip_service.routers.trips.fetch_trip_context", stub_fetch_trip_context)
-    monkeypatch.setattr("trip_service.routers.trips.resolve_route_by_names", stub_resolve_route_by_names)
-
-    # Patch the service layer too (which is called by the dependencies)
-    monkeypatch.setattr("trip_service.service.ensure_trip_references_valid", allow_all_trip_references)
-    monkeypatch.setattr("trip_service.service.fetch_trip_context", stub_fetch_trip_context)
 
     # Initialize heartbeats for health checks
     await record_worker_heartbeat("enrichment-worker")
