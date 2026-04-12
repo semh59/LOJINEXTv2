@@ -42,6 +42,7 @@ class OutboxMessage:
     schema_version: int
     aggregate_type: str
     aggregate_id: str
+    causation_id: str | None = None
 
 
 class MessageBroker(abc.ABC):
@@ -129,6 +130,8 @@ class KafkaBroker(MessageBroker):
         c_id = correlation_id.get()
         if c_id:
             headers.append(("X-Correlation-ID", c_id.encode("utf-8")))
+        if message.causation_id:
+            headers.append(("X-Causation-ID", message.causation_id.encode("utf-8")))
 
         delivery_future = await self._producer.produce(
             self._topic,

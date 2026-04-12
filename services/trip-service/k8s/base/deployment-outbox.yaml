@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trip-outbox-worker
+  labels:
+    app: trip-outbox-worker
+    part-of: lojinext-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: trip-outbox-worker
+  template:
+    metadata:
+      labels:
+        app: trip-outbox-worker
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 2000
+      containers:
+        - name: worker
+          image: lojinext/trip-service:latest
+          command: ["trip-outbox-worker"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          envFrom:
+            - configMapRef:
+                name: trip-service-config
+            - secretRef:
+                name: trip-service-secrets
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi

@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     outbox_relay_poll_interval_seconds: int = 5
     outbox_relay_claim_ttl_seconds: int = 60
     outbox_relay_max_failures: int = 10
+    outbox_relay_max_retry_count: int = 10
 
     idempotency_retention_hours: int = 24
 

@@ -1,0 +1,2806 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.2, pytest-9.0.1, pluggy-1.6.0 -- C:\Users\semih\AppData\Local\Programs\Python\Python314\python.exe
+cachedir: .pytest_cache
+rootdir: D:\PROJECT\LOJINEXTv2\services\trip-service
+configfile: pyproject.toml
+plugins: anyio-4.12.0, asyncio-1.3.0, cov-7.0.0, respx-0.22.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=session, asyncio_default_test_loop_scope=function
+collecting ... collected 1 item
+
+tests/test_workers.py::test_enrichment_reclaims_stale_claim INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> a1b2c3d4e5f6, trip_service_baseline
+INFO  [alembic.runtime.migration] Running upgrade a1b2c3d4e5f6 -> b2c3d4e5f6a1, add outbox claims
+INFO  [alembic.runtime.migration] Running upgrade b2c3d4e5f6a1 -> c1d2e3f4a5b6, add worker heartbeats
+INFO  [alembic.runtime.migration] Running upgrade c1d2e3f4a5b6 -> d1e2f3a4b5c6, add trip audit log table
+INFO  [alembic.runtime.migration] Running upgrade d1e2f3a4b5c6 -> e1f2a3b4c5d6, fix column length drift: align migration schema to model definitions
+INFO  [alembic.runtime.migration] Running upgrade e1f2a3b4c5d6 -> f1a2b3c4d5e6, final forensic parity
+INFO  [alembic.runtime.migration] Running upgrade f1a2b3c4d5e6 -> a9c8e7f6d5b4, trip outbox payload_json text alignment
+2026-04-12 09:25:07,751 INFO sqlalchemy.engine.Engine select pg_catalog.version()
+INFO  [sqlalchemy.engine.Engine] select pg_catalog.version()
+2026-04-12 09:25:07,751 INFO sqlalchemy.engine.Engine [raw sql] ()
+INFO  [sqlalchemy.engine.Engine] [raw sql] ()
+2026-04-12 09:25:07,757 INFO sqlalchemy.engine.Engine select current_schema()
+INFO  [sqlalchemy.engine.Engine] select current_schema()
+2026-04-12 09:25:07,757 INFO sqlalchemy.engine.Engine [raw sql] ()
+INFO  [sqlalchemy.engine.Engine] [raw sql] ()
+2026-04-12 09:25:07,769 INFO sqlalchemy.engine.Engine show standard_conforming_strings
+INFO  [sqlalchemy.engine.Engine] show standard_conforming_strings
+2026-04-12 09:25:07,769 INFO sqlalchemy.engine.Engine [raw sql] ()
+INFO  [sqlalchemy.engine.Engine] [raw sql] ()
+2026-04-12 09:25:07,774 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+INFO  [sqlalchemy.engine.Engine] BEGIN (implicit)
+2026-04-12 09:25:07,775 INFO sqlalchemy.engine.Engine TRUNCATE TABLE trip_trip_timeline, trip_trip_evidence, trip_trip_enrichment, trip_trip_delete_audit, trip_outbox, trip_idempotency_records, trip_trips, worker_heartbeats CASCADE
+INFO  [sqlalchemy.engine.Engine] TRUNCATE TABLE trip_trip_timeline, trip_trip_evidence, trip_trip_enrichment, trip_trip_delete_audit, trip_outbox, trip_idempotency_records, trip_trips, worker_heartbeats CASCADE
+2026-04-12 09:25:07,775 INFO sqlalchemy.engine.Engine [generated in 0.00040s] ()
+INFO  [sqlalchemy.engine.Engine] [generated in 0.00040s] ()
+2026-04-12 09:25:08,030 INFO sqlalchemy.engine.Engine COMMIT
+INFO  [sqlalchemy.engine.Engine] COMMIT
+2026-04-12 09:25:08,123 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+INFO  [sqlalchemy.engine.Engine] BEGIN (implicit)
+2026-04-12 09:25:08,128 INFO sqlalchemy.engine.Engine INSERT INTO trip_trips (id, trip_no, source_type, source_slip_no, source_reference_key, source_payload_hash, review_reason_code, driver_id, vehicle_id, tare_weight_kg, gross_weight_kg, net_weight_kg, is_empty_return, status, version, created_by_actor_type, created_by_actor_id, created_at_utc, updated_at_utc) VALUES ($1::VARCHAR, $2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::VARCHAR, $6::VARCHAR, $7::VARCHAR, $8::VARCHAR, $9::VARCHAR, $10::INTEGER, $11::INTEGER, $12::INTEGER, $13::BOOLEAN, $14::VARCHAR, $15::INTEGER, $16::VARCHAR, $17::VARCHAR, $18::TIMESTAMP WITH TIME ZONE, $19::TIMESTAMP WITH TIME ZONE)
+INFO  [sqlalchemy.engine.Engine] INSERT INTO trip_trips (id, trip_no, source_type, source_slip_no, source_reference_key, source_payload_hash, review_reason_code, driver_id, vehicle_id, tare_weight_kg, gross_weight_kg, net_weight_kg, is_empty_return, status, version, created_by_actor_type, created_by_actor_id, created_at_utc, updated_at_utc) VALUES ($1::VARCHAR, $2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::VARCHAR, $6::VARCHAR, $7::VARCHAR, $8::VARCHAR, $9::VARCHAR, $10::INTEGER, $11::INTEGER, $12::INTEGER, $13::BOOLEAN, $14::VARCHAR, $15::INTEGER, $16::VARCHAR, $17::VARCHAR, $18::TIMESTAMP WITH TIME ZONE, $19::TIMESTAMP WITH TIME ZONE)
+2026-04-12 09:25:08,129 INFO sqlalchemy.engine.Engine [generated in 0.00061s] ('01JATENRICHSTALEROW001', 'TR-ENRICH-STALE', 'TELEGRAM_TRIP_SLIP', 'SLIP-ENRICH-STALE', 'telegram-message-enrich-stale', 'hash', 'SOURCE_IMPORT', 'driver-001', 'vehicle-001', 10000, 25000, 15000, False, 'PENDING_REVIEW', 1, 'SERVICE', 'worker-test', datetime.datetime(2026, 4, 12, 6, 25, 8, 48253, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 4, 12, 6, 25, 8, 48253, tzinfo=datetime.timezone.utc))
+INFO  [sqlalchemy.engine.Engine] [generated in 0.00061s] ('01JATENRICHSTALEROW001', 'TR-ENRICH-STALE', 'TELEGRAM_TRIP_SLIP', 'SLIP-ENRICH-STALE', 'telegram-message-enrich-stale', 'hash', 'SOURCE_IMPORT', 'driver-001', 'vehicle-001', 10000, 25000, 15000, False, 'PENDING_REVIEW', 1, 'SERVICE', 'worker-test', datetime.datetime(2026, 4, 12, 6, 25, 8, 48253, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 4, 12, 6, 25, 8, 48253, tzinfo=datetime.timezone.utc))
+FAILED2026-04-12 09:25:09,225 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO  [sqlalchemy.engine.Engine] ROLLBACK
+ERROR [sqlalchemy.pool.impl.NullPool] Exception closing connection <AdaptedConnection <asyncpg.connection.Connection object at 0x0000025FA57025D0>>
+Traceback (most recent call last):
+  File "C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\pool\base.py", line 374, in _close_connection
+    self._dialect.do_close(connection)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\default.py", line 720, in do_close
+    dbapi_connection.close()
+    ~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 903, in close
+    self.await_(self._connection.close())
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\asyncpg\connection.py", line 1513, in close
+    await self._protocol.close(timeout)
+  File "asyncpg/protocol/protocol.pyx", line 617, in close
+  File "asyncpg/protocol/protocol.pyx", line 650, in asyncpg.protocol.protocol.BaseProtocol._request_cancel
+  File "C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\asyncpg\connection.py", line 1682, in _cancel_current_command
+    self._cancellations.add(self._loop.create_task(self._cancel(waiter)))
+                            ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\asyncio\base_events.py", line 466, in create_task
+    self._check_closed()
+    ~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\asyncio\base_events.py", line 550, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+2026-04-12 09:25:09,291 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+INFO  [sqlalchemy.engine.Engine] BEGIN (implicit)
+2026-04-12 09:25:09,291 INFO sqlalchemy.engine.Engine TRUNCATE TABLE trip_trip_timeline, trip_trip_evidence, trip_trip_enrichment, trip_trip_delete_audit, trip_outbox, trip_idempotency_records, trip_trips, worker_heartbeats CASCADE
+INFO  [sqlalchemy.engine.Engine] TRUNCATE TABLE trip_trip_timeline, trip_trip_evidence, trip_trip_enrichment, trip_trip_delete_audit, trip_outbox, trip_idempotency_records, trip_trips, worker_heartbeats CASCADE
+2026-04-12 09:25:09,291 INFO sqlalchemy.engine.Engine [cached since 1.516s ago] ()
+INFO  [sqlalchemy.engine.Engine] [cached since 1.516s ago] ()
+2026-04-12 09:25:09,780 INFO sqlalchemy.engine.Engine COMMIT
+INFO  [sqlalchemy.engine.Engine] COMMIT
+
+tests/test_workers.py::test_enrichment_reclaims_stale_claim ERROR
+
+=================================== ERRORS ====================================
+__________ ERROR at teardown of test_enrichment_reclaims_stale_claim __________
+
+self = <ProactorEventLoop running=False closed=True debug=False>
+callback = <bound method BaseProtocol._on_waiter_completed of <asyncpg.protocol.protocol.Protocol object at 0x0000025FA1C926E0>>
+context = <_contextvars.Context object at 0x0000025FA5371640>
+args = (<Future finished exception=AttributeError("'NoneType' object has no attribute 'send'")>,)
+
+    def call_soon(self, callback, *args, context=None):
+        """Arrange for a callback to be called as soon as possible.
+    
+        This operates as a FIFO queue: callbacks are called in the
+        order in which they are registered.  Each callback will be
+        called exactly once.
+    
+        Any positional arguments after the callback will be passed to
+        the callback when it is called.
+        """
+>       self._check_closed()
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\asyncio\base_events.py:827: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <ProactorEventLoop running=False closed=True debug=False>
+
+    def _check_closed(self):
+        if self._closed:
+>           raise RuntimeError('Event loop is closed')
+E           RuntimeError: Event loop is closed
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\asyncio\base_events.py:550: RuntimeError
+
+During handling of the above exception, another exception occurred:
+
+    def finalizer() -> None:
+        """Yield again, to finalize."""
+    
+        async def async_finalizer() -> None:
+            try:
+                await gen_obj.__anext__()
+            except StopAsyncIteration:
+                pass
+            else:
+                msg = "Async generator fixture didn't stop."
+                msg += "Yield only once."
+                raise ValueError(msg)
+    
+>       runner.run(async_finalizer(), context=context)
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\pytest_asyncio\plugin.py:330: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <asyncio.runners.Runner object at 0x0000025FA550B110>
+coro = <coroutine object _wrap_asyncgen_fixture.<locals>._asyncgen_fixture_wrapper.<locals>.finalizer.<locals>.async_finalizer at 0x0000025FA5405620>
+
+    def run(self, coro, *, context=None):
+        """Run code in the embedded event loop."""
+        if events._get_running_loop() is not None:
+            # fail fast with short traceback
+            raise RuntimeError(
+                "Runner.run() cannot be called from a running event loop")
+    
+        self._lazy_init()
+    
+        if not coroutines.iscoroutine(coro):
+            if inspect.isawaitable(coro):
+                async def _wrap_awaitable(awaitable):
+                    return await awaitable
+    
+                coro = _wrap_awaitable(coro)
+            else:
+                raise TypeError('An asyncio.Future, a coroutine or an '
+                                'awaitable is required')
+    
+        if context is None:
+            context = self._context
+    
+        task = self._loop.create_task(coro, context=context)
+    
+        if (threading.current_thread() is threading.main_thread()
+            and signal.getsignal(signal.SIGINT) is signal.default_int_handler
+        ):
+            sigint_handler = functools.partial(self._on_sigint, main_task=task)
+            try:
+                signal.signal(signal.SIGINT, sigint_handler)
+            except ValueError:
+                # `signal.signal` may throw if `threading.main_thread` does
+                # not support signals (e.g. embedded interpreter with signals
+                # not registered - see gh-91880)
+                sigint_handler = None
+        else:
+            sigint_handler = None
+    
+        self._interrupt_count = 0
+        try:
+>           return self._loop.run_until_complete(task)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\asyncio\runners.py:127: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <ProactorEventLoop running=False closed=True debug=False>
+future = <Task finished name='Task-15' coro=<_wrap_asyncgen_fixture.<locals>._asyncgen_fixture_wrapper.<locals>.finalizer.<loca...\Lib\site-packages\pytest_asyncio\plugin.py:320> exception=AttributeError("'NoneType' object has no attribute 'send'")>
+
+    def run_until_complete(self, future):
+        """Run until the Future is done.
+    
+        If the argument is a coroutine, it is wrapped in a Task.
+    
+        WARNING: It would be disastrous to call run_until_complete()
+        with the same coroutine twice -- it would wrap it in two
+        different Tasks and that can't be good.
+    
+        Return the Future's result, or raise its exception.
+        """
+        self._check_closed()
+        self._check_running()
+    
+        new_task = not futures.isfuture(future)
+        future = tasks.ensure_future(future, loop=self)
+        if new_task:
+            # An exception is raised if the future didn't complete, so there
+            # is no need to log the "destroy pending task" message
+            future._log_destroy_pending = False
+    
+        future.add_done_callback(_run_until_complete_cb)
+        try:
+            self.run_forever()
+        except:
+            if new_task and future.done() and not future.cancelled():
+                # The coroutine raised a BaseException. Consume the exception
+                # to not log a warning, the caller doesn't have access to the
+                # local task.
+                future.exception()
+            raise
+        finally:
+            future.remove_done_callback(_run_until_complete_cb)
+        if not future.done():
+            raise RuntimeError('Event loop stopped before Future completed.')
+    
+>       return future.result()
+               ^^^^^^^^^^^^^^^
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\asyncio\base_events.py:719: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    async def async_finalizer() -> None:
+        try:
+>           await gen_obj.__anext__()
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\pytest_asyncio\plugin.py:322: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+db_engine = <sqlalchemy.ext.asyncio.engine.AsyncEngine object at 0x0000025FA38F74D0>
+
+    @pytest_asyncio.fixture
+    async def test_session(db_engine) -> AsyncGenerator[AsyncSession, None]:  # noqa: ANN001
+        """Provide a session for direct DB manipulation in tests."""
+        session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+        async with session_factory() as session:
+            yield session
+>           await session.rollback()
+
+tests\conftest.py:214: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x0000025FA21E6CF0>
+
+    async def rollback(self) -> None:
+        """Rollback the current transaction in progress.
+    
+        .. seealso::
+    
+            :meth:`_orm.Session.rollback` - main documentation for
+            "rollback"
+        """
+>       await greenlet_spawn(self.sync_session.rollback)
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\ext\asyncio\session.py:990: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <bound method Session.rollback of <sqlalchemy.orm.session.Session object at 0x0000025FA5506CF0>>
+_require_await = False, args = (), kwargs = {}
+context = <_AsyncIoGreenlet object at 0x0000025FA54A8E80 (otid=0x0000025FA06EC780) dead>
+switch_occurred = True
+result = <coroutine object Connection.close at 0x0000025FA5715460>
+
+    async def greenlet_spawn(
+        fn: Callable[..., _T],
+        *args: Any,
+        _require_await: bool = False,
+        **kwargs: Any,
+    ) -> _T:
+        """Runs a sync function ``fn`` in a new greenlet.
+    
+        The sync function can then use :func:`await_only` to wait for async
+        functions.
+    
+        :param fn: The sync callable to call.
+        :param \\*args: Positional arguments to pass to the ``fn`` callable.
+        :param \\*\\*kwargs: Keyword arguments to pass to the ``fn`` callable.
+        """
+    
+        result: Any
+        context = _AsyncIoGreenlet(fn, getcurrent())
+        # runs the function synchronously in gl greenlet. If the execution
+        # is interrupted by await_only, context is not dead and result is a
+        # coroutine to wait. If the context is dead the function has
+        # returned, and its result can be returned.
+        switch_occurred = False
+        result = context.switch(*args, **kwargs)
+        while not context.dead:
+            switch_occurred = True
+            try:
+                # wait for a coroutine from await_only and then return its
+                # result back to it.
+                value = await result
+            except BaseException:
+                # this allows an exception to be raised within
+                # the moderated greenlet so that it can continue
+                # its expected flow.
+>               result = context.throw(*sys.exc_info())
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:201: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.orm.session.Session object at 0x0000025FA5506CF0>
+
+    def rollback(self) -> None:
+        """Rollback the current transaction in progress.
+    
+        If no transaction is in progress, this method is a pass-through.
+    
+        The method always rolls back
+        the topmost database transaction, discarding any nested
+        transactions that may be in progress.
+    
+        .. seealso::
+    
+            :ref:`session_rollback`
+    
+            :ref:`unitofwork_transaction`
+    
+        """
+        if self._transaction is None:
+            pass
+        else:
+>           self._transaction.rollback(_to_root=True)
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\orm\session.py:1992: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function SessionTransaction.rollback at 0x0000025FA32FDA60>
+self = <sqlalchemy.orm.session.SessionTransaction object at 0x0000025FA55A8B50>
+arg = (), kw = {'_capture_exception': False, '_to_root': True}
+current_state = <SessionTransactionState.ACTIVE: 1>
+next_state = <_StateChangeStates.ANY: 1>, existing_fn = None
+expect_state = <SessionTransactionState.CLOSED: 5>
+
+    @util.decorator
+    def _go(fn: _F, self: Any, *arg: Any, **kw: Any) -> Any:
+        current_state = self._state
+    
+        if (
+            has_prerequisite_states
+            and current_state not in prerequisite_state_collection
+        ):
+            self._raise_for_prerequisite_state(fn.__name__, current_state)
+    
+        next_state = self._next_state
+        existing_fn = self._current_fn
+        expect_state = moves_to if expect_state_change else current_state
+    
+        if (
+            # destination states are restricted
+            next_state is not _StateChangeStates.ANY
+            # method seeks to change state
+            and expect_state_change
+            # destination state incorrect
+            and next_state is not expect_state
+        ):
+            if existing_fn and next_state in (
+                _StateChangeStates.NO_CHANGE,
+                _StateChangeStates.CHANGE_IN_PROGRESS,
+            ):
+                raise sa_exc.IllegalStateChangeError(
+                    f"Method '{fn.__name__}()' can't be called here; "
+                    f"method '{existing_fn.__name__}()' is already "
+                    f"in progress and this would cause an unexpected "
+                    f"state change to {moves_to!r}",
+                    code="isce",
+                )
+            else:
+                raise sa_exc.IllegalStateChangeError(
+                    f"Cant run operation '{fn.__name__}()' here; "
+                    f"will move to state {moves_to!r} where we are "
+                    f"expecting {next_state!r}",
+                    code="isce",
+                )
+    
+        self._current_fn = fn
+        self._next_state = _StateChangeStates.CHANGE_IN_PROGRESS
+        try:
+>           ret_value = fn(self, *arg, **kw)
+                        ^^^^^^^^^^^^^^^^^^^^
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\orm\state_changes.py:137: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.orm.session.SessionTransaction object at 0x0000025FA55A8B50>
+_capture_exception = False, _to_root = True
+
+    @_StateChange.declare_states(
+        (
+            SessionTransactionState.ACTIVE,
+            SessionTransactionState.DEACTIVE,
+            SessionTransactionState.PREPARED,
+        ),
+        SessionTransactionState.CLOSED,
+    )
+    def rollback(
+        self, _capture_exception: bool = False, _to_root: bool = False
+    ) -> None:
+        stx = self.session._transaction
+        assert stx is not None
+        if stx is not self:
+            for subtransaction in stx._iterate_self_and_parents(upto=self):
+                subtransaction.close()
+    
+        boundary = self
+        rollback_err = None
+        if self._state in (
+            SessionTransactionState.ACTIVE,
+            SessionTransactionState.PREPARED,
+        ):
+            for transaction in self._iterate_self_and_parents():
+                if transaction._parent is None or transaction.nested:
+                    try:
+                        for t in set(transaction._connections.values()):
+                            t[1].rollback()
+    
+                        transaction._state = SessionTransactionState.DEACTIVE
+                        self.session.dispatch.after_rollback(self.session)
+                    except:
+                        rollback_err = sys.exc_info()
+                    finally:
+                        transaction._state = SessionTransactionState.DEACTIVE
+                        transaction._restore_snapshot(
+                            dirty_only=transaction.nested
+                        )
+                    boundary = transaction
+                    break
+                else:
+                    transaction._state = SessionTransactionState.DEACTIVE
+    
+        sess = self.session
+    
+        if not rollback_err and not sess._is_clean():
+            # if items were added, deleted, or mutated
+            # here, we need to re-restore the snapshot
+            util.warn(
+                "Session's state has been changed on "
+                "a non-active transaction - this state "
+                "will be discarded."
+            )
+            boundary._restore_snapshot(dirty_only=boundary.nested)
+    
+        with self._expect_state(SessionTransactionState.CLOSED):
+            self.close()
+    
+        if self._parent and _capture_exception:
+            self._parent._rollback_exception = sys.exc_info()[1]
+    
+        if rollback_err and rollback_err[1]:
+>           raise rollback_err[1].with_traceback(rollback_err[2])
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\orm\session.py:1393: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.orm.session.SessionTransaction object at 0x0000025FA55A8B50>
+_capture_exception = False, _to_root = True
+
+    @_StateChange.declare_states(
+        (
+            SessionTransactionState.ACTIVE,
+            SessionTransactionState.DEACTIVE,
+            SessionTransactionState.PREPARED,
+        ),
+        SessionTransactionState.CLOSED,
+    )
+    def rollback(
+        self, _capture_exception: bool = False, _to_root: bool = False
+    ) -> None:
+        stx = self.session._transaction
+        assert stx is not None
+        if stx is not self:
+            for subtransaction in stx._iterate_self_and_parents(upto=self):
+                subtransaction.close()
+    
+        boundary = self
+        rollback_err = None
+        if self._state in (
+            SessionTransactionState.ACTIVE,
+            SessionTransactionState.PREPARED,
+        ):
+            for transaction in self._iterate_self_and_parents():
+                if transaction._parent is None or transaction.nested:
+                    try:
+                        for t in set(transaction._connections.values()):
+>                           t[1].rollback()
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\orm\session.py:1358: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.engine.base.RootTransaction object at 0x0000025FA56E1FE0>
+
+    def rollback(self) -> None:
+        """Roll back this :class:`.Transaction`.
+    
+        The implementation of this may vary based on the type of transaction in
+        use:
+    
+        * For a simple database transaction (e.g. :class:`.RootTransaction`),
+          it corresponds to a ROLLBACK.
+    
+        * For a :class:`.NestedTransaction`, it corresponds to a
+          "ROLLBACK TO SAVEPOINT" operation.
+    
+        * For a :class:`.TwoPhaseTransaction`, DBAPI-specific methods for two
+          phase transactions may be used.
+    
+    
+        """
+        try:
+>           self._do_rollback()
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:2611: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.engine.base.RootTransaction object at 0x0000025FA56E1FE0>
+
+    def _do_rollback(self) -> None:
+>       self._close_impl(try_deactivate=True)
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:2730: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.engine.base.RootTransaction object at 0x0000025FA56E1FE0>
+try_deactivate = True
+
+    def _close_impl(self, try_deactivate: bool = False) -> None:
+        try:
+            if self.is_active:
+>               self._connection_rollback_impl()
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:2713: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.engine.base.RootTransaction object at 0x0000025FA56E1FE0>
+
+    def _connection_rollback_impl(self) -> None:
+>       self.connection._rollback_impl()
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:2705: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.engine.base.Connection object at 0x0000025FA57048A0>
+
+    def _rollback_impl(self) -> None:
+        if self._has_events or self.engine._has_events:
+            self.dispatch.rollback(self)
+    
+        if self._still_open_and_dbapi_connection_is_valid:
+            if self._echo:
+                if self._is_autocommit_isolation():
+                    if self.dialect.skip_autocommit_rollback:
+                        self._log_info(
+                            "ROLLBACK will be skipped by "
+                            "skip_autocommit_rollback"
+                        )
+                    else:
+                        self._log_info(
+                            "ROLLBACK using DBAPI connection.rollback(); "
+                            "set skip_autocommit_rollback to prevent fully"
+                        )
+                else:
+                    self._log_info("ROLLBACK")
+            try:
+                self.engine.dialect.do_rollback(self.connection)
+            except BaseException as e:
+>               self._handle_dbapi_exception(e, None, None, None, None)
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1130: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.engine.base.Connection object at 0x0000025FA57048A0>
+e = AttributeError("'NoneType' object has no attribute 'send'")
+statement = None, parameters = None, cursor = None, context = None
+is_sub_exec = False
+
+    def _handle_dbapi_exception(
+        self,
+        e: BaseException,
+        statement: Optional[str],
+        parameters: Optional[_AnyExecuteParams],
+        cursor: Optional[DBAPICursor],
+        context: Optional[ExecutionContext],
+        is_sub_exec: bool = False,
+    ) -> NoReturn:
+        exc_info = sys.exc_info()
+    
+        is_exit_exception = util.is_exit_exception(e)
+    
+        if not self._is_disconnect:
+            self._is_disconnect = (
+                isinstance(e, self.dialect.loaded_dbapi.Error)
+                and not self.closed
+                and self.dialect.is_disconnect(
+                    e,
+                    self._dbapi_connection if not self.invalidated else None,
+                    cursor,
+                )
+            ) or (is_exit_exception and not self.closed)
+    
+        invalidate_pool_on_disconnect = not is_exit_exception
+    
+        ismulti: bool = (
+            not is_sub_exec and context.executemany
+            if context is not None
+            else False
+        )
+        if self._reentrant_error:
+            raise exc.DBAPIError.instance(
+                statement,
+                parameters,
+                e,
+                self.dialect.loaded_dbapi.Error,
+                hide_parameters=self.engine.hide_parameters,
+                dialect=self.dialect,
+                ismulti=ismulti,
+            ).with_traceback(exc_info[2]) from e
+        self._reentrant_error = True
+        try:
+            # non-DBAPI error - if we already got a context,
+            # or there's no string statement, don't wrap it
+            should_wrap = isinstance(e, self.dialect.loaded_dbapi.Error) or (
+                statement is not None
+                and context is None
+                and not is_exit_exception
+            )
+    
+            if should_wrap:
+                sqlalchemy_exception = exc.DBAPIError.instance(
+                    statement,
+                    parameters,
+                    cast(Exception, e),
+                    self.dialect.loaded_dbapi.Error,
+                    hide_parameters=self.engine.hide_parameters,
+                    connection_invalidated=self._is_disconnect,
+                    dialect=self.dialect,
+                    ismulti=ismulti,
+                )
+            else:
+                sqlalchemy_exception = None
+    
+            newraise = None
+    
+            if (self.dialect._has_events) and not self._execution_options.get(
+                "skip_user_error_events", False
+            ):
+                ctx = ExceptionContextImpl(
+                    e,
+                    sqlalchemy_exception,
+                    self.engine,
+                    self.dialect,
+                    self,
+                    cursor,
+                    statement,
+                    parameters,
+                    context,
+                    self._is_disconnect,
+                    invalidate_pool_on_disconnect,
+                    False,
+                )
+    
+                for fn in self.dialect.dispatch.handle_error:
+                    try:
+                        # handler returns an exception;
+                        # call next handler in a chain
+                        per_fn = fn(ctx)
+                        if per_fn is not None:
+                            ctx.chained_exception = newraise = per_fn
+                    except Exception as _raised:
+                        # handler raises an exception - stop processing
+                        newraise = _raised
+                        break
+    
+                if self._is_disconnect != ctx.is_disconnect:
+                    self._is_disconnect = ctx.is_disconnect
+                    if sqlalchemy_exception:
+                        sqlalchemy_exception.connection_invalidated = (
+                            ctx.is_disconnect
+                        )
+    
+                # set up potentially user-defined value for
+                # invalidate pool.
+                invalidate_pool_on_disconnect = (
+                    ctx.invalidate_pool_on_disconnect
+                )
+    
+            if should_wrap and context:
+                context.handle_dbapi_exception(e)
+    
+            if not self._is_disconnect:
+                if cursor:
+                    self._safe_close_cursor(cursor)
+                # "autorollback" was mostly relevant in 1.x series.
+                # It's very unlikely to reach here, as the connection
+                # does autobegin so when we are here, we are usually
+                # in an explicit / semi-explicit transaction.
+                # however we have a test which manufactures this
+                # scenario in any case using an event handler.
+                # test/engine/test_execute.py-> test_actual_autorollback
+                if not self.in_transaction():
+                    self._rollback_impl()
+    
+            if newraise:
+                raise newraise.with_traceback(exc_info[2]) from e
+            elif should_wrap:
+                assert sqlalchemy_exception is not None
+                raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+            else:
+                assert exc_info[1] is not None
+>               raise exc_info[1].with_traceback(exc_info[2])
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:2358: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.engine.base.Connection object at 0x0000025FA57048A0>
+
+    def _rollback_impl(self) -> None:
+        if self._has_events or self.engine._has_events:
+            self.dispatch.rollback(self)
+    
+        if self._still_open_and_dbapi_connection_is_valid:
+            if self._echo:
+                if self._is_autocommit_isolation():
+                    if self.dialect.skip_autocommit_rollback:
+                        self._log_info(
+                            "ROLLBACK will be skipped by "
+                            "skip_autocommit_rollback"
+                        )
+                    else:
+                        self._log_info(
+                            "ROLLBACK using DBAPI connection.rollback(); "
+                            "set skip_autocommit_rollback to prevent fully"
+                        )
+                else:
+                    self._log_info("ROLLBACK")
+            try:
+>               self.engine.dialect.do_rollback(self.connection)
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1128: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.postgresql.asyncpg.PGDialect_asyncpg object at 0x0000025FA550AE90>
+dbapi_connection = <sqlalchemy.pool.base._ConnectionFairy object at 0x0000025FA55A8890>
+
+    def do_rollback(self, dbapi_connection):
+        if self.skip_autocommit_rollback and self.detect_autocommit_setting(
+            dbapi_connection
+        ):
+            return
+>       dbapi_connection.rollback()
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\default.py:711: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <AdaptedConnection <asyncpg.connection.Connection object at 0x0000025FA57025D0>>
+
+    def rollback(self):
+        if self._started:
+            try:
+                self.await_(self._rollback_and_discard())
+                self._transaction = None
+                self._started = False
+            except Exception as error:
+                # don't dereference asyncpg transaction if we didn't
+                # actually try to call rollback() on it
+>               self._handle_exception(error)
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:887: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <AdaptedConnection <asyncpg.connection.Connection object at 0x0000025FA57025D0>>
+error = AttributeError("'NoneType' object has no attribute 'send'")
+
+    def _handle_exception(self, error):
+        if self._connection.is_closed():
+            self._transaction = None
+            self._started = False
+    
+        if not isinstance(error, AsyncAdapt_asyncpg_dbapi.Error):
+            exception_mapping = self.dbapi._asyncpg_error_translate
+    
+            for super_ in type(error).__mro__:
+                if super_ in exception_mapping:
+                    translated_error = exception_mapping[super_](
+                        "%s: %s" % (type(error), error)
+                    )
+                    translated_error.pgcode = translated_error.sqlstate = (
+                        getattr(error, "sqlstate", None)
+                    )
+                    raise translated_error from error
+            else:
+>               raise error
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:799: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <AdaptedConnection <asyncpg.connection.Connection object at 0x0000025FA57025D0>>
+
+    def rollback(self):
+        if self._started:
+            try:
+>               self.await_(self._rollback_and_discard())
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:881: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+awaitable = <coroutine object AsyncAdapt_asyncpg_connection._rollback_and_discard at 0x0000025FA54F76B0>
+
+    def await_only(awaitable: Awaitable[_T]) -> _T:
+        """Awaits an async function in a sync method.
+    
+        The sync method must be inside a :func:`greenlet_spawn` context.
+        :func:`await_only` calls cannot be nested.
+    
+        :param awaitable: The coroutine to call.
+    
+        """
+        # this is called in the context greenlet while running fn
+        current = getcurrent()
+        if not getattr(current, "__sqlalchemy_greenlet_provider__", False):
+            _safe_cancel_awaitable(awaitable)
+    
+            raise exc.MissingGreenlet(
+                "greenlet_spawn has not been called; can't call await_only() "
+                "here. Was IO attempted in an unexpected place?"
+            )
+    
+        # returns the control to the driver greenlet passing it
+        # a coroutine to run. Once the awaitable is done, the driver greenlet
+        # switches back to this greenlet with the result of awaitable that is
+        # then returned to the caller (or raised as error)
+>       return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:132: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <bound method Session.rollback of <sqlalchemy.orm.session.Session object at 0x0000025FA5506CF0>>
+_require_await = False, args = (), kwargs = {}
+context = <_AsyncIoGreenlet object at 0x0000025FA54A8E80 (otid=0x0000025FA06EC780) dead>
+switch_occurred = True
+result = <coroutine object Connection.close at 0x0000025FA5715460>
+
+    async def greenlet_spawn(
+        fn: Callable[..., _T],
+        *args: Any,
+        _require_await: bool = False,
+        **kwargs: Any,
+    ) -> _T:
+        """Runs a sync function ``fn`` in a new greenlet.
+    
+        The sync function can then use :func:`await_only` to wait for async
+        functions.
+    
+        :param fn: The sync callable to call.
+        :param \\*args: Positional arguments to pass to the ``fn`` callable.
+        :param \\*\\*kwargs: Keyword arguments to pass to the ``fn`` callable.
+        """
+    
+        result: Any
+        context = _AsyncIoGreenlet(fn, getcurrent())
+        # runs the function synchronously in gl greenlet. If the execution
+        # is interrupted by await_only, context is not dead and result is a
+        # coroutine to wait. If the context is dead the function has
+        # returned, and its result can be returned.
+        switch_occurred = False
+        result = context.switch(*args, **kwargs)
+        while not context.dead:
+            switch_occurred = True
+            try:
+                # wait for a coroutine from await_only and then return its
+                # result back to it.
+>               value = await result
+                        ^^^^^^^^^^^^
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:196: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <AdaptedConnection <asyncpg.connection.Connection object at 0x0000025FA57025D0>>
+
+    async def _rollback_and_discard(self):
+        try:
+>           await self._transaction.rollback()
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:862: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <asyncpg.Transaction state:failed 0x25fa56f6b20>
+
+    @connresource.guarded
+    async def rollback(self):
+        """Exit the transaction or savepoint block and rollback changes."""
+        if self._managed:
+            raise apg_errors.InterfaceError(
+                'cannot manually rollback from within an `async with` block')
+>       await self.__rollback()
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\asyncpg\transaction.py:227: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <asyncpg.Transaction state:failed 0x25fa56f6b20>
+
+    async def __rollback(self):
+        self.__check_state('rollback')
+    
+        if self._connection._top_xact is self:
+            self._connection._top_xact = None
+    
+        if self._nested:
+            query = 'ROLLBACK TO {};'.format(self._id)
+        else:
+            query = 'ROLLBACK;'
+    
+        try:
+>           await self._connection.execute(query)
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\asyncpg\transaction.py:206: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <asyncpg.connection.Connection object at 0x0000025FA57025D0>
+query = 'ROLLBACK;', timeout = None, args = ()
+
+    async def execute(
+        self,
+        query: str,
+        *args,
+        timeout: typing.Optional[float]=None,
+    ) -> str:
+        """Execute an SQL command (or commands).
+    
+        This method can execute many SQL commands at once, when no arguments
+        are provided.
+    
+        Example:
+    
+        .. code-block:: pycon
+    
+            >>> await con.execute('''
+            ...     CREATE TABLE mytab (a int);
+            ...     INSERT INTO mytab (a) VALUES (100), (200), (300);
+            ... ''')
+            INSERT 0 3
+    
+            >>> await con.execute('''
+            ...     INSERT INTO mytab (a) VALUES ($1), ($2)
+            ... ''', 10, 20)
+            INSERT 0 2
+    
+        :param args: Query arguments.
+        :param float timeout: Optional timeout value in seconds.
+        :return str: Status of the last SQL command.
+    
+        .. versionchanged:: 0.5.4
+           Made it possible to pass query arguments.
+        """
+        self._check_open()
+    
+        if not args:
+            if self._query_loggers:
+                with self._time_and_log(query, args, timeout):
+                    result = await self._protocol.query(query, timeout)
+            else:
+>               result = await self._protocol.query(query, timeout)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\asyncpg\connection.py:354: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+
+asyncpg/protocol/protocol.pyx:369: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+
+asyncpg/protocol/protocol.pyx:362: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+
+asyncpg/protocol/coreproto.pyx:1174: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+
+asyncpg/protocol/protocol.pyx:956: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <_ProactorSocketTransport fd=800 read=<_OverlappedFuture cancelled>>
+data = <memory at 0x0000025FA5603880>
+
+    def write(self, data):
+        if not isinstance(data, (bytes, bytearray, memoryview)):
+            raise TypeError(
+                f"data argument must be a bytes-like object, "
+                f"not {type(data).__name__}")
+        if self._eof_written:
+            raise RuntimeError('write_eof() already called')
+        if self._empty_waiter is not None:
+            raise RuntimeError('unable to write; sendfile is in progress')
+    
+        if not data:
+            return
+    
+        if self._conn_lost:
+            if self._conn_lost >= constants.LOG_THRESHOLD_FOR_CONNLOST_WRITES:
+                logger.warning('socket.send() raised exception.')
+            self._conn_lost += 1
+            return
+    
+        # Observable states:
+        # 1. IDLE: _write_fut and _buffer both None
+        # 2. WRITING: _write_fut set; _buffer None
+        # 3. BACKED UP: _write_fut set; _buffer a bytearray
+        # We always copy the data, so the caller can't modify it
+        # while we're still waiting for the I/O to happen.
+        if self._write_fut is None:  # IDLE -> WRITING
+            assert self._buffer is None
+            # Pass a copy, except if it's already immutable.
+>           self._loop_writing(data=bytes(data))
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\asyncio\proactor_events.py:366: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <_ProactorSocketTransport fd=800 read=<_OverlappedFuture cancelled>>
+f = None, data = b'Q\x00\x00\x00\x0eROLLBACK;\x00'
+
+    def _loop_writing(self, f=None, data=None):
+        try:
+            if f is not None and self._write_fut is None and self._closing:
+                # XXX most likely self._force_close() has been called, and
+                # it has set self._write_fut to None.
+                return
+            assert f is self._write_fut
+            self._write_fut = None
+            self._pending_write = 0
+            if f:
+                f.result()
+            if data is None:
+                data = self._buffer
+                self._buffer = None
+            if not data:
+                if self._closing:
+                    self._loop.call_soon(self._call_connection_lost, None)
+                if self._eof_written:
+                    self._sock.shutdown(socket.SHUT_WR)
+                # Now that we've reduced the buffer size, tell the
+                # protocol to resume writing if it was paused.  Note that
+                # we do this last since the callback is called immediately
+                # and it may add more data to the buffer (even causing the
+                # protocol to be paused again).
+                self._maybe_resume_protocol()
+            else:
+>               self._write_fut = self._loop._proactor.send(self._sock, data)
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^
+E               AttributeError: 'NoneType' object has no attribute 'send'
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\asyncio\proactor_events.py:402: AttributeError
+------------------------------ Captured log call ------------------------------
+INFO     sqlalchemy.engine.Engine:base.py:2702 BEGIN (implicit)
+INFO     sqlalchemy.engine.Engine:base.py:1846 INSERT INTO trip_trips (id, trip_no, source_type, source_slip_no, source_reference_key, source_payload_hash, review_reason_code, driver_id, vehicle_id, tare_weight_kg, gross_weight_kg, net_weight_kg, is_empty_return, status, version, created_by_actor_type, created_by_actor_id, created_at_utc, updated_at_utc) VALUES ($1::VARCHAR, $2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::VARCHAR, $6::VARCHAR, $7::VARCHAR, $8::VARCHAR, $9::VARCHAR, $10::INTEGER, $11::INTEGER, $12::INTEGER, $13::BOOLEAN, $14::VARCHAR, $15::INTEGER, $16::VARCHAR, $17::VARCHAR, $18::TIMESTAMP WITH TIME ZONE, $19::TIMESTAMP WITH TIME ZONE)
+INFO     sqlalchemy.engine.Engine:base.py:1846 [generated in 0.00061s] ('01JATENRICHSTALEROW001', 'TR-ENRICH-STALE', 'TELEGRAM_TRIP_SLIP', 'SLIP-ENRICH-STALE', 'telegram-message-enrich-stale', 'hash', 'SOURCE_IMPORT', 'driver-001', 'vehicle-001', 10000, 25000, 15000, False, 'PENDING_REVIEW', 1, 'SERVICE', 'worker-test', datetime.datetime(2026, 4, 12, 6, 25, 8, 48253, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 4, 12, 6, 25, 8, 48253, tzinfo=datetime.timezone.utc))
+---------------------------- Captured log teardown ----------------------------
+INFO     sqlalchemy.engine.Engine:base.py:2705 ROLLBACK
+ERROR    sqlalchemy.pool.impl.NullPool:base.py:376 Exception closing connection <AdaptedConnection <asyncpg.connection.Connection object at 0x0000025FA57025D0>>
+Traceback (most recent call last):
+  File "C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\pool\base.py", line 374, in _close_connection
+    self._dialect.do_close(connection)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\default.py", line 720, in do_close
+    dbapi_connection.close()
+    ~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 903, in close
+    self.await_(self._connection.close())
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\asyncpg\connection.py", line 1513, in close
+    await self._protocol.close(timeout)
+  File "asyncpg/protocol/protocol.pyx", line 617, in close
+  File "asyncpg/protocol/protocol.pyx", line 650, in asyncpg.protocol.protocol.BaseProtocol._request_cancel
+  File "C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\asyncpg\connection.py", line 1682, in _cancel_current_command
+    self._cancellations.add(self._loop.create_task(self._cancel(waiter)))
+                            ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\asyncio\base_events.py", line 466, in create_task
+    self._check_closed()
+    ~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\asyncio\base_events.py", line 550, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+INFO     sqlalchemy.engine.Engine:base.py:2702 BEGIN (implicit)
+INFO     sqlalchemy.engine.Engine:base.py:1846 TRUNCATE TABLE trip_trip_timeline, trip_trip_evidence, trip_trip_enrichment, trip_trip_delete_audit, trip_outbox, trip_idempotency_records, trip_trips, worker_heartbeats CASCADE
+INFO     sqlalchemy.engine.Engine:base.py:1846 [cached since 1.516s ago] ()
+INFO     sqlalchemy.engine.Engine:base.py:2708 COMMIT
+================================== FAILURES ===================================
+____________________ test_enrichment_reclaims_stale_claim _____________________
+
+self = <sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_cursor object at 0x0000025FA56C1960>
+operation = 'INSERT INTO trip_trips (id, trip_no, source_type, source_slip_no, source_reference_key, source_payload_hash, review_r... $14::VARCHAR, $15::INTEGER, $16::VARCHAR, $17::VARCHAR, $18::TIMESTAMP WITH TIME ZONE, $19::TIMESTAMP WITH TIME ZONE)'
+parameters = ('01JATENRICHSTALEROW001', 'TR-ENRICH-STALE', 'TELEGRAM_TRIP_SLIP', 'SLIP-ENRICH-STALE', 'telegram-message-enrich-stale', 'hash', ...)
+
+    async def _prepare_and_execute(self, operation, parameters):
+        adapt_connection = self._adapt_connection
+    
+        async with adapt_connection._execute_mutex:
+            if not adapt_connection._started:
+                await adapt_connection._start_transaction()
+    
+            if parameters is None:
+                parameters = ()
+    
+            try:
+                prepared_stmt, attributes = await adapt_connection._prepare(
+                    operation, self._invalidate_schema_cache_asof
+                )
+    
+                if attributes:
+                    self.description = [
+                        (
+                            attr.name,
+                            attr.type.oid,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                        )
+                        for attr in attributes
+                    ]
+                else:
+                    self.description = None
+    
+                if self.server_side:
+                    self._cursor = await prepared_stmt.cursor(*parameters)
+                    self.rowcount = -1
+                else:
+>                   self._rows = deque(await prepared_stmt.fetch(*parameters))
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:550: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <asyncpg.prepared_stmt.PreparedStatement object at 0x0000025FA56E3920>
+timeout = None
+args = ('01JATENRICHSTALEROW001', 'TR-ENRICH-STALE', 'TELEGRAM_TRIP_SLIP', 'SLIP-ENRICH-STALE', 'telegram-message-enrich-stale', 'hash', ...)
+
+    @connresource.guarded
+    async def fetch(self, *args, timeout=None):
+        r"""Execute the statement and return a list of :class:`Record` objects.
+    
+        :param str query: Query text
+        :param args: Query arguments
+        :param float timeout: Optional timeout value in seconds.
+    
+        :return: A list of :class:`Record` instances.
+        """
+>       data = await self.__bind_execute(args, 0, timeout)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\asyncpg\prepared_stmt.py:177: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <asyncpg.prepared_stmt.PreparedStatement object at 0x0000025FA56E3920>
+args = ('01JATENRICHSTALEROW001', 'TR-ENRICH-STALE', 'TELEGRAM_TRIP_SLIP', 'SLIP-ENRICH-STALE', 'telegram-message-enrich-stale', 'hash', ...)
+limit = 0, timeout = None
+
+    async def __bind_execute(self, args, limit, timeout):
+>       data, status, _ = await self.__do_execute(
+            lambda protocol: protocol.bind_execute(
+                self._state, args, '', limit, True, timeout))
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\asyncpg\prepared_stmt.py:268: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <asyncpg.prepared_stmt.PreparedStatement object at 0x0000025FA56E3920>
+executor = <function PreparedStatement.__bind_execute.<locals>.<lambda> at 0x0000025FA56BFAB0>
+
+    async def __do_execute(self, executor):
+        protocol = self._connection._protocol
+        try:
+>           return await executor(protocol)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\asyncpg\prepared_stmt.py:257: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+E   asyncpg.exceptions.NotNullViolationError: null value in column "trip_datetime_utc" of relation "trip_trips" violates not-null constraint
+E   DETAIL:  Failing row contains (01JATENRICHSTALEROW001, TR-ENRICH-STALE, TELEGRAM_TRIP_SLIP, SLIP-ENRICH-STALE, telegram-message-enrich-stale, hash, SOURCE_IMPORT, null, driver-001, vehicle-001, null, null, null, null, null, null, null, null, null, null, null, 10000, 25000, 15000, f, PENDING_REVIEW, 1, SERVICE, worker-test, 2026-04-12 06:25:08.048253+00, 2026-04-12 06:25:08.048253+00, null, null).
+
+asyncpg/protocol/protocol.pyx:205: NotNullViolationError
+
+The above exception was the direct cause of the following exception:
+
+self = <sqlalchemy.engine.base.Connection object at 0x0000025FA57048A0>
+dialect = <sqlalchemy.dialects.postgresql.asyncpg.PGDialect_asyncpg object at 0x0000025FA550AE90>
+context = <sqlalchemy.dialects.postgresql.asyncpg.PGExecutionContext_asyncpg object at 0x0000025FA5572250>
+statement = <sqlalchemy.dialects.postgresql.asyncpg.PGCompiler_asyncpg object at 0x0000025FA56DF4D0>
+parameters = [('01JATENRICHSTALEROW001', 'TR-ENRICH-STALE', 'TELEGRAM_TRIP_SLIP', 'SLIP-ENRICH-STALE', 'telegram-message-enrich-stale', 'hash', ...)]
+
+    def _exec_single_context(
+        self,
+        dialect: Dialect,
+        context: ExecutionContext,
+        statement: Union[str, Compiled],
+        parameters: Optional[_AnyMultiExecuteParams],
+    ) -> CursorResult[Any]:
+        """continue the _execute_context() method for a single DBAPI
+        cursor.execute() or cursor.executemany() call.
+    
+        """
+        if dialect.bind_typing is BindTyping.SETINPUTSIZES:
+            generic_setinputsizes = context._prepare_set_input_sizes()
+    
+            if generic_setinputsizes:
+                try:
+                    dialect.do_set_input_sizes(
+                        context.cursor, generic_setinputsizes, context
+                    )
+                except BaseException as e:
+                    self._handle_dbapi_exception(
+                        e, str(statement), parameters, None, context
+                    )
+    
+        cursor, str_statement, parameters = (
+            context.cursor,
+            context.statement,
+            context.parameters,
+        )
+    
+        effective_parameters: Optional[_AnyExecuteParams]
+    
+        if not context.executemany:
+            effective_parameters = parameters[0]
+        else:
+            effective_parameters = parameters
+    
+        if self._has_events or self.engine._has_events:
+            for fn in self.dispatch.before_cursor_execute:
+                str_statement, effective_parameters = fn(
+                    self,
+                    cursor,
+                    str_statement,
+                    effective_parameters,
+                    context,
+                    context.executemany,
+                )
+    
+        if self._echo:
+            self._log_info(str_statement)
+    
+            stats = context._get_cache_stats()
+    
+            if not self.engine.hide_parameters:
+                self._log_info(
+                    "[%s] %r",
+                    stats,
+                    sql_util._repr_params(
+                        effective_parameters,
+                        batches=10,
+                        ismulti=context.executemany,
+                    ),
+                )
+            else:
+                self._log_info(
+                    "[%s] [SQL parameters hidden due to hide_parameters=True]",
+                    stats,
+                )
+    
+        evt_handled: bool = False
+        try:
+            if context.execute_style is ExecuteStyle.EXECUTEMANY:
+                effective_parameters = cast(
+                    "_CoreMultiExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_executemany:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_executemany(
+                        cursor,
+                        str_statement,
+                        effective_parameters,
+                        context,
+                    )
+            elif not effective_parameters and context.no_parameters:
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute_no_params:
+                        if fn(cursor, str_statement, context):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_execute_no_params(
+                        cursor, str_statement, context
+                    )
+            else:
+                effective_parameters = cast(
+                    "_CoreSingleExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+>                   self.dialect.do_execute(
+                        cursor, str_statement, effective_parameters, context
+                    )
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1967: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.postgresql.asyncpg.PGDialect_asyncpg object at 0x0000025FA550AE90>
+cursor = <sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_cursor object at 0x0000025FA56C1960>
+statement = 'INSERT INTO trip_trips (id, trip_no, source_type, source_slip_no, source_reference_key, source_payload_hash, review_r... $14::VARCHAR, $15::INTEGER, $16::VARCHAR, $17::VARCHAR, $18::TIMESTAMP WITH TIME ZONE, $19::TIMESTAMP WITH TIME ZONE)'
+parameters = ('01JATENRICHSTALEROW001', 'TR-ENRICH-STALE', 'TELEGRAM_TRIP_SLIP', 'SLIP-ENRICH-STALE', 'telegram-message-enrich-stale', 'hash', ...)
+context = <sqlalchemy.dialects.postgresql.asyncpg.PGExecutionContext_asyncpg object at 0x0000025FA5572250>
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+>       cursor.execute(statement, parameters)
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\default.py:951: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_cursor object at 0x0000025FA56C1960>
+operation = 'INSERT INTO trip_trips (id, trip_no, source_type, source_slip_no, source_reference_key, source_payload_hash, review_r... $14::VARCHAR, $15::INTEGER, $16::VARCHAR, $17::VARCHAR, $18::TIMESTAMP WITH TIME ZONE, $19::TIMESTAMP WITH TIME ZONE)'
+parameters = ('01JATENRICHSTALEROW001', 'TR-ENRICH-STALE', 'TELEGRAM_TRIP_SLIP', 'SLIP-ENRICH-STALE', 'telegram-message-enrich-stale', 'hash', ...)
+
+    def execute(self, operation, parameters=None):
+>       self._adapt_connection.await_(
+            self._prepare_and_execute(operation, parameters)
+        )
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:585: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+awaitable = <coroutine object AsyncAdapt_asyncpg_cursor._prepare_and_execute at 0x0000025FA55A8F60>
+
+    def await_only(awaitable: Awaitable[_T]) -> _T:
+        """Awaits an async function in a sync method.
+    
+        The sync method must be inside a :func:`greenlet_spawn` context.
+        :func:`await_only` calls cannot be nested.
+    
+        :param awaitable: The coroutine to call.
+    
+        """
+        # this is called in the context greenlet while running fn
+        current = getcurrent()
+        if not getattr(current, "__sqlalchemy_greenlet_provider__", False):
+            _safe_cancel_awaitable(awaitable)
+    
+            raise exc.MissingGreenlet(
+                "greenlet_spawn has not been called; can't call await_only() "
+                "here. Was IO attempted in an unexpected place?"
+            )
+    
+        # returns the control to the driver greenlet passing it
+        # a coroutine to run. Once the awaitable is done, the driver greenlet
+        # switches back to this greenlet with the result of awaitable that is
+        # then returned to the caller (or raised as error)
+>       return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:132: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <bound method Session.execute of <sqlalchemy.orm.session.Session object at 0x0000025FA5506CF0>>
+_require_await = False
+args = (<sqlalchemy.sql.dml.Insert object at 0x0000025FA55295B0>,)
+kwargs = {'bind_arguments': None, 'execution_options': immutabledict({'prebuffer_rows': True}), 'params': None}
+context = <_AsyncIoGreenlet object at 0x0000025FA55E3AC0 (otid=0x0000025FA06EC780) dead>
+switch_occurred = True
+result = <coroutine object AsyncAdapt_asyncpg_cursor._prepare_and_execute at 0x0000025FA55A8F60>
+value = None
+
+    async def greenlet_spawn(
+        fn: Callable[..., _T],
+        *args: Any,
+        _require_await: bool = False,
+        **kwargs: Any,
+    ) -> _T:
+        """Runs a sync function ``fn`` in a new greenlet.
+    
+        The sync function can then use :func:`await_only` to wait for async
+        functions.
+    
+        :param fn: The sync callable to call.
+        :param \\*args: Positional arguments to pass to the ``fn`` callable.
+        :param \\*\\*kwargs: Keyword arguments to pass to the ``fn`` callable.
+        """
+    
+        result: Any
+        context = _AsyncIoGreenlet(fn, getcurrent())
+        # runs the function synchronously in gl greenlet. If the execution
+        # is interrupted by await_only, context is not dead and result is a
+        # coroutine to wait. If the context is dead the function has
+        # returned, and its result can be returned.
+        switch_occurred = False
+        result = context.switch(*args, **kwargs)
+        while not context.dead:
+            switch_occurred = True
+            try:
+                # wait for a coroutine from await_only and then return its
+                # result back to it.
+>               value = await result
+                        ^^^^^^^^^^^^
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:196: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_cursor object at 0x0000025FA56C1960>
+operation = 'INSERT INTO trip_trips (id, trip_no, source_type, source_slip_no, source_reference_key, source_payload_hash, review_r... $14::VARCHAR, $15::INTEGER, $16::VARCHAR, $17::VARCHAR, $18::TIMESTAMP WITH TIME ZONE, $19::TIMESTAMP WITH TIME ZONE)'
+parameters = ('01JATENRICHSTALEROW001', 'TR-ENRICH-STALE', 'TELEGRAM_TRIP_SLIP', 'SLIP-ENRICH-STALE', 'telegram-message-enrich-stale', 'hash', ...)
+
+    async def _prepare_and_execute(self, operation, parameters):
+        adapt_connection = self._adapt_connection
+    
+        async with adapt_connection._execute_mutex:
+            if not adapt_connection._started:
+                await adapt_connection._start_transaction()
+    
+            if parameters is None:
+                parameters = ()
+    
+            try:
+                prepared_stmt, attributes = await adapt_connection._prepare(
+                    operation, self._invalidate_schema_cache_asof
+                )
+    
+                if attributes:
+                    self.description = [
+                        (
+                            attr.name,
+                            attr.type.oid,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                        )
+                        for attr in attributes
+                    ]
+                else:
+                    self.description = None
+    
+                if self.server_side:
+                    self._cursor = await prepared_stmt.cursor(*parameters)
+                    self.rowcount = -1
+                else:
+                    self._rows = deque(await prepared_stmt.fetch(*parameters))
+                    status = prepared_stmt.get_statusmsg()
+    
+                    reg = re.match(
+                        r"(?:SELECT|UPDATE|DELETE|INSERT \d+) (\d+)",
+                        status or "",
+                    )
+                    if reg:
+                        self.rowcount = int(reg.group(1))
+                    else:
+                        self.rowcount = -1
+    
+            except Exception as error:
+>               self._handle_exception(error)
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:563: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_cursor object at 0x0000025FA56C1960>
+error = NotNullViolationError('null value in column "trip_datetime_utc" of relation "trip_trips" violates not-null constraint')
+
+    def _handle_exception(self, error):
+>       self._adapt_connection._handle_exception(error)
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:513: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <AdaptedConnection <asyncpg.connection.Connection object at 0x0000025FA57025D0>>
+error = NotNullViolationError('null value in column "trip_datetime_utc" of relation "trip_trips" violates not-null constraint')
+
+    def _handle_exception(self, error):
+        if self._connection.is_closed():
+            self._transaction = None
+            self._started = False
+    
+        if not isinstance(error, AsyncAdapt_asyncpg_dbapi.Error):
+            exception_mapping = self.dbapi._asyncpg_error_translate
+    
+            for super_ in type(error).__mro__:
+                if super_ in exception_mapping:
+                    translated_error = exception_mapping[super_](
+                        "%s: %s" % (type(error), error)
+                    )
+                    translated_error.pgcode = translated_error.sqlstate = (
+                        getattr(error, "sqlstate", None)
+                    )
+>                   raise translated_error from error
+E                   sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.IntegrityError: <class 'asyncpg.exceptions.NotNullViolationError'>: null value in column "trip_datetime_utc" of relation "trip_trips" violates not-null constraint
+E                   DETAIL:  Failing row contains (01JATENRICHSTALEROW001, TR-ENRICH-STALE, TELEGRAM_TRIP_SLIP, SLIP-ENRICH-STALE, telegram-message-enrich-stale, hash, SOURCE_IMPORT, null, driver-001, vehicle-001, null, null, null, null, null, null, null, null, null, null, null, 10000, 25000, 15000, f, PENDING_REVIEW, 1, SERVICE, worker-test, 2026-04-12 06:25:08.048253+00, 2026-04-12 06:25:08.048253+00, null, null).
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:797: IntegrityError
+
+The above exception was the direct cause of the following exception:
+
+test_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x0000025FA21E6CF0>
+db_engine = <sqlalchemy.ext.asyncio.engine.AsyncEngine object at 0x0000025FA38F74D0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000025FA54BEBE0>
+
+    @pytest.mark.asyncio
+    async def test_enrichment_reclaims_stale_claim(test_session, db_engine, monkeypatch: pytest.MonkeyPatch):
+        session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+        monkeypatch.setattr("trip_service.workers.enrichment_worker.async_session_factory", session_factory)
+    
+        async def stub_resolve_route(origin_name: str, destination_name: str):
+            return "route-resolved-001", RouteStatus.READY, "pair-resolved-001"
+    
+        monkeypatch.setattr("trip_service.workers.enrichment_worker._resolve_route", stub_resolve_route)
+        monkeypatch.setattr("trip_service.workers.enrichment_worker.fetch_trip_context", stub_fetch_trip_context)
+    
+        now = datetime.now(UTC)
+        # Use explicit INSERT to avoid ORM batch-insert/tuple errors
+        t_id = "01JATENRICHSTALEROW001"
+        e_id = "01JATENRICHSTALEROW002"
+        en_id = "01JATENRICHSTALEROW003"
+>       await test_session.execute(
+            insert(TripTrip).values(
+                id=t_id,
+                trip_no="TR-ENRICH-STALE",
+                source_type="TELEGRAM_TRIP_SLIP",
+                source_slip_no="SLIP-ENRICH-STALE",
+                source_reference_key="telegram-message-enrich-stale",
+                source_payload_hash="hash",
+                review_reason_code="SOURCE_IMPORT",
+                driver_id="driver-001",
+                vehicle_id="vehicle-001",
+                tare_weight_kg=10000,
+                gross_weight_kg=25000,
+                net_weight_kg=15000,
+                is_empty_return=False,
+                status="PENDING_REVIEW",
+                version=1,
+                created_by_actor_type="SERVICE",
+                created_by_actor_id="worker-test",
+                created_at_utc=now,
+                updated_at_utc=now,
+            )
+        )
+
+tests\test_workers.py:379: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x0000025FA21E6CF0>
+statement = <sqlalchemy.sql.dml.Insert object at 0x0000025FA55295B0>
+params = None, execution_options = immutabledict({'prebuffer_rows': True})
+bind_arguments = None, kw = {}
+
+    async def execute(
+        self,
+        statement: Executable,
+        params: Optional[_CoreAnyExecuteParams] = None,
+        *,
+        execution_options: OrmExecuteOptionsParameter = util.EMPTY_DICT,
+        bind_arguments: Optional[_BindArguments] = None,
+        **kw: Any,
+    ) -> Result[Any]:
+        """Execute a statement and return a buffered
+        :class:`_engine.Result` object.
+    
+        .. seealso::
+    
+            :meth:`_orm.Session.execute` - main documentation for execute
+    
+        """
+    
+        if execution_options:
+            execution_options = util.immutabledict(execution_options).union(
+                _EXECUTE_OPTIONS
+            )
+        else:
+            execution_options = _EXECUTE_OPTIONS
+    
+>       result = await greenlet_spawn(
+            self.sync_session.execute,
+            statement,
+            params=params,
+            execution_options=execution_options,
+            bind_arguments=bind_arguments,
+            **kw,
+        )
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\ext\asyncio\session.py:449: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <bound method Session.execute of <sqlalchemy.orm.session.Session object at 0x0000025FA5506CF0>>
+_require_await = False
+args = (<sqlalchemy.sql.dml.Insert object at 0x0000025FA55295B0>,)
+kwargs = {'bind_arguments': None, 'execution_options': immutabledict({'prebuffer_rows': True}), 'params': None}
+context = <_AsyncIoGreenlet object at 0x0000025FA55E3AC0 (otid=0x0000025FA06EC780) dead>
+switch_occurred = True
+result = <coroutine object AsyncAdapt_asyncpg_cursor._prepare_and_execute at 0x0000025FA55A8F60>
+value = None
+
+    async def greenlet_spawn(
+        fn: Callable[..., _T],
+        *args: Any,
+        _require_await: bool = False,
+        **kwargs: Any,
+    ) -> _T:
+        """Runs a sync function ``fn`` in a new greenlet.
+    
+        The sync function can then use :func:`await_only` to wait for async
+        functions.
+    
+        :param fn: The sync callable to call.
+        :param \\*args: Positional arguments to pass to the ``fn`` callable.
+        :param \\*\\*kwargs: Keyword arguments to pass to the ``fn`` callable.
+        """
+    
+        result: Any
+        context = _AsyncIoGreenlet(fn, getcurrent())
+        # runs the function synchronously in gl greenlet. If the execution
+        # is interrupted by await_only, context is not dead and result is a
+        # coroutine to wait. If the context is dead the function has
+        # returned, and its result can be returned.
+        switch_occurred = False
+        result = context.switch(*args, **kwargs)
+        while not context.dead:
+            switch_occurred = True
+            try:
+                # wait for a coroutine from await_only and then return its
+                # result back to it.
+                value = await result
+            except BaseException:
+                # this allows an exception to be raised within
+                # the moderated greenlet so that it can continue
+                # its expected flow.
+>               result = context.throw(*sys.exc_info())
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:201: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.orm.session.Session object at 0x0000025FA5506CF0>
+statement = <sqlalchemy.sql.dml.Insert object at 0x0000025FA55295B0>
+params = None
+
+    def execute(
+        self,
+        statement: Executable,
+        params: Optional[_CoreAnyExecuteParams] = None,
+        *,
+        execution_options: OrmExecuteOptionsParameter = util.EMPTY_DICT,
+        bind_arguments: Optional[_BindArguments] = None,
+        _parent_execute_state: Optional[Any] = None,
+        _add_event: Optional[Any] = None,
+    ) -> Result[Any]:
+        r"""Execute a SQL expression construct.
+    
+        Returns a :class:`_engine.Result` object representing
+        results of the statement execution.
+    
+        E.g.::
+    
+            from sqlalchemy import select
+    
+            result = session.execute(select(User).where(User.id == 5))
+    
+        The API contract of :meth:`_orm.Session.execute` is similar to that
+        of :meth:`_engine.Connection.execute`, the :term:`2.0 style` version
+        of :class:`_engine.Connection`.
+    
+        .. versionchanged:: 1.4 the :meth:`_orm.Session.execute` method is
+           now the primary point of ORM statement execution when using
+           :term:`2.0 style` ORM usage.
+    
+        :param statement:
+            An executable statement (i.e. an :class:`.Executable` expression
+            such as :func:`_expression.select`).
+    
+        :param params:
+            Optional dictionary, or list of dictionaries, containing
+            bound parameter values.   If a single dictionary, single-row
+            execution occurs; if a list of dictionaries, an
+            "executemany" will be invoked.  The keys in each dictionary
+            must correspond to parameter names present in the statement.
+    
+        :param execution_options: optional dictionary of execution options,
+         which will be associated with the statement execution.  This
+         dictionary can provide a subset of the options that are accepted
+         by :meth:`_engine.Connection.execution_options`, and may also
+         provide additional options understood only in an ORM context.
+    
+         .. seealso::
+    
+            :ref:`orm_queryguide_execution_options` - ORM-specific execution
+            options
+    
+        :param bind_arguments: dictionary of additional arguments to determine
+         the bind.  May include "mapper", "bind", or other custom arguments.
+         Contents of this dictionary are passed to the
+         :meth:`.Session.get_bind` method.
+    
+        :return: a :class:`_engine.Result` object.
+    
+    
+        """
+>       return self._execute_internal(
+            statement,
+            params,
+            execution_options=execution_options,
+            bind_arguments=bind_arguments,
+            _parent_execute_state=_parent_execute_state,
+            _add_event=_add_event,
+        )
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\orm\session.py:2351: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.orm.session.Session object at 0x0000025FA5506CF0>
+statement = <sqlalchemy.sql.annotation.AnnotatedInsert object at 0x0000025FA5506510>
+params = None
+
+    def _execute_internal(
+        self,
+        statement: Executable,
+        params: Optional[_CoreAnyExecuteParams] = None,
+        *,
+        execution_options: OrmExecuteOptionsParameter = util.EMPTY_DICT,
+        bind_arguments: Optional[_BindArguments] = None,
+        _parent_execute_state: Optional[Any] = None,
+        _add_event: Optional[Any] = None,
+        _scalar_result: bool = False,
+    ) -> Any:
+        statement = coercions.expect(roles.StatementRole, statement)
+    
+        if not bind_arguments:
+            bind_arguments = {}
+        else:
+            bind_arguments = dict(bind_arguments)
+    
+        if (
+            statement._propagate_attrs.get("compile_state_plugin", None)
+            == "orm"
+        ):
+            compile_state_cls = CompileState._get_plugin_class_for_plugin(
+                statement, "orm"
+            )
+            if TYPE_CHECKING:
+                assert isinstance(
+                    compile_state_cls, context.AbstractORMCompileState
+                )
+        else:
+            compile_state_cls = None
+            bind_arguments.setdefault("clause", statement)
+    
+        execution_options = util.coerce_to_immutabledict(execution_options)
+    
+        if _parent_execute_state:
+            events_todo = _parent_execute_state._remaining_events()
+        else:
+            events_todo = self.dispatch.do_orm_execute
+            if _add_event:
+                events_todo = list(events_todo) + [_add_event]
+    
+        if events_todo:
+            if compile_state_cls is not None:
+                # for event handlers, do the orm_pre_session_exec
+                # pass ahead of the event handlers, so that things like
+                # .load_options, .update_delete_options etc. are populated.
+                # is_pre_event=True allows the hook to hold off on things
+                # it doesn't want to do twice, including autoflush as well
+                # as "pre fetch" for DML, etc.
+                (
+                    statement,
+                    execution_options,
+                ) = compile_state_cls.orm_pre_session_exec(
+                    self,
+                    statement,
+                    params,
+                    execution_options,
+                    bind_arguments,
+                    True,
+                )
+    
+            orm_exec_state = ORMExecuteState(
+                self,
+                statement,
+                params,
+                execution_options,
+                bind_arguments,
+                compile_state_cls,
+                events_todo,
+            )
+            for idx, fn in enumerate(events_todo):
+                orm_exec_state._starting_event_idx = idx
+                fn_result: Optional[Result[Any]] = fn(orm_exec_state)
+                if fn_result:
+                    if _scalar_result:
+                        return fn_result.scalar()
+                    else:
+                        return fn_result
+    
+            statement = orm_exec_state.statement
+            execution_options = orm_exec_state.local_execution_options
+    
+        if compile_state_cls is not None:
+            # now run orm_pre_session_exec() "for real".   if there were
+            # event hooks, this will re-run the steps that interpret
+            # new execution_options into load_options / update_delete_options,
+            # which we assume the event hook might have updated.
+            # autoflush will also be invoked in this step if enabled.
+            (
+                statement,
+                execution_options,
+            ) = compile_state_cls.orm_pre_session_exec(
+                self,
+                statement,
+                params,
+                execution_options,
+                bind_arguments,
+                False,
+            )
+    
+        bind = self.get_bind(**bind_arguments)
+    
+        conn = self._connection_for_bind(bind)
+    
+        if _scalar_result and not compile_state_cls:
+            if TYPE_CHECKING:
+                params = cast(_CoreSingleExecuteParams, params)
+            return conn.scalar(
+                statement, params or {}, execution_options=execution_options
+            )
+    
+        if compile_state_cls:
+>           result: Result[Any] = compile_state_cls.orm_execute_statement(
+                self,
+                statement,
+                params or {},
+                execution_options,
+                bind_arguments,
+                conn,
+            )
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\orm\session.py:2249: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+cls = <class 'sqlalchemy.orm.bulk_persistence.BulkORMInsert'>
+session = <sqlalchemy.orm.session.Session object at 0x0000025FA5506CF0>
+statement = <sqlalchemy.sql.annotation.AnnotatedInsert object at 0x0000025FA5506510>
+params = {}
+execution_options = immutabledict({'prebuffer_rows': True, '_result_disable_adapt_to_context': True, '_sa_orm_insert_options': default_insert_options(_dml_strategy='orm', _subject_mapper=<Mapper at 0x25fa4af12b0; TripTrip>)})
+bind_arguments = {'clause': <sqlalchemy.sql.dml.Insert object at 0x0000025FA55295B0>, 'mapper': <Mapper at 0x25fa4af12b0; TripTrip>}
+conn = <sqlalchemy.engine.base.Connection object at 0x0000025FA57048A0>
+
+    @classmethod
+    def orm_execute_statement(
+        cls,
+        session: Session,
+        statement: dml.Insert,
+        params: _CoreAnyExecuteParams,
+        execution_options: OrmExecuteOptionsParameter,
+        bind_arguments: _BindArguments,
+        conn: Connection,
+    ) -> _result.Result:
+        insert_options = execution_options.get(
+            "_sa_orm_insert_options", cls.default_insert_options
+        )
+    
+        if insert_options._dml_strategy not in (
+            "raw",
+            "bulk",
+            "orm",
+            "auto",
+        ):
+            raise sa_exc.ArgumentError(
+                "Valid strategies for ORM insert strategy "
+                "are 'raw', 'orm', 'bulk', 'auto"
+            )
+    
+        result: _result.Result[Any]
+    
+        if insert_options._dml_strategy == "raw":
+            result = conn.execute(
+                statement, params or {}, execution_options=execution_options
+            )
+            return result
+    
+        if insert_options._dml_strategy == "bulk":
+            mapper = insert_options._subject_mapper
+    
+            if (
+                statement._post_values_clause is not None
+                and mapper._multiple_persistence_tables
+            ):
+                raise sa_exc.InvalidRequestError(
+                    "bulk INSERT with a 'post values' clause "
+                    "(typically upsert) not supported for multi-table "
+                    f"mapper {mapper}"
+                )
+    
+            assert mapper is not None
+            assert session._transaction is not None
+            result = _bulk_insert(
+                mapper,
+                cast(
+                    "Iterable[Dict[str, Any]]",
+                    [params] if isinstance(params, dict) else params,
+                ),
+                session._transaction,
+                isstates=False,
+                return_defaults=insert_options._return_defaults,
+                render_nulls=insert_options._render_nulls,
+                use_orm_insert_stmt=statement,
+                execution_options=execution_options,
+            )
+        elif insert_options._dml_strategy == "orm":
+>           result = conn.execute(
+                statement, params or {}, execution_options=execution_options
+            )
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\orm\bulk_persistence.py:1306: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.engine.base.Connection object at 0x0000025FA57048A0>
+statement = <sqlalchemy.sql.annotation.AnnotatedInsert object at 0x0000025FA5506510>
+parameters = {}
+
+    def execute(
+        self,
+        statement: Executable,
+        parameters: Optional[_CoreAnyExecuteParams] = None,
+        *,
+        execution_options: Optional[CoreExecuteOptionsParameter] = None,
+    ) -> CursorResult[Any]:
+        r"""Executes a SQL statement construct and returns a
+        :class:`_engine.CursorResult`.
+    
+        :param statement: The statement to be executed.  This is always
+         an object that is in both the :class:`_expression.ClauseElement` and
+         :class:`_expression.Executable` hierarchies, including:
+    
+         * :class:`_expression.Select`
+         * :class:`_expression.Insert`, :class:`_expression.Update`,
+           :class:`_expression.Delete`
+         * :class:`_expression.TextClause` and
+           :class:`_expression.TextualSelect`
+         * :class:`_schema.DDL` and objects which inherit from
+           :class:`_schema.ExecutableDDLElement`
+    
+        :param parameters: parameters which will be bound into the statement.
+         This may be either a dictionary of parameter names to values,
+         or a mutable sequence (e.g. a list) of dictionaries.  When a
+         list of dictionaries is passed, the underlying statement execution
+         will make use of the DBAPI ``cursor.executemany()`` method.
+         When a single dictionary is passed, the DBAPI ``cursor.execute()``
+         method will be used.
+    
+        :param execution_options: optional dictionary of execution options,
+         which will be associated with the statement execution.  This
+         dictionary can provide a subset of the options that are accepted
+         by :meth:`_engine.Connection.execution_options`.
+    
+        :return: a :class:`_engine.Result` object.
+    
+        """
+        distilled_parameters = _distill_params_20(parameters)
+        try:
+            meth = statement._execute_on_connection
+        except AttributeError as err:
+            raise exc.ObjectNotExecutableError(statement) from err
+        else:
+>           return meth(
+                self,
+                distilled_parameters,
+                execution_options or NO_OPTIONS,
+            )
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1419: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.sql.annotation.AnnotatedInsert object at 0x0000025FA5506510>
+connection = <sqlalchemy.engine.base.Connection object at 0x0000025FA57048A0>
+distilled_params = [{}]
+execution_options = immutabledict({'prebuffer_rows': True, '_result_disable_adapt_to_context': True, '_sa_orm_insert_options': default_insert_options(_dml_strategy='orm', _subject_mapper=<Mapper at 0x25fa4af12b0; TripTrip>)})
+
+    def _execute_on_connection(
+        self,
+        connection: Connection,
+        distilled_params: _CoreMultiExecuteParams,
+        execution_options: CoreExecuteOptionsParameter,
+    ) -> Result[Any]:
+        if self.supports_execution:
+            if TYPE_CHECKING:
+                assert isinstance(self, Executable)
+>           return connection._execute_clauseelement(
+                self, distilled_params, execution_options
+            )
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\sql\elements.py:526: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.engine.base.Connection object at 0x0000025FA57048A0>
+elem = <sqlalchemy.sql.annotation.AnnotatedInsert object at 0x0000025FA5506510>
+distilled_parameters = [{}]
+execution_options = immutabledict({'prebuffer_rows': True, '_result_disable_adapt_to_context': True, '_sa_orm_insert_options': default_insert_options(_dml_strategy='orm', _subject_mapper=<Mapper at 0x25fa4af12b0; TripTrip>)})
+
+    def _execute_clauseelement(
+        self,
+        elem: Executable,
+        distilled_parameters: _CoreMultiExecuteParams,
+        execution_options: CoreExecuteOptionsParameter,
+    ) -> CursorResult[Any]:
+        """Execute a sql.ClauseElement object."""
+    
+        execution_options = elem._execution_options.merge_with(
+            self._execution_options, execution_options
+        )
+    
+        has_events = self._has_events or self.engine._has_events
+        if has_events:
+            (
+                elem,
+                distilled_parameters,
+                event_multiparams,
+                event_params,
+            ) = self._invoke_before_exec_event(
+                elem, distilled_parameters, execution_options
+            )
+    
+        if distilled_parameters:
+            # ensure we don't retain a link to the view object for keys()
+            # which links to the values, which we don't want to cache
+            keys = sorted(distilled_parameters[0])
+            for_executemany = len(distilled_parameters) > 1
+        else:
+            keys = []
+            for_executemany = False
+    
+        dialect = self.dialect
+    
+        schema_translate_map = execution_options.get(
+            "schema_translate_map", None
+        )
+    
+        compiled_cache: Optional[CompiledCacheType] = execution_options.get(
+            "compiled_cache", self.engine._compiled_cache
+        )
+    
+        compiled_sql, extracted_params, cache_hit = elem._compile_w_cache(
+            dialect=dialect,
+            compiled_cache=compiled_cache,
+            column_keys=keys,
+            for_executemany=for_executemany,
+            schema_translate_map=schema_translate_map,
+            linting=self.dialect.compiler_linting | compiler.WARN_LINTING,
+        )
+>       ret = self._execute_context(
+            dialect,
+            dialect.execution_ctx_cls._init_compiled,
+            compiled_sql,
+            distilled_parameters,
+            execution_options,
+            compiled_sql,
+            distilled_parameters,
+            elem,
+            extracted_params,
+            cache_hit=cache_hit,
+        )
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1641: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.engine.base.Connection object at 0x0000025FA57048A0>
+dialect = <sqlalchemy.dialects.postgresql.asyncpg.PGDialect_asyncpg object at 0x0000025FA550AE90>
+constructor = <bound method DefaultExecutionContext._init_compiled of <class 'sqlalchemy.dialects.postgresql.asyncpg.PGExecutionContext_asyncpg'>>
+statement = <sqlalchemy.dialects.postgresql.asyncpg.PGCompiler_asyncpg object at 0x0000025FA56DF4D0>
+parameters = [{}]
+execution_options = immutabledict({'prebuffer_rows': True, '_result_disable_adapt_to_context': True, '_sa_orm_insert_options': default_insert_options(_dml_strategy='orm', _subject_mapper=<Mapper at 0x25fa4af12b0; TripTrip>)})
+args = (<sqlalchemy.dialects.postgresql.asyncpg.PGCompiler_asyncpg object at 0x0000025FA56DF4D0>, [{}], <sqlalchemy.sql.annot...ram-message-enrich-stale', type_=NullType()), BindParameter('%(2609820718864 param)s', 'hash', type_=NullType()), ...])
+kw = {'cache_hit': <CacheStats.CACHE_MISS: 1>}, yp = None
+conn = <sqlalchemy.pool.base._ConnectionFairy object at 0x0000025FA55A8890>
+context = <sqlalchemy.dialects.postgresql.asyncpg.PGExecutionContext_asyncpg object at 0x0000025FA5572250>
+
+    def _execute_context(
+        self,
+        dialect: Dialect,
+        constructor: Callable[..., ExecutionContext],
+        statement: Union[str, Compiled],
+        parameters: Optional[_AnyMultiExecuteParams],
+        execution_options: _ExecuteOptions,
+        *args: Any,
+        **kw: Any,
+    ) -> CursorResult[Any]:
+        """Create an :class:`.ExecutionContext` and execute, returning
+        a :class:`_engine.CursorResult`."""
+    
+        if execution_options:
+            yp = execution_options.get("yield_per", None)
+            if yp:
+                execution_options = execution_options.union(
+                    {"stream_results": True, "max_row_buffer": yp}
+                )
+        try:
+            conn = self._dbapi_connection
+            if conn is None:
+                conn = self._revalidate_connection()
+    
+            context = constructor(
+                dialect, self, conn, execution_options, *args, **kw
+            )
+        except (exc.PendingRollbackError, exc.ResourceClosedError):
+            raise
+        except BaseException as e:
+            self._handle_dbapi_exception(
+                e, str(statement), parameters, None, None
+            )
+    
+        if (
+            self._transaction
+            and not self._transaction.is_active
+            or (
+                self._nested_transaction
+                and not self._nested_transaction.is_active
+            )
+        ):
+            self._invalid_transaction()
+    
+        elif self._trans_context_manager:
+            TransactionalContext._trans_ctx_check(self)
+    
+        if self._transaction is None:
+            self._autobegin()
+    
+        context.pre_exec()
+    
+        if context.execute_style is ExecuteStyle.INSERTMANYVALUES:
+            return self._exec_insertmany_context(dialect, context)
+        else:
+>           return self._exec_single_context(
+                dialect, context, statement, parameters
+            )
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1846: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.engine.base.Connection object at 0x0000025FA57048A0>
+dialect = <sqlalchemy.dialects.postgresql.asyncpg.PGDialect_asyncpg object at 0x0000025FA550AE90>
+context = <sqlalchemy.dialects.postgresql.asyncpg.PGExecutionContext_asyncpg object at 0x0000025FA5572250>
+statement = <sqlalchemy.dialects.postgresql.asyncpg.PGCompiler_asyncpg object at 0x0000025FA56DF4D0>
+parameters = [('01JATENRICHSTALEROW001', 'TR-ENRICH-STALE', 'TELEGRAM_TRIP_SLIP', 'SLIP-ENRICH-STALE', 'telegram-message-enrich-stale', 'hash', ...)]
+
+    def _exec_single_context(
+        self,
+        dialect: Dialect,
+        context: ExecutionContext,
+        statement: Union[str, Compiled],
+        parameters: Optional[_AnyMultiExecuteParams],
+    ) -> CursorResult[Any]:
+        """continue the _execute_context() method for a single DBAPI
+        cursor.execute() or cursor.executemany() call.
+    
+        """
+        if dialect.bind_typing is BindTyping.SETINPUTSIZES:
+            generic_setinputsizes = context._prepare_set_input_sizes()
+    
+            if generic_setinputsizes:
+                try:
+                    dialect.do_set_input_sizes(
+                        context.cursor, generic_setinputsizes, context
+                    )
+                except BaseException as e:
+                    self._handle_dbapi_exception(
+                        e, str(statement), parameters, None, context
+                    )
+    
+        cursor, str_statement, parameters = (
+            context.cursor,
+            context.statement,
+            context.parameters,
+        )
+    
+        effective_parameters: Optional[_AnyExecuteParams]
+    
+        if not context.executemany:
+            effective_parameters = parameters[0]
+        else:
+            effective_parameters = parameters
+    
+        if self._has_events or self.engine._has_events:
+            for fn in self.dispatch.before_cursor_execute:
+                str_statement, effective_parameters = fn(
+                    self,
+                    cursor,
+                    str_statement,
+                    effective_parameters,
+                    context,
+                    context.executemany,
+                )
+    
+        if self._echo:
+            self._log_info(str_statement)
+    
+            stats = context._get_cache_stats()
+    
+            if not self.engine.hide_parameters:
+                self._log_info(
+                    "[%s] %r",
+                    stats,
+                    sql_util._repr_params(
+                        effective_parameters,
+                        batches=10,
+                        ismulti=context.executemany,
+                    ),
+                )
+            else:
+                self._log_info(
+                    "[%s] [SQL parameters hidden due to hide_parameters=True]",
+                    stats,
+                )
+    
+        evt_handled: bool = False
+        try:
+            if context.execute_style is ExecuteStyle.EXECUTEMANY:
+                effective_parameters = cast(
+                    "_CoreMultiExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_executemany:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_executemany(
+                        cursor,
+                        str_statement,
+                        effective_parameters,
+                        context,
+                    )
+            elif not effective_parameters and context.no_parameters:
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute_no_params:
+                        if fn(cursor, str_statement, context):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_execute_no_params(
+                        cursor, str_statement, context
+                    )
+            else:
+                effective_parameters = cast(
+                    "_CoreSingleExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_execute(
+                        cursor, str_statement, effective_parameters, context
+                    )
+    
+            if self._has_events or self.engine._has_events:
+                self.dispatch.after_cursor_execute(
+                    self,
+                    cursor,
+                    str_statement,
+                    effective_parameters,
+                    context,
+                    context.executemany,
+                )
+    
+            context.post_exec()
+    
+            result = context._setup_result_proxy()
+    
+        except BaseException as e:
+>           self._handle_dbapi_exception(
+                e, str_statement, effective_parameters, cursor, context
+            )
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1986: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.engine.base.Connection object at 0x0000025FA57048A0>
+e = IntegrityError('<class \'asyncpg.exceptions.NotNullViolationError\'>: null value in column "trip_datetime_utc" of rela..., PENDING_REVIEW, 1, SERVICE, worker-test, 2026-04-12 06:25:08.048253+00, 2026-04-12 06:25:08.048253+00, null, null).')
+statement = 'INSERT INTO trip_trips (id, trip_no, source_type, source_slip_no, source_reference_key, source_payload_hash, review_r... $14::VARCHAR, $15::INTEGER, $16::VARCHAR, $17::VARCHAR, $18::TIMESTAMP WITH TIME ZONE, $19::TIMESTAMP WITH TIME ZONE)'
+parameters = ('01JATENRICHSTALEROW001', 'TR-ENRICH-STALE', 'TELEGRAM_TRIP_SLIP', 'SLIP-ENRICH-STALE', 'telegram-message-enrich-stale', 'hash', ...)
+cursor = <sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_cursor object at 0x0000025FA56C1960>
+context = <sqlalchemy.dialects.postgresql.asyncpg.PGExecutionContext_asyncpg object at 0x0000025FA5572250>
+is_sub_exec = False
+
+    def _handle_dbapi_exception(
+        self,
+        e: BaseException,
+        statement: Optional[str],
+        parameters: Optional[_AnyExecuteParams],
+        cursor: Optional[DBAPICursor],
+        context: Optional[ExecutionContext],
+        is_sub_exec: bool = False,
+    ) -> NoReturn:
+        exc_info = sys.exc_info()
+    
+        is_exit_exception = util.is_exit_exception(e)
+    
+        if not self._is_disconnect:
+            self._is_disconnect = (
+                isinstance(e, self.dialect.loaded_dbapi.Error)
+                and not self.closed
+                and self.dialect.is_disconnect(
+                    e,
+                    self._dbapi_connection if not self.invalidated else None,
+                    cursor,
+                )
+            ) or (is_exit_exception and not self.closed)
+    
+        invalidate_pool_on_disconnect = not is_exit_exception
+    
+        ismulti: bool = (
+            not is_sub_exec and context.executemany
+            if context is not None
+            else False
+        )
+        if self._reentrant_error:
+            raise exc.DBAPIError.instance(
+                statement,
+                parameters,
+                e,
+                self.dialect.loaded_dbapi.Error,
+                hide_parameters=self.engine.hide_parameters,
+                dialect=self.dialect,
+                ismulti=ismulti,
+            ).with_traceback(exc_info[2]) from e
+        self._reentrant_error = True
+        try:
+            # non-DBAPI error - if we already got a context,
+            # or there's no string statement, don't wrap it
+            should_wrap = isinstance(e, self.dialect.loaded_dbapi.Error) or (
+                statement is not None
+                and context is None
+                and not is_exit_exception
+            )
+    
+            if should_wrap:
+                sqlalchemy_exception = exc.DBAPIError.instance(
+                    statement,
+                    parameters,
+                    cast(Exception, e),
+                    self.dialect.loaded_dbapi.Error,
+                    hide_parameters=self.engine.hide_parameters,
+                    connection_invalidated=self._is_disconnect,
+                    dialect=self.dialect,
+                    ismulti=ismulti,
+                )
+            else:
+                sqlalchemy_exception = None
+    
+            newraise = None
+    
+            if (self.dialect._has_events) and not self._execution_options.get(
+                "skip_user_error_events", False
+            ):
+                ctx = ExceptionContextImpl(
+                    e,
+                    sqlalchemy_exception,
+                    self.engine,
+                    self.dialect,
+                    self,
+                    cursor,
+                    statement,
+                    parameters,
+                    context,
+                    self._is_disconnect,
+                    invalidate_pool_on_disconnect,
+                    False,
+                )
+    
+                for fn in self.dialect.dispatch.handle_error:
+                    try:
+                        # handler returns an exception;
+                        # call next handler in a chain
+                        per_fn = fn(ctx)
+                        if per_fn is not None:
+                            ctx.chained_exception = newraise = per_fn
+                    except Exception as _raised:
+                        # handler raises an exception - stop processing
+                        newraise = _raised
+                        break
+    
+                if self._is_disconnect != ctx.is_disconnect:
+                    self._is_disconnect = ctx.is_disconnect
+                    if sqlalchemy_exception:
+                        sqlalchemy_exception.connection_invalidated = (
+                            ctx.is_disconnect
+                        )
+    
+                # set up potentially user-defined value for
+                # invalidate pool.
+                invalidate_pool_on_disconnect = (
+                    ctx.invalidate_pool_on_disconnect
+                )
+    
+            if should_wrap and context:
+                context.handle_dbapi_exception(e)
+    
+            if not self._is_disconnect:
+                if cursor:
+                    self._safe_close_cursor(cursor)
+                # "autorollback" was mostly relevant in 1.x series.
+                # It's very unlikely to reach here, as the connection
+                # does autobegin so when we are here, we are usually
+                # in an explicit / semi-explicit transaction.
+                # however we have a test which manufactures this
+                # scenario in any case using an event handler.
+                # test/engine/test_execute.py-> test_actual_autorollback
+                if not self.in_transaction():
+                    self._rollback_impl()
+    
+            if newraise:
+                raise newraise.with_traceback(exc_info[2]) from e
+            elif should_wrap:
+                assert sqlalchemy_exception is not None
+>               raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:2355: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.engine.base.Connection object at 0x0000025FA57048A0>
+dialect = <sqlalchemy.dialects.postgresql.asyncpg.PGDialect_asyncpg object at 0x0000025FA550AE90>
+context = <sqlalchemy.dialects.postgresql.asyncpg.PGExecutionContext_asyncpg object at 0x0000025FA5572250>
+statement = <sqlalchemy.dialects.postgresql.asyncpg.PGCompiler_asyncpg object at 0x0000025FA56DF4D0>
+parameters = [('01JATENRICHSTALEROW001', 'TR-ENRICH-STALE', 'TELEGRAM_TRIP_SLIP', 'SLIP-ENRICH-STALE', 'telegram-message-enrich-stale', 'hash', ...)]
+
+    def _exec_single_context(
+        self,
+        dialect: Dialect,
+        context: ExecutionContext,
+        statement: Union[str, Compiled],
+        parameters: Optional[_AnyMultiExecuteParams],
+    ) -> CursorResult[Any]:
+        """continue the _execute_context() method for a single DBAPI
+        cursor.execute() or cursor.executemany() call.
+    
+        """
+        if dialect.bind_typing is BindTyping.SETINPUTSIZES:
+            generic_setinputsizes = context._prepare_set_input_sizes()
+    
+            if generic_setinputsizes:
+                try:
+                    dialect.do_set_input_sizes(
+                        context.cursor, generic_setinputsizes, context
+                    )
+                except BaseException as e:
+                    self._handle_dbapi_exception(
+                        e, str(statement), parameters, None, context
+                    )
+    
+        cursor, str_statement, parameters = (
+            context.cursor,
+            context.statement,
+            context.parameters,
+        )
+    
+        effective_parameters: Optional[_AnyExecuteParams]
+    
+        if not context.executemany:
+            effective_parameters = parameters[0]
+        else:
+            effective_parameters = parameters
+    
+        if self._has_events or self.engine._has_events:
+            for fn in self.dispatch.before_cursor_execute:
+                str_statement, effective_parameters = fn(
+                    self,
+                    cursor,
+                    str_statement,
+                    effective_parameters,
+                    context,
+                    context.executemany,
+                )
+    
+        if self._echo:
+            self._log_info(str_statement)
+    
+            stats = context._get_cache_stats()
+    
+            if not self.engine.hide_parameters:
+                self._log_info(
+                    "[%s] %r",
+                    stats,
+                    sql_util._repr_params(
+                        effective_parameters,
+                        batches=10,
+                        ismulti=context.executemany,
+                    ),
+                )
+            else:
+                self._log_info(
+                    "[%s] [SQL parameters hidden due to hide_parameters=True]",
+                    stats,
+                )
+    
+        evt_handled: bool = False
+        try:
+            if context.execute_style is ExecuteStyle.EXECUTEMANY:
+                effective_parameters = cast(
+                    "_CoreMultiExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_executemany:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_executemany(
+                        cursor,
+                        str_statement,
+                        effective_parameters,
+                        context,
+                    )
+            elif not effective_parameters and context.no_parameters:
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute_no_params:
+                        if fn(cursor, str_statement, context):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_execute_no_params(
+                        cursor, str_statement, context
+                    )
+            else:
+                effective_parameters = cast(
+                    "_CoreSingleExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+>                   self.dialect.do_execute(
+                        cursor, str_statement, effective_parameters, context
+                    )
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1967: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.postgresql.asyncpg.PGDialect_asyncpg object at 0x0000025FA550AE90>
+cursor = <sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_cursor object at 0x0000025FA56C1960>
+statement = 'INSERT INTO trip_trips (id, trip_no, source_type, source_slip_no, source_reference_key, source_payload_hash, review_r... $14::VARCHAR, $15::INTEGER, $16::VARCHAR, $17::VARCHAR, $18::TIMESTAMP WITH TIME ZONE, $19::TIMESTAMP WITH TIME ZONE)'
+parameters = ('01JATENRICHSTALEROW001', 'TR-ENRICH-STALE', 'TELEGRAM_TRIP_SLIP', 'SLIP-ENRICH-STALE', 'telegram-message-enrich-stale', 'hash', ...)
+context = <sqlalchemy.dialects.postgresql.asyncpg.PGExecutionContext_asyncpg object at 0x0000025FA5572250>
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+>       cursor.execute(statement, parameters)
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\default.py:951: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_cursor object at 0x0000025FA56C1960>
+operation = 'INSERT INTO trip_trips (id, trip_no, source_type, source_slip_no, source_reference_key, source_payload_hash, review_r... $14::VARCHAR, $15::INTEGER, $16::VARCHAR, $17::VARCHAR, $18::TIMESTAMP WITH TIME ZONE, $19::TIMESTAMP WITH TIME ZONE)'
+parameters = ('01JATENRICHSTALEROW001', 'TR-ENRICH-STALE', 'TELEGRAM_TRIP_SLIP', 'SLIP-ENRICH-STALE', 'telegram-message-enrich-stale', 'hash', ...)
+
+    def execute(self, operation, parameters=None):
+>       self._adapt_connection.await_(
+            self._prepare_and_execute(operation, parameters)
+        )
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:585: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+awaitable = <coroutine object AsyncAdapt_asyncpg_cursor._prepare_and_execute at 0x0000025FA55A8F60>
+
+    def await_only(awaitable: Awaitable[_T]) -> _T:
+        """Awaits an async function in a sync method.
+    
+        The sync method must be inside a :func:`greenlet_spawn` context.
+        :func:`await_only` calls cannot be nested.
+    
+        :param awaitable: The coroutine to call.
+    
+        """
+        # this is called in the context greenlet while running fn
+        current = getcurrent()
+        if not getattr(current, "__sqlalchemy_greenlet_provider__", False):
+            _safe_cancel_awaitable(awaitable)
+    
+            raise exc.MissingGreenlet(
+                "greenlet_spawn has not been called; can't call await_only() "
+                "here. Was IO attempted in an unexpected place?"
+            )
+    
+        # returns the control to the driver greenlet passing it
+        # a coroutine to run. Once the awaitable is done, the driver greenlet
+        # switches back to this greenlet with the result of awaitable that is
+        # then returned to the caller (or raised as error)
+>       return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:132: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <bound method Session.execute of <sqlalchemy.orm.session.Session object at 0x0000025FA5506CF0>>
+_require_await = False
+args = (<sqlalchemy.sql.dml.Insert object at 0x0000025FA55295B0>,)
+kwargs = {'bind_arguments': None, 'execution_options': immutabledict({'prebuffer_rows': True}), 'params': None}
+context = <_AsyncIoGreenlet object at 0x0000025FA55E3AC0 (otid=0x0000025FA06EC780) dead>
+switch_occurred = True
+result = <coroutine object AsyncAdapt_asyncpg_cursor._prepare_and_execute at 0x0000025FA55A8F60>
+value = None
+
+    async def greenlet_spawn(
+        fn: Callable[..., _T],
+        *args: Any,
+        _require_await: bool = False,
+        **kwargs: Any,
+    ) -> _T:
+        """Runs a sync function ``fn`` in a new greenlet.
+    
+        The sync function can then use :func:`await_only` to wait for async
+        functions.
+    
+        :param fn: The sync callable to call.
+        :param \\*args: Positional arguments to pass to the ``fn`` callable.
+        :param \\*\\*kwargs: Keyword arguments to pass to the ``fn`` callable.
+        """
+    
+        result: Any
+        context = _AsyncIoGreenlet(fn, getcurrent())
+        # runs the function synchronously in gl greenlet. If the execution
+        # is interrupted by await_only, context is not dead and result is a
+        # coroutine to wait. If the context is dead the function has
+        # returned, and its result can be returned.
+        switch_occurred = False
+        result = context.switch(*args, **kwargs)
+        while not context.dead:
+            switch_occurred = True
+            try:
+                # wait for a coroutine from await_only and then return its
+                # result back to it.
+>               value = await result
+                        ^^^^^^^^^^^^
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:196: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_cursor object at 0x0000025FA56C1960>
+operation = 'INSERT INTO trip_trips (id, trip_no, source_type, source_slip_no, source_reference_key, source_payload_hash, review_r... $14::VARCHAR, $15::INTEGER, $16::VARCHAR, $17::VARCHAR, $18::TIMESTAMP WITH TIME ZONE, $19::TIMESTAMP WITH TIME ZONE)'
+parameters = ('01JATENRICHSTALEROW001', 'TR-ENRICH-STALE', 'TELEGRAM_TRIP_SLIP', 'SLIP-ENRICH-STALE', 'telegram-message-enrich-stale', 'hash', ...)
+
+    async def _prepare_and_execute(self, operation, parameters):
+        adapt_connection = self._adapt_connection
+    
+        async with adapt_connection._execute_mutex:
+            if not adapt_connection._started:
+                await adapt_connection._start_transaction()
+    
+            if parameters is None:
+                parameters = ()
+    
+            try:
+                prepared_stmt, attributes = await adapt_connection._prepare(
+                    operation, self._invalidate_schema_cache_asof
+                )
+    
+                if attributes:
+                    self.description = [
+                        (
+                            attr.name,
+                            attr.type.oid,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                        )
+                        for attr in attributes
+                    ]
+                else:
+                    self.description = None
+    
+                if self.server_side:
+                    self._cursor = await prepared_stmt.cursor(*parameters)
+                    self.rowcount = -1
+                else:
+                    self._rows = deque(await prepared_stmt.fetch(*parameters))
+                    status = prepared_stmt.get_statusmsg()
+    
+                    reg = re.match(
+                        r"(?:SELECT|UPDATE|DELETE|INSERT \d+) (\d+)",
+                        status or "",
+                    )
+                    if reg:
+                        self.rowcount = int(reg.group(1))
+                    else:
+                        self.rowcount = -1
+    
+            except Exception as error:
+>               self._handle_exception(error)
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:563: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_cursor object at 0x0000025FA56C1960>
+error = NotNullViolationError('null value in column "trip_datetime_utc" of relation "trip_trips" violates not-null constraint')
+
+    def _handle_exception(self, error):
+>       self._adapt_connection._handle_exception(error)
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:513: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <AdaptedConnection <asyncpg.connection.Connection object at 0x0000025FA57025D0>>
+error = NotNullViolationError('null value in column "trip_datetime_utc" of relation "trip_trips" violates not-null constraint')
+
+    def _handle_exception(self, error):
+        if self._connection.is_closed():
+            self._transaction = None
+            self._started = False
+    
+        if not isinstance(error, AsyncAdapt_asyncpg_dbapi.Error):
+            exception_mapping = self.dbapi._asyncpg_error_translate
+    
+            for super_ in type(error).__mro__:
+                if super_ in exception_mapping:
+                    translated_error = exception_mapping[super_](
+                        "%s: %s" % (type(error), error)
+                    )
+                    translated_error.pgcode = translated_error.sqlstate = (
+                        getattr(error, "sqlstate", None)
+                    )
+>                   raise translated_error from error
+E                   sqlalchemy.exc.IntegrityError: (sqlalchemy.dialects.postgresql.asyncpg.IntegrityError) <class 'asyncpg.exceptions.NotNullViolationError'>: null value in column "trip_datetime_utc" of relation "trip_trips" violates not-null constraint
+E                   DETAIL:  Failing row contains (01JATENRICHSTALEROW001, TR-ENRICH-STALE, TELEGRAM_TRIP_SLIP, SLIP-ENRICH-STALE, telegram-message-enrich-stale, hash, SOURCE_IMPORT, null, driver-001, vehicle-001, null, null, null, null, null, null, null, null, null, null, null, 10000, 25000, 15000, f, PENDING_REVIEW, 1, SERVICE, worker-test, 2026-04-12 06:25:08.048253+00, 2026-04-12 06:25:08.048253+00, null, null).
+E                   [SQL: INSERT INTO trip_trips (id, trip_no, source_type, source_slip_no, source_reference_key, source_payload_hash, review_reason_code, driver_id, vehicle_id, tare_weight_kg, gross_weight_kg, net_weight_kg, is_empty_return, status, version, created_by_actor_type, created_by_actor_id, created_at_utc, updated_at_utc) VALUES ($1::VARCHAR, $2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::VARCHAR, $6::VARCHAR, $7::VARCHAR, $8::VARCHAR, $9::VARCHAR, $10::INTEGER, $11::INTEGER, $12::INTEGER, $13::BOOLEAN, $14::VARCHAR, $15::INTEGER, $16::VARCHAR, $17::VARCHAR, $18::TIMESTAMP WITH TIME ZONE, $19::TIMESTAMP WITH TIME ZONE)]
+E                   [parameters: ('01JATENRICHSTALEROW001', 'TR-ENRICH-STALE', 'TELEGRAM_TRIP_SLIP', 'SLIP-ENRICH-STALE', 'telegram-message-enrich-stale', 'hash', 'SOURCE_IMPORT', 'driver-001', 'vehicle-001', 10000, 25000, 15000, False, 'PENDING_REVIEW', 1, 'SERVICE', 'worker-test', datetime.datetime(2026, 4, 12, 6, 25, 8, 48253, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 4, 12, 6, 25, 8, 48253, tzinfo=datetime.timezone.utc))]
+E                   (Background on this error at: https://sqlalche.me/e/20/gkpj)
+
+C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py:797: IntegrityError
+------------------------------ Captured log call ------------------------------
+INFO     sqlalchemy.engine.Engine:base.py:2702 BEGIN (implicit)
+INFO     sqlalchemy.engine.Engine:base.py:1846 INSERT INTO trip_trips (id, trip_no, source_type, source_slip_no, source_reference_key, source_payload_hash, review_reason_code, driver_id, vehicle_id, tare_weight_kg, gross_weight_kg, net_weight_kg, is_empty_return, status, version, created_by_actor_type, created_by_actor_id, created_at_utc, updated_at_utc) VALUES ($1::VARCHAR, $2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::VARCHAR, $6::VARCHAR, $7::VARCHAR, $8::VARCHAR, $9::VARCHAR, $10::INTEGER, $11::INTEGER, $12::INTEGER, $13::BOOLEAN, $14::VARCHAR, $15::INTEGER, $16::VARCHAR, $17::VARCHAR, $18::TIMESTAMP WITH TIME ZONE, $19::TIMESTAMP WITH TIME ZONE)
+INFO     sqlalchemy.engine.Engine:base.py:1846 [generated in 0.00061s] ('01JATENRICHSTALEROW001', 'TR-ENRICH-STALE', 'TELEGRAM_TRIP_SLIP', 'SLIP-ENRICH-STALE', 'telegram-message-enrich-stale', 'hash', 'SOURCE_IMPORT', 'driver-001', 'vehicle-001', 10000, 25000, 15000, False, 'PENDING_REVIEW', 1, 'SERVICE', 'worker-test', datetime.datetime(2026, 4, 12, 6, 25, 8, 48253, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 4, 12, 6, 25, 8, 48253, tzinfo=datetime.timezone.utc))
+============================== warnings summary ===============================
+tests/test_workers.py::test_enrichment_reclaims_stale_claim
+  C:\Users\semih\AppData\Local\Programs\Python\Python314\Lib\site-packages\alembic\config.py:598: DeprecationWarning: No path_separator found in configuration; falling back to legacy splitting on spaces, commas, and colons for prepend_sys_path.  Consider adding path_separator=os to Alembic config.
+    util.warn_deprecated(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_workers.py::test_enrichment_reclaims_stale_claim - sqlalchemy.exc.IntegrityError: (sqlalchemy.dialects.postgresql.asyncpg.IntegrityError) <class 'asyncpg.exceptions.NotNullViolationError'>: null value in column "trip_datetime_utc" of relation "trip_trips" violates not-null constraint
+DETAIL:  Failing row contains (01JATENRICHSTALEROW001, TR-ENRICH-STALE, TELEGRAM_TRIP_SLIP, SLIP-ENRICH-STALE, telegram-message-enrich-stale, hash, SOURCE_IMPORT, null, driver-001, vehicle-001, null, null, null, null, null, null, null, null, null, null, null, 10000, 25000, 15000, f, PENDING_REVIEW, 1, SERVICE, worker-test, 2026-04-12 06:25:08.048253+00, 2026-04-12 06:25:08.048253+00, null, null).
+[SQL: INSERT INTO trip_trips (id, trip_no, source_type, source_slip_no, source_reference_key, source_payload_hash, review_reason_code, driver_id, vehicle_id, tare_weight_kg, gross_weight_kg, net_weight_kg, is_empty_return, status, version, created_by_actor_type, created_by_actor_id, created_at_utc, updated_at_utc) VALUES ($1::VARCHAR, $2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::VARCHAR, $6::VARCHAR, $7::VARCHAR, $8::VARCHAR, $9::VARCHAR, $10::INTEGER, $11::INTEGER, $12::INTEGER, $13::BOOLEAN, $14::VARCHAR, $15::INTEGER, $16::VARCHAR, $17::VARCHAR, $18::TIMESTAMP WITH TIME ZONE, $19::TIMESTAMP WITH TIME ZONE)]
+[parameters: ('01JATENRICHSTALEROW001', 'TR-ENRICH-STALE', 'TELEGRAM_TRIP_SLIP', 'SLIP-ENRICH-STALE', 'telegram-message-enrich-stale', 'hash', 'SOURCE_IMPORT', 'driver-001', 'vehicle-001', 10000, 25000, 15000, False, 'PENDING_REVIEW', 1, 'SERVICE', 'worker-test', datetime.datetime(2026, 4, 12, 6, 25, 8, 48253, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 4, 12, 6, 25, 8, 48253, tzinfo=datetime.timezone.utc))]
+(Background on this error at: https://sqlalche.me/e/20/gkpj)
+ERROR tests/test_workers.py::test_enrichment_reclaims_stale_claim - AttributeError: 'NoneType' object has no attribute 'send'
+=================== 1 failed, 1 warning, 1 error in 11.29s ====================

@@ -24,11 +24,11 @@ from trip_service.routers.trips import (
     _require_reference_service_access,
     _require_super_admin,
 )
+from platform_common import compute_data_quality_flag
 from trip_service.schemas import EditTripRequest
 from trip_service.trip_helpers import (
     _classify_manual_status,
     _coerce_actor_type,
-    _compute_data_quality_flag,
     _constraint_name,
     _map_integrity_error,
     _maybe_require_change_reason,
@@ -180,11 +180,11 @@ def test_validate_trip_weights_allows_partial_inputs() -> None:
 
 
 def test_trip_router_compute_data_quality_flag_covers_all_levels() -> None:
-    assert _compute_data_quality_flag("ADMIN_MANUAL", None, route_resolved=True) == DataQualityFlag.HIGH
-    assert _compute_data_quality_flag("TELEGRAM_TRIP_SLIP", 0.95, route_resolved=True) == DataQualityFlag.HIGH
-    assert _compute_data_quality_flag("TELEGRAM_TRIP_SLIP", 0.80, route_resolved=False) == DataQualityFlag.MEDIUM
-    assert _compute_data_quality_flag("TELEGRAM_TRIP_SLIP", None, route_resolved=False) == DataQualityFlag.MEDIUM
-    assert _compute_data_quality_flag("TELEGRAM_TRIP_SLIP", 0.20, route_resolved=True) == DataQualityFlag.LOW
+    assert compute_data_quality_flag("ADMIN_MANUAL", None, route_resolved=True) == DataQualityFlag.HIGH
+    assert compute_data_quality_flag("TELEGRAM_TRIP_SLIP", 0.95, route_resolved=True) == DataQualityFlag.HIGH
+    assert compute_data_quality_flag("TELEGRAM_TRIP_SLIP", 0.80, route_resolved=False) == DataQualityFlag.MEDIUM
+    assert compute_data_quality_flag("TELEGRAM_TRIP_SLIP", None, route_resolved=False) == DataQualityFlag.MEDIUM
+    assert compute_data_quality_flag("TELEGRAM_TRIP_SLIP", 0.20, route_resolved=True) == DataQualityFlag.LOW
 
 
 def test_map_integrity_error_covers_known_constraints() -> None:

@@ -28,8 +28,9 @@ from trip_service.worker_heartbeats import record_worker_heartbeat
 
 logger = logging.getLogger("trip_service.cleanup")
 
-# Correlation ContextVar for cross-service tracing propagation
+# Correlation ContextVars for cross-service tracing propagation
 correlation_id: ContextVar[str | None] = ContextVar("correlation_id", default=None)
+causation_id: ContextVar[str | None] = ContextVar("causation_id", default=None)
 
 
 # ---------------------------------------------------------------------------

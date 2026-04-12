@@ -53,14 +53,22 @@ class TripBookingSagaOrchestrator:
         await redis.hset(self.redis_key, f"step:{step.value}", outcome)
 
     def _build_compensation_event(
-        self, event_name: str, payload: dict[str, Any]
+        self,
+        event_name: str,
+        payload: dict[str, Any],
+        causation_id: str | None = None,
     ) -> OutboxMessage:
         """Build a CloudEvents-compatible compensation message."""
+        from trip_service.observability import causation_id as causation_ctx
+
         now = datetime.now(UTC)
+        effective_causation = causation_id or causation_ctx.get()
+
         return OutboxMessage(
             event_id=str(ULID()),
             event_name=event_name,
             partition_key=self.trip_id,
+            causation_id=effective_causation,
             payload=__import__("json").dumps(
                 {
                     **payload,
@@ -79,9 +87,7 @@ class TripBookingSagaOrchestrator:
         await self._update_status(SagaStatus.PENDING)
         broker = create_broker(settings.resolved_broker_type)
         try:
-            await broker.publish(
-                self._build_compensation_event("trip.booking.started.v1", {})
-            )
+            await broker.publish(self._build_compensation_event("trip.booking.started.v1", {}))
             logger.info("SAGA [%s] started", self.trip_id)
         except Exception:
             logger.exception("SAGA [%s] failed to publish start event", self.trip_id)
@@ -110,9 +116,7 @@ class TripBookingSagaOrchestrator:
                 )
                 await self._record_step(_CompensateStep.RELEASE_VEHICLE, "OK")
             except Exception:
-                logger.exception(
-                    "SAGA [%s] compensation step RELEASE_VEHICLE failed", self.trip_id
-                )
+                logger.exception("SAGA [%s] compensation step RELEASE_VEHICLE failed", self.trip_id)
                 await self._record_step(_CompensateStep.RELEASE_VEHICLE, "ERROR")
 
             # Step 2: Release driver assignment via Driver Service
@@ -125,9 +129,7 @@ class TripBookingSagaOrchestrator:
                 )
                 await self._record_step(_CompensateStep.RELEASE_DRIVER, "OK")
             except Exception:
-                logger.exception(
-                    "SAGA [%s] compensation step RELEASE_DRIVER failed", self.trip_id
-                )
+                logger.exception("SAGA [%s] compensation step RELEASE_DRIVER failed", self.trip_id)
                 await self._record_step(_CompensateStep.RELEASE_DRIVER, "ERROR")
 
             # Step 3: Mark trip as FAILED so downstream consumers can reconcile
@@ -140,9 +142,7 @@ class TripBookingSagaOrchestrator:
                 )
                 await self._record_step(_CompensateStep.MARK_TRIP_FAILED, "OK")
             except Exception:
-                logger.exception(
-                    "SAGA [%s] compensation step MARK_TRIP_FAILED failed", self.trip_id
-                )
+                logger.exception("SAGA [%s] compensation step MARK_TRIP_FAILED failed", self.trip_id)
                 await self._record_step(_CompensateStep.MARK_TRIP_FAILED, "ERROR")
 
         finally:

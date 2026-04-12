@@ -16,7 +16,7 @@ import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import and_, not_, or_, select
+from sqlalchemy import and_, not_, or_, select, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import aliased
 
@@ -40,14 +40,13 @@ logger = logging.getLogger("trip_service.outbox_relay")
 
 import random
 
-OUTBOX_BASE_BACKOFF = 5
-OUTBOX_MAX_BACKOFF = 300
+OUTBOX_BACKOFF_SCHEDULE = [5, 10, 30, 60, 300]
 
 
 def _outbox_next_attempt_at(consecutive_failures: int) -> datetime:
-    """Calculate next retry time for outbox relay using exponential backoff + jitter."""
-    # Exponential: 5, 10, 20, 40, 80, 160, 300...
-    delay = min(OUTBOX_MAX_BACKOFF, OUTBOX_BASE_BACKOFF * (2 ** (consecutive_failures - 1)))
+    """Calculate next retry time for outbox relay using a fixed schedule (V8 Section 14.2)."""
+    idx = max(0, min(consecutive_failures - 1, len(OUTBOX_BACKOFF_SCHEDULE) - 1))
+    delay = OUTBOX_BACKOFF_SCHEDULE[idx]
     # Add +/- 10% jitter
     jitter = delay * 0.1
     actual_delay = delay + random.uniform(-jitter, jitter)
@@ -78,6 +77,7 @@ def _build_message(row: TripOutbox) -> OutboxMessage:
         schema_version=row.schema_version,
         aggregate_type=row.aggregate_type,
         aggregate_id=row.aggregate_id,
+        causation_id=row.causation_id,
     )
 
 
@@ -93,50 +93,58 @@ async def _claim_batch(worker_id: str, batch_size: int) -> tuple[str, list[str]]
         # A row is eligible ONLY IF it is the EARLIEST row for its partition_key
         # that is not yet PUBLISHED. This ensures strict sequential processing.
         # -----------------------------------------------------------------------
+        o1 = aliased(TripOutbox)
         o2 = aliased(TripOutbox)
         hol_subq = select(1).where(
-            o2.partition_key == TripOutbox.partition_key,
-            o2.publish_status != OutboxPublishStatus.PUBLISHED,
-            o2.created_at_utc < TripOutbox.created_at_utc,
+            o2.partition_key == o1.partition_key,
+            o2.publish_status != OutboxPublishStatus.PUBLISHED.value,
+            o2.created_at_utc < o1.created_at_utc,
         )
 
+        # Fetch only IDs to avoid "already attached to session" errors in tests
         stmt = (
-            select(TripOutbox)
+            select(o1.event_id)
             .where(
                 or_(
-                    TripOutbox.publish_status.in_(
+                    o1.publish_status.in_(
                         [
-                            OutboxPublishStatus.PENDING,
-                            OutboxPublishStatus.READY,
-                            OutboxPublishStatus.FAILED,
+                            OutboxPublishStatus.PENDING.value,
+                            OutboxPublishStatus.READY.value,
+                            OutboxPublishStatus.FAILED.value,
                         ]
                     ),
                     and_(
-                        TripOutbox.publish_status == OutboxPublishStatus.PUBLISHING,
-                        TripOutbox.claim_expires_at_utc < now,
+                        o1.publish_status == OutboxPublishStatus.PUBLISHING.value,
+                        o1.claim_expires_at_utc < now,
                     ),
                 ),
-                TripOutbox.next_attempt_at_utc.is_(None) | (TripOutbox.next_attempt_at_utc <= now),
+                o1.next_attempt_at_utc.is_(None) | (o1.next_attempt_at_utc <= now),
                 not_(hol_subq.exists()),
             )
-            .order_by(TripOutbox.created_at_utc.asc())
+            .order_by(o1.created_at_utc.asc())
             .with_for_update(skip_locked=True)
             .limit(batch_size)
         )
         result = await session.execute(stmt)
-        rows = result.scalars().all()
+        event_ids = [str(eid) for eid in result.scalars().all()]
 
-        if not rows:
+        if not event_ids:
             return claim_token, []
 
-        for row in rows:
-            row.publish_status = OutboxPublishStatus.PUBLISHING
-            row.next_attempt_at_utc = None
-            row.claim_token = claim_token
-            row.claim_expires_at_utc = now + claim_ttl
-            row.claimed_by_worker = worker_id
+        stmt_update = (
+            update(TripOutbox)
+            .where(TripOutbox.event_id.in_(event_ids))
+            .values(
+                publish_status=OutboxPublishStatus.PUBLISHING.value,
+                next_attempt_at_utc=None,
+                claim_token=claim_token,
+                claim_expires_at_utc=now + claim_ttl,
+                claimed_by_worker=worker_id,
+            )
+        )
+        await session.execute(stmt_update)
         await session.commit()
-        return claim_token, [row.event_id for row in rows]
+        return claim_token, event_ids
 
 
 # ---------------------------------------------------------------------------
@@ -153,14 +161,18 @@ async def _relay_batch(broker: MessageBroker, worker_id: str, batch_size: int = 
     cannot roll back another.
     """
     claim_token, event_ids = await _claim_batch(worker_id, batch_size)
+
     if not event_ids:
         return 0
 
     published_count = 0
     for event_id in event_ids:
-        success = await _publish_single(broker, event_id, claim_token)
-        if success:
-            published_count += 1
+        try:
+            success = await _publish_single(broker, event_id, claim_token)
+            if success:
+                published_count += 1
+        except Exception:
+            logger.exception("Outbox %s: critical failure in background relay task", event_id)
     return published_count
 
 
@@ -171,49 +183,90 @@ async def _publish_single(broker: MessageBroker, event_id: str, claim_token: str
     token = correlation_id.set(event_id)
     try:
         async with async_session_factory() as session:
-            row = (
+            # Fetch data-only to avoid session affinity issues in tests
+            row_data = (
                 await session.execute(
-                    select(TripOutbox)
+                    select(
+                        TripOutbox.event_name,
+                        TripOutbox.partition_key,
+                        TripOutbox.payload_json,
+                        TripOutbox.schema_version,
+                        TripOutbox.aggregate_type,
+                        TripOutbox.aggregate_id,
+                        TripOutbox.attempt_count,
+                        TripOutbox.causation_id,
+                    )
                     .where(
                         TripOutbox.event_id == event_id,
                         TripOutbox.claim_token == claim_token,
                     )
                     .with_for_update()
                 )
-            ).scalar_one_or_none()
+            ).one_or_none()
 
-            if row is None:
+            if row_data is None:
                 logger.warning("Outbox %s: claim lost before publish finalization", event_id)
                 return False
 
-            message = _build_message(row)
+            message = OutboxMessage(
+                event_id=event_id,
+                event_name=row_data.event_name,
+                partition_key=row_data.partition_key,
+                payload=row_data.payload_json,
+                schema_version=row_data.schema_version,
+                aggregate_type=row_data.aggregate_type,
+                aggregate_id=row_data.aggregate_id,
+                causation_id=row_data.causation_id,
+            )
             now = _now_utc()
             publish_error: Exception | None = None
 
             try:
                 await broker.publish(message)
-            except Exception as exc:  # pragma: no cover - exercised through worker tests
+            except Exception as exc:
                 publish_error = exc
 
-            if publish_error is None:
-                row.publish_status = OutboxPublishStatus.PUBLISHED
-                row.published_at_utc = now
-                row.attempt_count = 0
-                row.next_attempt_at_utc = None
-                row.last_error_code = None
-            else:
-                row.attempt_count += 1
-                row.last_error_code = str(publish_error)[:100]
-                if row.attempt_count >= settings.outbox_relay_max_failures:
-                    row.publish_status = OutboxPublishStatus.DEAD_LETTER
-                    row.next_attempt_at_utc = None
-                else:
-                    row.publish_status = OutboxPublishStatus.FAILED
-                    row.next_attempt_at_utc = _outbox_next_attempt_at(row.attempt_count)
+            new_attempt_count = row_data.attempt_count
+            update_vals: dict[str, object] = {
+                "claim_token": None,
+                "claim_expires_at_utc": None,
+                "claimed_by_worker": None,
+            }
 
-            row.claim_token = None
-            row.claim_expires_at_utc = None
-            row.claimed_by_worker = None
+            if publish_error is None:
+                update_vals.update(
+                    {
+                        "publish_status": OutboxPublishStatus.PUBLISHED,
+                        "published_at_utc": now,
+                        "attempt_count": 0,
+                        "next_attempt_at_utc": None,
+                        "last_error_code": None,
+                    }
+                )
+            else:
+                new_attempt_count += 1
+                update_vals["attempt_count"] = new_attempt_count
+                update_vals["last_error_code"] = str(publish_error)[:100]
+                if new_attempt_count >= settings.outbox_relay_max_failures:
+                    update_vals["publish_status"] = OutboxPublishStatus.DEAD_LETTER
+                    update_vals["next_attempt_at_utc"] = None
+                else:
+                    update_vals["publish_status"] = OutboxPublishStatus.FAILED
+                    update_vals["next_attempt_at_utc"] = _outbox_next_attempt_at(new_attempt_count)
+
+            # Use explicit values() mapping to avoid driver parameter binding issues
+            # We must ensure all values are mapping-compatible (strings, datetimes, etc.)
+            vals = {
+                "claim_token": None,
+                "claim_expires_at_utc": None,
+                "claimed_by_worker": None,
+                "publish_status": update_vals["publish_status"].value,
+                "published_at_utc": update_vals.get("published_at_utc"),
+                "attempt_count": update_vals["attempt_count"],
+                "next_attempt_at_utc": update_vals.get("next_attempt_at_utc"),
+                "last_error_code": update_vals.get("last_error_code"),
+            }
+            await session.execute(update(TripOutbox).where(TripOutbox.event_id == event_id).values(vals))
             await session.commit()
 
         if publish_error is None:
@@ -228,13 +281,13 @@ async def _publish_single(broker: MessageBroker, event_id: str, claim_token: str
             )
             return True
 
-        if row.attempt_count >= settings.outbox_relay_max_failures:
+        if new_attempt_count >= settings.outbox_relay_max_failures:
             labels = get_standard_labels()
             OUTBOX_DEAD_LETTER_TOTAL.labels(**labels).inc()
             logger.error(
                 "Outbox %s: DEAD_LETTER after %d consecutive failures: %s",
                 message.event_id,
-                row.attempt_count,
+                new_attempt_count,
                 publish_error,
                 extra={
                     "alert": "DEAD_LETTER",
@@ -247,9 +300,9 @@ async def _publish_single(broker: MessageBroker, event_id: str, claim_token: str
             logger.warning(
                 "Outbox %s: publish failed (attempt %d/%d), next retry at %s: %s",
                 message.event_id,
-                row.attempt_count,
+                new_attempt_count,
                 settings.outbox_relay_max_failures,
-                row.next_attempt_at_utc,
+                update_vals.get("next_attempt_at_utc"),
                 publish_error,
             )
         return False

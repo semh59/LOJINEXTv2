@@ -91,7 +91,6 @@ from trip_service.trip_helpers import (
     _REFERENCE_EXCLUDED_STATUSES,
     _check_idempotency_key,
     _coerce_actor_type,
-    _compute_data_quality_flag,
     _create_outbox_event,
     _event_payload,
     _generate_id,
@@ -106,6 +105,7 @@ from trip_service.trip_helpers import (
     trip_to_resource,
     utc_now,
 )
+from platform_common import compute_data_quality_flag
 from trip_service.observability import (
     TRIP_CREATED_TOTAL,
     TRIP_HARD_DELETED_TOTAL,
@@ -380,7 +380,7 @@ async def ingest_trip_slip(
             trip_id=trip_id,
             enrichment_status=EnrichmentStatus.READY,
             route_status=RouteStatus.READY,
-            data_quality_flag=_compute_data_quality_flag(SourceType.TELEGRAM_TRIP_SLIP, body.ocr_confidence, True),
+            data_quality_flag=compute_data_quality_flag(SourceType.TELEGRAM_TRIP_SLIP, body.ocr_confidence, True),
             enrichment_attempt_count=0,
             created_at_utc=now,
             updated_at_utc=now,

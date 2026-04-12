@@ -118,7 +118,6 @@ x-telegram-common: &telegram-common
     TELEGRAM_ENVIRONMENT: prod
     TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN is required}
     TELEGRAM_WEBHOOK_URL: ${TELEGRAM_WEBHOOK_URL:-https://api.lojinext.com/telegram/webhook}
-    TELEGRAM_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-lojinext}:${POSTGRES_PASSWORD}@postgres:5432/${TELEGRAM_DB_NAME:-telegram_service}
     TELEGRAM_REDIS_URL: redis://redis:6379/1
     TELEGRAM_TRIP_SERVICE_URL: http://trip-api:8101
     TELEGRAM_DRIVER_SERVICE_URL: http://driver-api:8104
@@ -128,8 +127,6 @@ x-telegram-common: &telegram-common
     TELEGRAM_AUTH_SERVICE_CLIENT_ID: telegram-service
     TELEGRAM_AUTH_SERVICE_CLIENT_SECRET: ${TELEGRAM_SERVICE_CLIENT_SECRET:?TELEGRAM_SERVICE_CLIENT_SECRET is required}
   depends_on:
-    postgres:
-      condition: service_healthy
     trip-api:
       condition: service_healthy
     driver-api:

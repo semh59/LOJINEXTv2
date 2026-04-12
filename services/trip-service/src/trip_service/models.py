@@ -318,6 +318,7 @@ class TripOutbox(Base):
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
     payload_json: Mapped[str] = mapped_column(Text, nullable=False)
     partition_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    causation_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     publish_status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING")
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     next_attempt_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

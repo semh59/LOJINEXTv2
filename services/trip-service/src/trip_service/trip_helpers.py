@@ -364,9 +364,20 @@ async def _write_audit(
     )
 
 
-def _build_outbox_row(*, trip_id: str, aggregate_version: int, event_name: str, payload: dict[str, Any]) -> TripOutbox:
+def _build_outbox_row(
+    *,
+    trip_id: str,
+    aggregate_version: int,
+    event_name: str,
+    payload: dict[str, Any],
+    causation_id: str | None = None,
+) -> TripOutbox:
     """Create an in-memory outbox row ready to be added to the current transaction."""
+    from trip_service.observability import causation_id as causation_ctx
+
     now = utc_now()
+    effective_causation = causation_id or causation_ctx.get()
+
     return TripOutbox(
         event_id=str(ULID()),
         aggregate_type="TRIP",
@@ -376,6 +387,7 @@ def _build_outbox_row(*, trip_id: str, aggregate_version: int, event_name: str, 
         schema_version=1,
         payload_json=json.dumps(payload, default=str),
         partition_key=trip_id,
+        causation_id=effective_causation,
         publish_status=OutboxPublishStatus.PENDING.value,
         attempt_count=0,
         next_attempt_at_utc=now,
@@ -393,6 +405,7 @@ async def _create_outbox_event(
     trip: TripTrip,
     event_name: str,
     payload: dict[str, Any] | None = None,
+    causation_id: str | None = None,
 ) -> TripOutbox:
     """Add an outbox row to the current session for the given trip aggregate."""
     row = _build_outbox_row(
@@ -400,6 +413,7 @@ async def _create_outbox_event(
         aggregate_version=trip.version,
         event_name=event_name,
         payload=payload or _event_payload(trip),
+        causation_id=causation_id,
     )
     session.add(row)
     return row
@@ -411,6 +425,7 @@ async def _write_outbox(
     trip_id: str,
     event_name: str,
     payload: dict[str, Any],
+    causation_id: str | None = None,
 ) -> TripOutbox:
     """Add a generic outbox event to the current transaction."""
     row = _build_outbox_row(
@@ -418,6 +433,7 @@ async def _write_outbox(
         aggregate_version=int(payload.get("version", 1)),
         event_name=event_name,
         payload=payload,
+        causation_id=causation_id,
     )
     session.add(row)
     return row
@@ -686,11 +702,6 @@ def _validate_trip_weights(tare_weight_kg: int | None, gross_weight_kg: int | No
         raise trip_validation_error("Trip weights are inconsistent.", errors=errors)
 
 
-def _compute_data_quality_flag(source_type: str, ocr_confidence: float | None, route_resolved: bool) -> str:
-    """Compute the trip data-quality flag using the locked source contract."""
-    return compute_data_quality_flag(source_type, ocr_confidence, route_resolved)
-
-
 def _maybe_require_change_reason(
     auth: AuthContext,
     body: EditTripRequest,
@@ -752,7 +763,7 @@ def _set_enrichment_state(
 
     enrichment.route_status = RouteStatus.READY if route_ready else RouteStatus.PENDING
     enrichment.enrichment_status = EnrichmentStatus.READY if route_ready else EnrichmentStatus.PENDING
-    enrichment.data_quality_flag = _compute_data_quality_flag(source_type, ocr_confidence, route_resolved=route_ready)
+    enrichment.data_quality_flag = compute_data_quality_flag(source_type, ocr_confidence, route_resolved=route_ready)
     enrichment.claim_token = None
     enrichment.claim_expires_at_utc = None
     enrichment.claimed_by_worker = None
