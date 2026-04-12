@@ -44,7 +44,7 @@ async def test_metrics_endpoint_exposes_prometheus_payload(raw_client: AsyncClie
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/plain")
-    assert "location_request_duration_seconds" in response.text
+    assert "location_http_request_duration_seconds" in response.text
 
 
 @pytest.mark.asyncio
@@ -161,7 +161,10 @@ async def test_ready_returns_503_when_jwks_is_unreachable(
     raw_client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("location_service.routers.health.auth_verify_status", lambda: "fail")
+    async def mock_fail():
+        return "fail"
+
+    monkeypatch.setattr("location_service.routers.health.auth_verify_status", mock_fail)
 
     response = await raw_client.get("/ready")
 
@@ -174,7 +177,10 @@ async def test_ready_returns_503_when_jwks_is_malformed(
     raw_client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("location_service.routers.health.auth_verify_status", lambda: "fail")
+    async def mock_fail():
+        return "fail"
+
+    monkeypatch.setattr("location_service.routers.health.auth_verify_status", mock_fail)
 
     response = await raw_client.get("/ready")
 

@@ -409,6 +409,7 @@ class LocationOutboxModel(Base):
     publish_status: Mapped[str] = mapped_column(String(16), nullable=False, default="PENDING")
     last_error_code: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     claim_token: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    causation_id: Mapped[Optional[str]] = mapped_column(String(26), nullable=True)
     claimed_by_worker: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     claim_expires_at_utc: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

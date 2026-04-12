@@ -41,14 +41,14 @@ from fleet_service.repositories import (
 )
 from fleet_service.schemas.requests import VehicleSpecVersionRequest
 from fleet_service.schemas.responses import VehicleSpecResponse
-from fleet_service.timestamps import to_utc_naive, utc_now_naive
+from fleet_service.timestamps import to_utc_aware, utc_now_aware
 
 logger = logging.getLogger("fleet_service.vehicle_spec_service")
 
 
 def _utc_now() -> datetime.datetime:
     """Return the current naive UTC timestamp for the Fleet schema."""
-    return utc_now_naive()
+    return utc_now_aware()
 
 
 # === CREATE SPEC VERSION (13-step) ===
@@ -94,7 +94,7 @@ async def create_vehicle_spec_version(
     now = _utc_now()
 
     # Step 6: Default effective_from_utc
-    effective_from = to_utc_naive(body.effective_from_utc) if body.effective_from_utc else now
+    effective_from = to_utc_aware(body.effective_from_utc) if body.effective_from_utc else now
 
     # Step 7: Get max version_no â†’ new_version_no
     max_version = await vehicle_spec_repo.get_max_version_no(session, vehicle_id)
@@ -247,7 +247,7 @@ async def get_spec_as_of(session: AsyncSession, vehicle_id: str, at: datetime.da
     if not vehicle:
         raise VehicleNotFoundError(vehicle_id)
 
-    spec = await vehicle_spec_repo.get_spec_as_of(session, vehicle_id, to_utc_naive(at))
+    spec = await vehicle_spec_repo.get_spec_as_of(session, vehicle_id, to_utc_aware(at))
     if not spec:
         raise SpecNotFoundForInstantError(at.isoformat())
 

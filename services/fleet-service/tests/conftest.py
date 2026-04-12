@@ -18,10 +18,24 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import NullPool
 from testcontainers.postgres import PostgresContainer
 
+import sys
+import asyncio
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 from alembic import command
 from fleet_service.broker import NoOpBroker
 from fleet_service.config import settings
 from fleet_service.database import get_session
+import httpx
+import respx
+
+
+TEST_JWKS_BUNDLE = build_test_jwks_bundle()
+settings.auth_issuer = TEST_JWKS_BUNDLE.issuer
+settings.auth_audience = TEST_JWKS_BUNDLE.audience
+settings.auth_jwks_url = TEST_JWKS_BUNDLE.jwks_url
 from fleet_service.worker_heartbeats import record_worker_heartbeat
 
 TRUNCATE_TABLES = (
@@ -63,12 +77,10 @@ def _bearer_headers(payload: dict[str, Any]) -> dict[str, str]:
     return {"Authorization": f"Bearer {_token(payload)}"}
 
 
-ADMIN_HEADERS = _bearer_headers({"sub": "admin-test-001", "role": "ADMIN"})
+ADMIN_HEADERS = _bearer_headers({"sub": "admin-test-001", "role": "MANAGER"})
 SUPER_ADMIN_HEADERS = _bearer_headers({"sub": "super-admin-001", "role": "SUPER_ADMIN"})
 SERVICE_HEADERS = _bearer_headers({"sub": "trip-service", "role": "SERVICE", "service": "trip-service"})
-FORBIDDEN_SERVICE_HEADERS = _bearer_headers(
-    {"sub": "rogue-service", "role": "SERVICE", "service": "rogue-service"}
-)
+FORBIDDEN_SERVICE_HEADERS = _bearer_headers({"sub": "rogue-service", "role": "SERVICE", "service": "rogue-service"})
 
 
 @pytest.fixture
@@ -163,7 +175,7 @@ async def test_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
 
 
 @pytest_asyncio.fixture
-async def client(db_engine, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[AsyncClient, None]:
+async def client(db_engine, monkeypatch: pytest.MonkeyPatch, respx_mock) -> AsyncGenerator[AsyncClient, None]:
     """Provide a test HTTP client with dependencies stubbed."""
 
     @asynccontextmanager
@@ -227,6 +239,7 @@ async def client(db_engine, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[A
     monkeypatch.setattr("fleet_service.clients.driver_client.validate_driver", mock_validate_driver)
     monkeypatch.setattr("fleet_service.clients.trip_client.check_asset_references", mock_reference_check)
     install_jwks_urlopen_mock(monkeypatch, TEST_JWKS_BUNDLE, jwks_url=settings.auth_jwks_url)
+    respx_mock.get(settings.auth_jwks_url).mock(return_value=httpx.Response(200, json=TEST_JWKS_BUNDLE.jwks))
     monkeypatch.setattr("fleet_service.auth._SERVICE_TOKEN_CACHE.get_token", stub_get_token)
     await record_worker_heartbeat("outbox-relay")
     await record_worker_heartbeat("fleet-worker")

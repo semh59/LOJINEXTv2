@@ -123,7 +123,7 @@ def test_alembic_live_pair_uniqueness_migration_blocks_duplicate_drafts() -> Non
                         await conn.execute(
                             text(
                                 """
-                                INSERT INTO location_route_pairs (
+                                INSERT INTO route_pairs (
                                     route_pair_id,
                                     pair_code,
                                     origin_location_id,

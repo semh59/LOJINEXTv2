@@ -1,7 +1,7 @@
 """Deep architectural tests for Outbox Relay component."""
 
 import asyncio
-import uuid
+import json
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
@@ -35,8 +35,10 @@ async def test_outbox_deep_concurrency_isolation(db_engine, override_outbox_sett
             session.add(
                 LocationOutboxModel(
                     event_name=f"test.event.{i}",
-                    payload_json={"target_id": str(uuid.uuid4())},
-                    partition_key="key",
+                    aggregate_type="LOCATION",
+                    aggregate_id=f"12345678901234567890ID{i:02d}",
+                    payload_json=json.dumps({"target_id": "1234"}),
+                    partition_key=f"key_{i}",
                     created_at_utc=datetime.now(UTC),
                     next_attempt_at_utc=datetime.now(UTC),
                 )
@@ -65,7 +67,9 @@ async def test_outbox_deep_stale_claim_recovery(db_engine, override_outbox_setti
         # Row that crashed mid-publish an hour ago
         stale_row = LocationOutboxModel(
             event_name="test.event.stale",
-            payload_json={"target_id": "123"},
+            aggregate_type="LOCATION",
+            aggregate_id="123",
+            payload_json=json.dumps({"target_id": "123"}),
             partition_key="key",
             publish_status="PUBLISHING",
             claim_expires_at_utc=datetime.now(UTC) - timedelta(minutes=60),
@@ -92,7 +96,9 @@ async def test_outbox_deep_broker_fault_dlq_backoff(db_engine, override_outbox_s
     async with session_factory() as session:
         row = LocationOutboxModel(
             event_name="test.event.dlq",
-            payload_json={"target_id": "dlq_test"},
+            aggregate_type="LOCATION",
+            aggregate_id="dlq_test",
+            payload_json=json.dumps({"target_id": "dlq_test"}),
             partition_key="key",
             created_at_utc=datetime.now(UTC),
             next_attempt_at_utc=datetime.now(UTC),
@@ -117,12 +123,12 @@ async def test_outbox_deep_broker_fault_dlq_backoff(db_engine, override_outbox_s
 
             if i < settings.outbox_retry_max - 1:
                 assert row.publish_status == "FAILED"
-                assert row.retry_count == i + 1
+                assert row.attempt_count == i + 1
                 assert row.last_error_code == "ConnectionError"
                 assert row.next_attempt_at_utc > datetime.now(UTC)  # Backoff
             else:
                 assert row.publish_status == "DEAD_LETTER"
-                assert row.retry_count == settings.outbox_retry_max
+                assert row.attempt_count == settings.outbox_retry_max
 
 
 @pytest.mark.asyncio
@@ -132,9 +138,11 @@ async def test_outbox_deep_partial_batch_isolation(db_engine, override_outbox_se
         for i in range(3):
             session.add(
                 LocationOutboxModel(
+                    aggregate_type="LOCATION",
+                    aggregate_id=f"id_{i}",
                     event_name=f"test.event.{i}",
-                    payload_json={"target_id": f"id_{i}"},
-                    partition_key="key",
+                    payload_json=json.dumps({"target_id": f"id_{i}"}),
+                    partition_key=f"key_{i}",
                     created_at_utc=datetime.now(UTC),
                     next_attempt_at_utc=datetime.now(UTC),
                 )

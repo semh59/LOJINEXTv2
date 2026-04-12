@@ -33,6 +33,11 @@ from driver_service.errors import (
     driver_validation_error,
     driver_version_mismatch,
 )
+from driver_service.idempotency import (
+    check_idempotency,
+    compute_endpoint_fingerprint,
+    save_idempotency_record,
+)
 from driver_service.models import DriverAuditLogModel, DriverModel, DriverOutboxModel
 from driver_service.normalization import (
     build_full_name_search_key,
@@ -101,20 +106,27 @@ async def _write_outbox(
     driver_id: str,
     event_name: str,
     payload: dict[str, Any],
+    *,
+    request_id: str | None = None,
+    correlation_id: str | None = None,
+    causation_id: str | None = None,
 ) -> None:
     """Write an outbox row for reliable event publishing."""
     outbox = DriverOutboxModel(
-        outbox_id=_new_ulid(),
+        event_id=_new_ulid(),
         aggregate_type="DRIVER",
         aggregate_id=driver_id,
         aggregate_version=1,
         driver_id=driver_id,
         event_name=event_name,
         event_version=1,
-        payload_json=json.dumps(payload),
+        payload_json=payload,
         partition_key=driver_id,
         publish_status="PENDING",
         attempt_count=0,
+        request_id=request_id,
+        correlation_id=correlation_id,
+        causation_id=causation_id,
         created_at_utc=_now_utc(),
         next_attempt_at_utc=_now_utc(),
     )
@@ -150,7 +162,15 @@ async def create_driver(
     now = _now_utc()
     request_id = getattr(request.state, "request_id", None)
 
-    # Phone normalization (manual create MUST reach NORMALIZED)
+    # Idempotency Check
+    fingerprint = compute_endpoint_fingerprint("POST", "/api/v1/drivers")
+    if request_id:
+        existing = await check_idempotency(session, request_id, fingerprint)
+        if existing:
+            response.status_code = 200
+            return json.loads(existing.response_body_json) if existing.response_body_json else {}
+
+    # Phone normalization
     phone_result = normalize_phone(body.phone)
     if phone_result.status != PhoneNormalizationStatus.NORMALIZED:
         raise driver_validation_error(
@@ -181,8 +201,10 @@ async def create_driver(
         row_version=1,
         created_at_utc=now,
         created_by_actor_id=auth.actor_id,
+        created_by_actor_type=auth.actor_type,
         updated_at_utc=now,
         updated_by_actor_id=auth.actor_id,
+        updated_by_actor_type=auth.actor_type,
     )
     session.add(driver)
 
@@ -214,7 +236,22 @@ async def create_driver(
                 "row_version": driver.row_version,
                 "created_at_utc": now.isoformat(),
             },
+            request_id=request_id,
+            correlation_id=request_id,
         )
+
+        # Save Idempotency
+        result_body = serialize_driver_for_role(driver, auth.role)
+        if request_id:
+            await save_idempotency_record(
+                session,
+                request_id,
+                fingerprint,
+                201,
+                result_body,
+                auth.actor_id,
+            )
+
         await session.commit()
         from driver_service.observability import DRIVERS_CREATED_TOTAL, get_standard_labels
 
@@ -384,6 +421,14 @@ async def patch_driver(
     request_id = getattr(request.state, "request_id", None)
     now = _now_utc()
 
+    # Idempotency Check
+    fingerprint = compute_endpoint_fingerprint("PATCH", f"/api/v1/drivers/{driver_id}")
+    if request_id:
+        existing = await check_idempotency(session, request_id, fingerprint)
+        if existing:
+            response.status_code = 200
+            return json.loads(existing.response_body_json) if existing.response_body_json else {}
+
     # Require If-Match
     expected_version = parse_if_match(if_match)
     if expected_version is None:
@@ -530,6 +575,20 @@ async def patch_driver(
                 "row_version": driver.row_version,
                 "updated_at_utc": now.isoformat(),
             },
+            request_id=request_id,
+            correlation_id=request_id,
+        )
+
+    # Save Idempotency
+    result_body = serialize_driver_for_role(driver, auth.role)
+    if request_id:
+        await save_idempotency_record(
+            session,
+            request_id,
+            fingerprint,
+            200,
+            result_body,
+            auth.actor_id,
         )
 
     try:

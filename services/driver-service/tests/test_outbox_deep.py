@@ -52,6 +52,7 @@ async def test_outbox_stale_claim_recovery(committed_session: AsyncSession, test
     stale_outbox = DriverOutboxModel(
         outbox_id="stale_01",
         driver_id=test_driver.driver_id,
+        aggregate_id=test_driver.driver_id,
         event_name="driver.updated",
         payload_json='{"status": "active"}',
         publish_status="PUBLISHING",
@@ -84,6 +85,7 @@ async def test_outbox_concurrency_isolation(committed_session: AsyncSession, tes
             DriverOutboxModel(
                 outbox_id=f"concurrent_{i}",
                 driver_id=test_driver.driver_id,
+                aggregate_id=test_driver.driver_id,
                 event_name="driver.updated",
                 payload_json='{"status": "active"}',
                 publish_status="PENDING",
@@ -116,6 +118,7 @@ async def test_outbox_broker_failure_retry(committed_session: AsyncSession, test
     outbox = DriverOutboxModel(
         outbox_id="fail_01",
         driver_id=test_driver.driver_id,
+        aggregate_id=test_driver.driver_id,
         event_name="driver.updated",
         payload_json='{"status": "active"}',
         publish_status="PENDING",
@@ -134,7 +137,7 @@ async def test_outbox_broker_failure_retry(committed_session: AsyncSession, test
     # 3. Verify retry state
     await committed_session.refresh(outbox)
     assert outbox.publish_status == "FAILED"
-    assert outbox.retry_count == 1
+    assert outbox.attempt_count == 1
     assert outbox.last_error == "Kafka connection lost"
 
 
@@ -147,10 +150,11 @@ async def test_outbox_dead_letter_transition(committed_session: AsyncSession, te
     outbox = DriverOutboxModel(
         outbox_id="dlq_01",
         driver_id=test_driver.driver_id,
+        aggregate_id=test_driver.driver_id,
         event_name="driver.updated",
         payload_json='{"status": "active"}',
         publish_status="FAILED",
-        retry_count=settings.outbox_retry_max - 1,
+        attempt_count=settings.outbox_retry_max - 1,
         created_at_utc=now,
     )
     committed_session.add(outbox)
@@ -166,4 +170,4 @@ async def test_outbox_dead_letter_transition(committed_session: AsyncSession, te
     # 3. Verify DEAD_LETTER
     await committed_session.refresh(outbox)
     assert outbox.publish_status == "DEAD_LETTER"
-    assert outbox.retry_count == settings.outbox_retry_max
+    assert outbox.attempt_count == settings.outbox_retry_max

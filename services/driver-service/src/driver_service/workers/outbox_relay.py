@@ -9,8 +9,8 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import and_, not_, or_, select
-from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from driver_service import database
 from driver_service.broker import EventBroker
@@ -105,20 +105,21 @@ async def _process_batch(session: AsyncSession, broker: EventBroker) -> int:
     for row_stub in rows:
         from driver_service.observability import correlation_id
 
-        token = correlation_id.set(row_stub.outbox_id)
+        effective_cid = row_stub.correlation_id or row_stub.event_id
+        token = correlation_id.set(effective_cid)
 
         try:
             async with database.async_session_factory() as item_session:
-                row = await item_session.get(DriverOutboxModel, row_stub.outbox_id, with_for_update=True)
+                row = await item_session.get(DriverOutboxModel, row_stub.event_id, with_for_update=True)
                 if not row:
-                    logger.warning("Row %s disappeared", row_stub.outbox_id)
+                    logger.warning("Row %s disappeared", row_stub.event_id)
                     continue
                 if row.publish_status == "PUBLISHED":
-                    logger.info("Row %s already published", row_stub.outbox_id)
+                    logger.info("Row %s already published", row_stub.event_id)
                     continue
 
                 try:
-                    payload = json.loads(row.payload_json)
+                    payload = row.payload_json
                     partition_key = row.partition_key or row.driver_id or "unknown"
 
                     await broker.publish(
@@ -130,6 +131,9 @@ async def _process_batch(session: AsyncSession, broker: EventBroker) -> int:
                             "aggregate_id": row.aggregate_id,
                             "aggregate_type": row.aggregate_type,
                             "aggregate_version": row.aggregate_version,
+                            "request_id": row.request_id,
+                            "correlation_id": row.correlation_id,
+                            "causation_id": row.causation_id,
                             "data": payload,
                             "published_at_utc": now.isoformat(),
                         },
@@ -149,17 +153,17 @@ async def _process_batch(session: AsyncSession, broker: EventBroker) -> int:
                     await item_session.rollback()
 
                     async with database.async_session_factory() as fail_session:
-                        row = await fail_session.get(DriverOutboxModel, row_stub.outbox_id, with_for_update=True)
+                        row = await fail_session.get(DriverOutboxModel, row_stub.event_id, with_for_update=True)
                         if row:
                             row.attempt_count += 1
-                            row.last_error_code = type(exc).__name__[:100]
+                            row.last_error = str(exc)[:500]
                             row.claim_expires_at_utc = None
                             row.claim_token = None
                             row.claimed_by_worker = None
 
                             if row.attempt_count >= settings.outbox_retry_max:
                                 row.publish_status = "DEAD_LETTER"
-                                logger.error("Outbox row %s moved to DEAD_LETTER", row.outbox_id)
+                                logger.error("Outbox row %s moved to DEAD_LETTER", row.event_id)
                                 dl_labels = get_standard_labels()
                                 OUTBOX_DEAD_LETTER_TOTAL.labels(**dl_labels).inc()
                             else:

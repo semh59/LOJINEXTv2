@@ -6,12 +6,19 @@ import datetime
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, Field  # noqa: I001
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class StrictResponseModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# noqa: I001
 
 # --- Pagination ---
 
 
-class PagedResponse(BaseModel):
+class PagedResponse(StrictResponseModel):
     """Offset-based paginated response for list endpoints."""
 
     items: list[Any]
@@ -21,7 +28,7 @@ class PagedResponse(BaseModel):
     total_pages: int
 
 
-class CursorResponse(BaseModel):
+class CursorResponse(StrictResponseModel):
     """Cursor-based paginated response for selectable endpoints."""
 
     items: list[Any]
@@ -29,13 +36,13 @@ class CursorResponse(BaseModel):
     has_more: bool = False
 
 
-class VehicleByPlateResponse(BaseModel):
+class VehicleByPlateResponse(StrictResponseModel):
     """GET /internal/v1/vehicles/by-plate/{plate} response."""
 
     vehicle_id: str
 
 
-class TrailerByPlateResponse(BaseModel):
+class TrailerByPlateResponse(StrictResponseModel):
     """GET /internal/v1/trailers/by-plate/{plate} response."""
 
     trailer_id: str
@@ -44,7 +51,7 @@ class TrailerByPlateResponse(BaseModel):
 # --- Vehicle ---
 
 
-class CurrentSpecSummary(BaseModel):
+class CurrentSpecSummary(StrictResponseModel):
     """Lightweight spec summary for vehicle/trailer detail response."""
 
     version_no: int
@@ -56,7 +63,7 @@ class CurrentSpecSummary(BaseModel):
     effective_from_utc: datetime.datetime | None = None
 
 
-class VehicleDetailResponse(BaseModel):
+class VehicleDetailResponse(StrictResponseModel):
     """GET /api/v1/vehicles/{id} — Full vehicle detail (Section 9.3)."""
 
     vehicle_id: str
@@ -86,7 +93,7 @@ class VehicleDetailResponse(BaseModel):
     soft_delete_reason: str | None = None
 
 
-class VehicleListItemResponse(BaseModel):
+class VehicleListItemResponse(StrictResponseModel):
     """GET /api/v1/vehicles — Lighter list item (no notes, no soft_delete details)."""
 
     vehicle_id: str
@@ -109,7 +116,7 @@ class VehicleListItemResponse(BaseModel):
 # --- Trailer ---
 
 
-class TrailerCurrentSpecSummary(BaseModel):
+class TrailerCurrentSpecSummary(StrictResponseModel):
     """Lightweight spec summary for trailer detail response."""
 
     version_no: int
@@ -120,7 +127,7 @@ class TrailerCurrentSpecSummary(BaseModel):
     effective_from_utc: datetime.datetime | None = None
 
 
-class TrailerDetailResponse(BaseModel):
+class TrailerDetailResponse(StrictResponseModel):
     """GET /api/v1/trailers/{id} — Full trailer detail."""
 
     trailer_id: str
@@ -150,7 +157,7 @@ class TrailerDetailResponse(BaseModel):
     soft_delete_reason: str | None = None
 
 
-class TrailerListItemResponse(BaseModel):
+class TrailerListItemResponse(StrictResponseModel):
     """GET /api/v1/trailers — Lighter list item."""
 
     trailer_id: str
@@ -173,7 +180,7 @@ class TrailerListItemResponse(BaseModel):
 # --- Vehicle Spec ---
 
 
-class VehicleSpecResponse(BaseModel):
+class VehicleSpecResponse(StrictResponseModel):
     """Vehicle spec version full response (Section 9)."""
 
     vehicle_spec_version_id: str
@@ -217,7 +224,7 @@ class VehicleSpecResponse(BaseModel):
 # --- Trailer Spec ---
 
 
-class TrailerSpecResponse(BaseModel):
+class TrailerSpecResponse(StrictResponseModel):
     """Trailer spec version full response."""
 
     trailer_spec_version_id: str
@@ -254,7 +261,7 @@ class TrailerSpecResponse(BaseModel):
 # --- Validate ---
 
 
-class ValidateResponse(BaseModel):
+class ValidateResponse(StrictResponseModel):
     """GET /internal/v1/{asset_type}/{id}/validate — Always 200."""
 
     exists: bool
@@ -265,7 +272,7 @@ class ValidateResponse(BaseModel):
     reason_code: str | None = None
 
 
-class ValidateBulkItemResponse(BaseModel):
+class ValidateBulkItemResponse(StrictResponseModel):
     """Single item in bulk-validate response."""
 
     asset_id: str
@@ -281,7 +288,7 @@ class ValidateBulkItemResponse(BaseModel):
 # --- Selectable ---
 
 
-class SelectableItemResponse(BaseModel):
+class SelectableItemResponse(StrictResponseModel):
     """GET /internal/v1/selectable/{vehicles|trailers} — Selectable item."""
 
     asset_id: str
@@ -296,7 +303,7 @@ class SelectableItemResponse(BaseModel):
 # --- Fuel Metadata ---
 
 
-class FuelMetadataSpecResponse(BaseModel):
+class FuelMetadataSpecResponse(StrictResponseModel):
     """Fuel metadata spec DTO for resolve endpoint."""
 
     fuel_type: str | None = None
@@ -309,7 +316,7 @@ class FuelMetadataSpecResponse(BaseModel):
     tire_rr_class: str | None = None
 
 
-class FuelMetadataTrailerSpecResponse(BaseModel):
+class FuelMetadataTrailerSpecResponse(StrictResponseModel):
     """Fuel metadata trailer spec DTO for resolve endpoint."""
 
     trailer_type: str | None = None
@@ -323,7 +330,7 @@ class FuelMetadataTrailerSpecResponse(BaseModel):
     reefer_power_source: str | None = None
 
 
-class DerivedCombination(BaseModel):
+class DerivedCombination(StrictResponseModel):
     """Derived combination formulas (Section 5)."""
 
     combined_empty_weight_kg: Decimal | None = None
@@ -332,7 +339,7 @@ class DerivedCombination(BaseModel):
     aero_package_level: str | None = None
 
 
-class FuelMetadataResolveResponse(BaseModel):
+class FuelMetadataResolveResponse(StrictResponseModel):
     """POST /internal/v1/assets/fuel-metadata/resolve response."""
 
     vehicle: FuelMetadataSpecResponse | None = None
@@ -343,7 +350,7 @@ class FuelMetadataResolveResponse(BaseModel):
 # --- Hard Delete ---
 
 
-class HardDeleteResponse(BaseModel):
+class HardDeleteResponse(StrictResponseModel):
     """POST hard-delete success response."""
 
     deleted: bool = True
@@ -355,7 +362,7 @@ class HardDeleteResponse(BaseModel):
 # --- Timeline ---
 
 
-class TimelineEventResponse(BaseModel):
+class TimelineEventResponse(StrictResponseModel):
     """GET timeline event item."""
 
     event_id: str

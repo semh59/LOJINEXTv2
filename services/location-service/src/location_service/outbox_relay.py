@@ -104,20 +104,21 @@ class OutboxRelay:
         token = correlation_id.set(cid)
 
         try:
-            await self.broker.publish(
-                topic=settings.kafka_topic,
-                key=event.aggregate_id,
-                payload={
-                    "event_id": event.outbox_id,
-                    "event_name": event.event_name,
-                    "event_version": event.event_version,
-                    "aggregate_id": event.aggregate_id,
-                    "aggregate_type": event.aggregate_type,
-                    "aggregate_version": event.aggregate_version,
-                    "payload": payload,
-                    "published_at_utc": datetime.now(UTC).isoformat(),
-                },
+            from location_service.broker import OutboxMessage
+
+            payload_str = event.payload_json if isinstance(event.payload_json, str) else json.dumps(event.payload_json)
+
+            msg = OutboxMessage(
+                event_id=event.outbox_id,
+                event_name=event.event_name,
+                partition_key=event.partition_key,
+                payload=payload_str,
+                schema_version=event.event_version,
+                aggregate_type=event.aggregate_type,
+                aggregate_id=event.aggregate_id,
+                causation_id=event.causation_id,
             )
+            await self.broker.publish(msg)
             return True
         except Exception as exc:
             logger.error(

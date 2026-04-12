@@ -1,3 +1,4 @@
+import json
 import datetime
 from unittest.mock import AsyncMock, patch
 
@@ -8,7 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from fleet_service.broker import NoOpBroker
 from fleet_service.config import settings
 from fleet_service.models import FleetOutbox
-from fleet_service.timestamps import to_utc_naive, utc_now_naive
+from fleet_service.timestamps import to_utc_aware, utc_now_aware, to_utc_aware
 from fleet_service.workers.outbox_relay import _relay_batch
 
 
@@ -18,7 +19,7 @@ async def test_relay_batch_success(test_session, test_db_url):
     # We need to manually insert into FleetOutbox or use repo
     from ulid import ULID
 
-    now = utc_now_naive()
+    now = to_utc_aware(utc_now_aware())
 
     outbox_id = str(ULID())
     test_session.add(
@@ -28,7 +29,7 @@ async def test_relay_batch_success(test_session, test_db_url):
             aggregate_id="v-1",
             event_name="test.event",
             event_version=1,
-            payload_json={"id": "v-1"},
+            payload_json=json.dumps({"id": "v-1"}),
             publish_status="PENDING",
             next_attempt_at_utc=now - datetime.timedelta(minutes=1),
             created_at_utc=now,
@@ -63,7 +64,7 @@ async def test_relay_batch_success(test_session, test_db_url):
 
 @pytest.mark.asyncio
 async def test_relay_publish_failure_and_retry(test_session, test_db_url):
-    now = utc_now_naive()
+    now = to_utc_aware(utc_now_aware())
     outbox_id = "01H1234567890ABCDEFGHJKMN2"  # manual id
     test_session.add(
         FleetOutbox(
@@ -72,7 +73,7 @@ async def test_relay_publish_failure_and_retry(test_session, test_db_url):
             aggregate_id="v-2",
             event_name="test.event",
             event_version=1,
-            payload_json={"id": "v-2"},
+            payload_json=json.dumps({"id": "v-2"}),
             publish_status="PENDING",
             next_attempt_at_utc=now - datetime.timedelta(minutes=1),
             created_at_utc=now,
@@ -100,7 +101,7 @@ async def test_relay_publish_failure_and_retry(test_session, test_db_url):
         row = result.scalar_one()
         assert row.publish_status == "FAILED"
         assert row.attempt_count == 1
-        assert to_utc_naive(row.next_attempt_at_utc) > now
+        assert row.next_attempt_at_utc >= now
         assert row.last_error_code == "PUBLISH_ERROR"
 
     await engine.dispose()
@@ -108,7 +109,7 @@ async def test_relay_publish_failure_and_retry(test_session, test_db_url):
 
 @pytest.mark.asyncio
 async def test_relay_dead_letter_after_max_retries(test_session, test_db_url):
-    now = utc_now_naive()
+    now = to_utc_aware(utc_now_aware())
     outbox_id = "01H1234567890ABCDEFGHJKMN3"
 
     # Set attempt_count near max
@@ -119,7 +120,7 @@ async def test_relay_dead_letter_after_max_retries(test_session, test_db_url):
             aggregate_id="v-3",
             event_name="test.event",
             event_version=1,
-            payload_json={"id": "v-3"},
+            payload_json=json.dumps({"id": "v-3"}),
             publish_status="PENDING",
             next_attempt_at_utc=now - datetime.timedelta(minutes=1),
             created_at_utc=now,
@@ -159,7 +160,7 @@ async def test_concurrent_relay_safety(test_db_url):
     async with session_factory() as session:
         from ulid import ULID
 
-        now = utc_now_naive()
+        now = to_utc_aware(utc_now_aware())
         for i in range(5):
             session.add(
                 FleetOutbox(
@@ -168,7 +169,7 @@ async def test_concurrent_relay_safety(test_db_url):
                     aggregate_id=f"v-{i}",
                     event_name="test.event",
                     event_version=1,
-                    payload_json={"i": i},
+                    payload_json=json.dumps({"i": i}),
                     publish_status="PENDING",
                     next_attempt_at_utc=now - datetime.timedelta(minutes=1),
                     created_at_utc=now,

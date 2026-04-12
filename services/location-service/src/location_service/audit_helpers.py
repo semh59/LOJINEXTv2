@@ -123,6 +123,7 @@ async def _write_outbox(
     event_name: str,
     payload: dict[str, Any],
     partition_key: str | None = None,
+    causation_id: str | None = None,
 ) -> None:
     """Write a transactional outbox entry with 512KB safety guard."""
     import json
@@ -142,7 +143,7 @@ async def _write_outbox(
 
     outbox = LocationOutboxModel(
         outbox_id=_new_ulid(),
-        aggregate_type=payload.get("target_type", "LOCATION"),
+        aggregate_type=payload.get("target_type") or "LOCATION",
         aggregate_id=str(
             payload.get("target_id")
             or payload.get("location_id")
@@ -153,8 +154,9 @@ async def _write_outbox(
         aggregate_version=1,
         event_name=event_name,
         event_version=1,
-        payload_json=json.dumps(payload),
+        payload_json=payload_str,
         partition_key=p_key,
+        causation_id=causation_id,
         publish_status="PENDING",
         attempt_count=0,
         created_at_utc=now,

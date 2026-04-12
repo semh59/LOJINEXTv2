@@ -10,7 +10,7 @@ from fleet_service.broker import create_broker
 from fleet_service.config import settings
 from fleet_service.database import async_session_factory, engine
 from fleet_service.observability import setup_logging
-from fleet_service.timestamps import utc_now_naive
+from fleet_service.timestamps import utc_now_aware
 from fleet_service.worker_heartbeats import record_worker_heartbeat
 from fleet_service.workers.outbox_relay import run_outbox_relay
 
@@ -42,7 +42,7 @@ async def _idempotency_cleanup_loop(shutdown_event: asyncio.Event | None = None)
 
         try:
             async with async_session_factory() as session:
-                now = utc_now_naive()
+                now = utc_now_aware()
                 stmt = delete(FleetIdempotencyRecord).where(FleetIdempotencyRecord.expires_at_utc < now)
                 result = await session.execute(stmt)
                 count = getattr(result, "rowcount", 0)  # Type-safe access for rowcount

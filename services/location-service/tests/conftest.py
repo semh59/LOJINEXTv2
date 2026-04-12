@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
+import sys
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 import pytest
 import pytest_asyncio
+import httpx
 from httpx import ASGITransport, AsyncClient
+import respx
 from platform_auth_testing import build_test_jwks_bundle, install_jwks_urlopen_mock, sign_test_token
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -54,6 +61,17 @@ FORBIDDEN_SERVICE_HEADERS: dict[str, str] = _bearer_headers(
     {"sub": "other-service", "role": "SERVICE", "service": "other-service"}
 )
 FORBIDDEN_USER_HEADERS: dict[str, str] = _bearer_headers({"sub": "driver-test-001", "role": "DRIVER"})
+
+
+@pytest.fixture(scope="session")
+def event_loop():
+    """Create a session-scoped event loop for Windows compatibility."""
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -112,7 +130,7 @@ async def reset_provider_probe() -> AsyncGenerator[None, None]:
 
 
 @pytest_asyncio.fixture
-async def raw_client(db_engine, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[AsyncClient, None]:
+async def raw_client(db_engine, monkeypatch: pytest.MonkeyPatch, respx_mock) -> AsyncGenerator[AsyncClient, None]:
     """Provide an unauthenticated test client for auth and health checks."""
     session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
     app = create_app()
@@ -130,7 +148,11 @@ async def raw_client(db_engine, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerat
 
     app.dependency_overrides[get_db] = override_get_db
 
+    # Mock JWKS for both sync (urllib) and async (httpx)
     install_jwks_urlopen_mock(monkeypatch, TEST_JWKS_BUNDLE, jwks_url=settings.auth_jwks_url)
+
+    # respx mock for async httpx calls to JWKS
+    respx_mock.get(settings.auth_jwks_url).mock(return_value=httpx.Response(200, json=TEST_JWKS_BUNDLE.jwks))
     monkeypatch.setattr("location_service.database.async_session_factory", session_factory)
     monkeypatch.setattr("location_service.routers.health.async_session_factory", session_factory)
     monkeypatch.setattr("location_service.processing.pipeline.async_session_factory", session_factory)

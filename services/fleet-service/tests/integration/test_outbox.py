@@ -1,3 +1,4 @@
+import json
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
@@ -28,7 +29,7 @@ async def test_outbox_event_emission_on_create(client: AsyncClient, test_session
     event = outbox_events[0]
     assert event.event_name == "fleet.vehicle.created.v1"
     assert event.publish_status == "PENDING"
-    assert event.payload_json["aggregate_id"] == vehicle_id
+    assert json.loads(event.payload_json)["aggregate_id"] == vehicle_id
 
 
 @pytest.mark.asyncio

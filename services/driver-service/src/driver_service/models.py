@@ -9,7 +9,7 @@ Tables:
   - driver_import_job_rows — per-row import detail
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlalchemy import (
@@ -86,8 +86,10 @@ class DriverModel(Base):
     # Audit timestamps
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_by_actor_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_by_actor_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     updated_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_by_actor_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    updated_by_actor_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     soft_deleted_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
@@ -180,7 +182,7 @@ class DriverOutboxModel(Base):
 
     __tablename__ = "driver_outbox"
 
-    outbox_id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    event_id: Mapped[str] = mapped_column(String(26), primary_key=True)
     aggregate_type: Mapped[str] = mapped_column(String(16), nullable=False, default="DRIVER")
     aggregate_id: Mapped[str] = mapped_column(String(26), nullable=False)
     aggregate_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
@@ -189,17 +191,24 @@ class DriverOutboxModel(Base):
     )
     event_name: Mapped[str] = mapped_column(String(128), nullable=False)
     event_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    payload_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     partition_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     publish_status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING")
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    last_error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     claim_token: Mapped[str | None] = mapped_column(String(50), nullable=True)
     claimed_by_worker: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at_utc: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
     published_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     next_attempt_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     claim_expires_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Traceability headers
+    request_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    correlation_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    causation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -318,3 +327,22 @@ class WorkerHeartbeat(Base):
     last_heartbeat_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     worker_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     worker_metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+
+
+# ---------------------------------------------------------------------------
+# 2.8  driver_idempotency — consumer de-duplication
+# ---------------------------------------------------------------------------
+
+
+class DriverIdempotencyRecordModel(Base):
+    """Consumer-side idempotency record for reliable event processing."""
+
+    __tablename__ = "driver_idempotency"
+
+    idempotency_key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    endpoint_fingerprint: Mapped[str] = mapped_column(String(128), nullable=False)
+    response_code: Mapped[int] = mapped_column(Integer, nullable=False)
+    response_body_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    actor_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)

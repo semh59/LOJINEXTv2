@@ -29,8 +29,8 @@ from collections.abc import AsyncGenerator  # noqa: E402
 
 import pytest  # noqa: E402
 import sqlalchemy  # noqa: E402
-from httpx import ASGITransport, AsyncClient  # noqa: E402
-from platform_auth_testing import install_jwks_urlopen_mock  # noqa: E402
+from httpx import ASGITransport, AsyncClient, Response  # noqa: E402
+import respx  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine  # noqa: E402
 from testcontainers.postgres import PostgresContainer  # noqa: E402
 
@@ -133,23 +133,24 @@ async def client(db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> A
         return db_session
 
     app.dependency_overrides[get_session] = override_get_session
-    app.dependency_overrides[get_session] = override_get_session
-    install_jwks_urlopen_mock(monkeypatch, TEST_JWKS_BUNDLE, jwks_url=settings.auth_jwks_url)
+    # Mock JWKS for both sync and async httpx calls
+    with respx.mock(assert_all_called=False) as respx_mock:
+        respx_mock.get(settings.auth_jwks_url).mock(return_value=Response(200, json=TEST_JWKS_BUNDLE.jwks))
 
-    class HealthyBroker:
-        async def check_health(self) -> bool:
-            return True
+        class HealthyBroker:
+            async def check_health(self) -> bool:
+                return True
 
-        async def close(self) -> None:
-            return None
+            async def close(self) -> None:
+                return None
 
-    had_broker = hasattr(app.state, "broker")
-    original_broker = getattr(app.state, "broker", None)
-    app.state.broker = HealthyBroker()
+        had_broker = hasattr(app.state, "broker")
+        original_broker = getattr(app.state, "broker", None)
+        app.state.broker = HealthyBroker()
 
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
 
     app.dependency_overrides.clear()
     if had_broker:

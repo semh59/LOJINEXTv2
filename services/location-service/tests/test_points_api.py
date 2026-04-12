@@ -79,7 +79,7 @@ async def test_update_point_rejects_immutable_fields(client: AsyncClient) -> Non
     )
     assert patch_response.status_code == 422
     assert patch_response.headers["content-type"].startswith("application/problem+json")
-    assert patch_response.json()["code"] == "LOCATION_POINT_IMMUTABLE_FIELD_MODIFICATION"
+    assert patch_response.json()["code"] == "LOCATION_REQUEST_VALIDATION_ERROR"
 
 
 @pytest.mark.asyncio

@@ -5,12 +5,17 @@ from __future__ import annotations
 import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class StrictRequestModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", from_attributes=True, populate_by_name=True)
+
 
 # --- Vehicle ---
 
 
-class VehicleCreateRequest(BaseModel):
+class VehicleCreateRequest(StrictRequestModel):
     """POST /api/v1/vehicles — Create a vehicle (Section 9.1)."""
 
     asset_code: str = Field(..., min_length=1, max_length=50)
@@ -23,7 +28,7 @@ class VehicleCreateRequest(BaseModel):
     initial_spec: VehicleSpecVersionFields | None = None
 
 
-class VehiclePatchRequest(BaseModel):
+class VehiclePatchRequest(StrictRequestModel):
     """PATCH /api/v1/vehicles/{id} — Update vehicle (Section 9.4).
 
     Note: asset_code is NOT patchable.
@@ -37,7 +42,7 @@ class VehiclePatchRequest(BaseModel):
     notes: str | None = None
 
 
-class VehicleSpecVersionFields(BaseModel):
+class VehicleSpecVersionFields(StrictRequestModel):
     """Shared spec fields for vehicle spec versions (Section 8.4 columns)."""
 
     change_reason: str = Field(..., min_length=1)
@@ -77,7 +82,7 @@ class VehicleSpecVersionRequest(VehicleSpecVersionFields):
 # --- Trailer ---
 
 
-class TrailerCreateRequest(BaseModel):
+class TrailerCreateRequest(StrictRequestModel):
     """POST /api/v1/trailers — Create a trailer."""
 
     asset_code: str = Field(..., min_length=1, max_length=50)
@@ -90,7 +95,7 @@ class TrailerCreateRequest(BaseModel):
     initial_spec: TrailerSpecVersionFields | None = None
 
 
-class TrailerPatchRequest(BaseModel):
+class TrailerPatchRequest(StrictRequestModel):
     """PATCH /api/v1/trailers/{id} — Update trailer."""
 
     plate: str | None = Field(None, min_length=1, max_length=32)
@@ -101,7 +106,7 @@ class TrailerPatchRequest(BaseModel):
     notes: str | None = None
 
 
-class TrailerSpecVersionFields(BaseModel):
+class TrailerSpecVersionFields(StrictRequestModel):
     """Shared spec fields for trailer spec versions (Section 8.5 columns)."""
 
     change_reason: str = Field(..., min_length=1)
@@ -137,13 +142,13 @@ class TrailerSpecVersionRequest(TrailerSpecVersionFields):
 # --- Lifecycle ---
 
 
-class LifecycleActionRequest(BaseModel):
+class LifecycleActionRequest(StrictRequestModel):
     """POST deactivate/reactivate/soft-delete — reason is required (Gap #6)."""
 
     reason: str = Field(..., min_length=1)
 
 
-class HardDeleteRequest(BaseModel):
+class HardDeleteRequest(StrictRequestModel):
     """POST hard-delete — reason is required."""
 
     reason: str = Field(..., min_length=1)
@@ -152,7 +157,7 @@ class HardDeleteRequest(BaseModel):
 # --- Internal ---
 
 
-class TripCompatRequest(BaseModel):
+class TripCompatRequest(StrictRequestModel):
     """POST /internal/v1/trip-references/validate (Section 9)."""
 
     driver_id: str = Field(..., min_length=1)
@@ -160,7 +165,7 @@ class TripCompatRequest(BaseModel):
     trailer_id: str | None = None
 
 
-class FuelMetadataResolveRequest(BaseModel):
+class FuelMetadataResolveRequest(StrictRequestModel):
     """POST /internal/v1/assets/fuel-metadata/resolve."""
 
     vehicle_id: str = Field(..., min_length=1)
@@ -168,7 +173,7 @@ class FuelMetadataResolveRequest(BaseModel):
     at: datetime.datetime | None = None
 
 
-class ValidateBulkRequest(BaseModel):
+class ValidateBulkRequest(StrictRequestModel):
     """POST /internal/v1/assets/validate-bulk."""
 
     vehicle_ids: list[str] | None = Field(None, max_length=100)

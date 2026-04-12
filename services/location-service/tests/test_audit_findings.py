@@ -211,8 +211,21 @@ def test_create_pair_same_origin_destination(app_client, mock_session) -> None:
 def test_soft_delete_pair_and_already_deleted(app_client, mock_session) -> None:
     pair_id = str(ULID())
     pair = MagicMock(spec=RoutePair)
+    pair.route_pair_id = pair_id
+    pair.pair_code = "RP_TEST"
     pair.pair_status = "DRAFT"
+    pair.origin_location_id = str(ULID())
+    pair.destination_location_id = str(ULID())
+    pair.profile_code = "car"
+    pair.forward_route_id = None
+    pair.reverse_route_id = None
+    pair.current_active_forward_version_no = None
+    pair.current_active_reverse_version_no = None
+    pair.pending_forward_version_no = None
+    pair.pending_reverse_version_no = None
     pair.row_version = 1
+    pair.created_at_utc = datetime.now(UTC)
+    pair.updated_at_utc = datetime.now(UTC)
 
     result = MagicMock()
     result.scalar_one_or_none.return_value = pair

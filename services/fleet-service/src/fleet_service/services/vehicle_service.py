@@ -10,6 +10,7 @@ import json
 import logging
 from typing import Any
 
+from platform_common import OutboxPublishStatus
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
@@ -23,7 +24,6 @@ from fleet_service.domain.enums import (
     MasterStatus,
     ReferenceCheckStatus,
 )
-from platform_common import OutboxPublishStatus
 from fleet_service.domain.etag import generate_master_etag, generate_spec_etag
 from fleet_service.domain.idempotency import compute_endpoint_fingerprint, compute_request_hash
 from fleet_service.domain.normalization import normalize_plate
@@ -64,7 +64,7 @@ from fleet_service.schemas.responses import (
     VehicleDetailResponse,
     VehicleListItemResponse,
 )
-from fleet_service.timestamps import to_utc_naive, utc_now_naive
+from fleet_service.timestamps import to_utc_aware, utc_now_aware
 
 logger = logging.getLogger("fleet_service.vehicle_service")
 
@@ -75,7 +75,7 @@ _IDEMPOTENCY_TTL_HOURS = 72
 
 def _utc_now() -> datetime.datetime:
     """Return the current naive UTC timestamp for the Fleet schema."""
-    return utc_now_naive()
+    return utc_now_aware()
 
 
 # === CREATE ===
@@ -157,7 +157,7 @@ async def create_vehicle(
         if body.initial_spec is not None:
             vehicle.spec_stream_version = 1
             effective_from = (
-                to_utc_naive(body.initial_spec.effective_from_utc) if body.initial_spec.effective_from_utc else now
+                to_utc_aware(body.initial_spec.effective_from_utc) if body.initial_spec.effective_from_utc else now
             )
             current_spec = FleetVehicleSpecVersion(
                 vehicle_spec_version_id=str(ULID()),
@@ -250,7 +250,6 @@ async def create_vehicle(
         created_at_utc=now,
     )
     await outbox_repo.insert_outbox_event(session, outbox_event)
-    await session.commit()
 
     # Step 9: Build response
     response = _build_vehicle_detail_response(vehicle, current_spec=current_spec)
@@ -268,6 +267,7 @@ async def create_vehicle(
         expires_at_utc=now + datetime.timedelta(hours=_IDEMPOTENCY_TTL_HOURS),
     )
     await idempotency_repo.insert_record(session, idem_record)
+    await session.commit()
     # committed above
 
     # Step 11: ETag

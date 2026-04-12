@@ -1,7 +1,7 @@
 import abc
 import asyncio
-import json
 import logging
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from location_service.config import settings
@@ -23,11 +23,25 @@ except ImportError:
 logger = logging.getLogger("location_service.broker")
 
 
+@dataclass
+class OutboxMessage:
+    """Message to be published via the broker."""
+
+    event_id: str
+    event_name: str
+    partition_key: str
+    payload: str  # JSON string
+    schema_version: int
+    aggregate_type: str
+    aggregate_id: str
+    causation_id: str | None = None
+
+
 class EventBroker(abc.ABC):
     """Abstract event broker interface."""
 
     @abc.abstractmethod
-    async def publish(self, topic: str, key: str, payload: dict[str, Any]) -> None:
+    async def publish(self, message: "OutboxMessage") -> None:
         """Publish an event to the broker."""
         ...
 
@@ -53,7 +67,7 @@ class EventBroker(abc.ABC):
 class NoopBroker(EventBroker):
     """Swallows events."""
 
-    async def publish(self, topic: str, key: str, payload: dict[str, Any]) -> None:
+    async def publish(self, message: "OutboxMessage") -> None:
         pass
 
     async def close(self) -> None:
@@ -66,14 +80,15 @@ class NoopBroker(EventBroker):
 class LogBroker(EventBroker):
     """Logs events to stdout."""
 
-    async def publish(self, topic: str, key: str, payload: dict[str, Any]) -> None:
+    async def publish(self, message: "OutboxMessage") -> None:
         c_id = correlation_id.get() or "no-correlation-id"
         logger.info(
-            "EVENT [%s] correlation_id=%s key=%s payload=%s",
-            topic,
+            "EVENT [%s] correlation_id=%s key=%s payload=%s causation_id=%s",
+            message.event_name,
             c_id,
-            key,
-            json.dumps(payload),
+            message.partition_key,
+            message.payload,
+            message.causation_id,
         )
 
     async def close(self) -> None:
@@ -98,16 +113,18 @@ class KafkaBroker(EventBroker):
         self._producer = AIOProducer(config)
         self._admin = AdminClient(config)
 
-    async def publish(self, topic: str, key: str, payload: dict[str, Any]) -> None:
+    async def publish(self, message: "OutboxMessage") -> None:
         headers = []
         c_id = correlation_id.get()
         if c_id:
             headers.append(("X-Correlation-ID", c_id.encode()))
+        if message.causation_id:
+            headers.append(("X-Causation-ID", message.causation_id.encode()))
 
         delivery_future = await self._producer.produce(
-            topic,
-            key=key.encode(),
-            value=json.dumps(payload).encode(),
+            message.event_name,
+            key=message.partition_key.encode(),
+            value=message.payload.encode(),
             headers=headers,
         )
         await delivery_future

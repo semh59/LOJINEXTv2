@@ -8,7 +8,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fleet_service.models import FleetIdempotencyRecord
-from fleet_service.timestamps import to_utc_naive, utc_now_naive
+from fleet_service.timestamps import to_utc_aware, utc_now_aware
 
 
 async def find_existing_record(
@@ -35,9 +35,9 @@ async def cleanup_expired(session: AsyncSession, now: datetime.datetime | None =
     Returns number of rows deleted.
     """
     if now is None:
-        now = utc_now_naive()
+        now = utc_now_aware()
     else:
-        now = to_utc_naive(now)
+        now = to_utc_aware(now)
     stmt = delete(FleetIdempotencyRecord).where(FleetIdempotencyRecord.expires_at_utc < now)
     result = await session.execute(stmt)
     return result.rowcount or 0

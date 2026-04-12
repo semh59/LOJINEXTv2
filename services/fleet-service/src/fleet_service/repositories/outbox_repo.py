@@ -10,7 +10,7 @@ from ulid import ULID
 
 from fleet_service.config import settings
 from fleet_service.models import FleetOutbox
-from fleet_service.timestamps import to_utc_naive, utc_now_naive
+from fleet_service.timestamps import to_utc_aware, utc_now_aware
 
 
 def _claim_deadline(now: datetime.datetime) -> datetime.datetime:
@@ -60,9 +60,9 @@ async def claim_batch(
     or rows stuck in PUBLISHING where claim_expires_at_utc < now.
     """
     if now is None:
-        now = utc_now_naive()
+        now = utc_now_aware()
     else:
-        now = to_utc_naive(now)
+        now = to_utc_aware(now)
     # -----------------------------------------------------------------------
     # Head-of-Line (HOL) blocking:
     # Ensures only the earliest available event for a partition is claimed.
@@ -122,9 +122,9 @@ async def claim_batch(
 async def mark_published(session: AsyncSession, outbox_id: str, now: datetime.datetime | None = None) -> None:
     """Mark an outbox row as PUBLISHED."""
     if now is None:
-        now = utc_now_naive()
+        now = utc_now_aware()
     else:
-        now = to_utc_naive(now)
+        now = to_utc_aware(now)
     stmt = (
         update(FleetOutbox)
         .where(FleetOutbox.outbox_id == outbox_id)
@@ -147,7 +147,7 @@ async def mark_failed(
     next_attempt_at: datetime.datetime,
 ) -> None:
     """Mark an outbox row as FAILED with error details and next retry time."""
-    normalized_next_attempt_at = to_utc_naive(next_attempt_at)
+    normalized_next_attempt_at = to_utc_aware(next_attempt_at)
     stmt = (
         update(FleetOutbox)
         .where(FleetOutbox.outbox_id == outbox_id)

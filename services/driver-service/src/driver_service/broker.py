@@ -6,21 +6,13 @@ import json
 import logging
 from typing import Any, Literal
 
+from confluent_kafka import Producer
+from confluent_kafka.admin import AdminClient
+
 from driver_service.config import settings
 from driver_service.observability import correlation_id
 
-try:
-    from confluent_kafka.admin import AdminClient
-except ImportError:
-    AdminClient = None  # type: ignore
-
-try:
-    from confluent_kafka.aio import AIOProducer
-except ImportError:
-    try:
-        from confluent_kafka.experimental.aio import AIOProducer
-    except ImportError:
-        AIOProducer = None  # type: ignore
+AIOProducer = None  # We will use Producer and wrap it if needed, or stick to Producer for reliability
 
 logger = logging.getLogger("driver_service.broker")
 
@@ -72,37 +64,70 @@ class LogBroker(EventBroker):
 
 
 class KafkaBroker(EventBroker):
-    """Publishes events to Kafka using AIOProducer."""
+    """Publishes events to Kafka using standard Producer."""
 
     def __init__(self, bootstrap_servers: str, client_id: str, **kwargs: object) -> None:
-        if AIOProducer is None or AdminClient is None:
-            raise RuntimeError("confluent-kafka with asyncio support is not installed.")
-
         config: dict[str, object] = {
             "bootstrap.servers": bootstrap_servers,
             "client.id": client_id,
+            "acks": "all",
+            "enable.idempotence": True,
         }
         config.update(kwargs)
-        self._producer = AIOProducer(config)
+        self._producer = Producer(config)
         self._admin = AdminClient(config)
+        self._poll_task = asyncio.create_task(self._poll_loop())
+
+    async def _poll_loop(self) -> None:
+        """Background task to continuously poll for delivery reports."""
+        try:
+            while True:
+                # Poll for events (callbacks)
+                self._producer.poll(0.1)
+                await asyncio.sleep(0.01)
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("Kafka poll loop error")
 
     async def publish(self, topic: str, key: str, payload: dict[str, Any]) -> None:
         headers = []
-        c_id = correlation_id.get()
-        if c_id:
-            headers.append(("X-Correlation-ID", c_id.encode()))
+        c_id = correlation_id.get() or payload.get("correlation_id")
+        r_id = payload.get("request_id")
+        causation_id = payload.get("causation_id")
 
-        delivery_future = await self._producer.produce(
+        if c_id:
+            headers.append(("X-Correlation-ID", str(c_id).encode()))
+        if r_id:
+            headers.append(("X-Request-ID", str(r_id).encode()))
+        if causation_id:
+            headers.append(("X-Causation-ID", str(causation_id).encode()))
+
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[None] = loop.create_future()
+
+        def delivery_report(err: Any, msg: Any) -> None:
+            if err is not None:
+                future.set_exception(RuntimeError(f"Kafka delivery failed: {err}"))
+            else:
+                future.set_result(None)
+
+        self._producer.produce(
             topic,
             key=key.encode(),
             value=json.dumps(payload).encode(),
             headers=headers,
+            callback=delivery_report,
         )
-        await delivery_future
+        await future
 
     async def close(self) -> None:
-        await self._producer.flush()
-        await self._producer.close()
+        self._poll_task.cancel()
+        try:
+            await self._poll_task
+        except asyncio.CancelledError:
+            pass
+        self._producer.flush()
 
     async def check_health(self) -> None:
         """Verify broker connectivity via AdminClient."""

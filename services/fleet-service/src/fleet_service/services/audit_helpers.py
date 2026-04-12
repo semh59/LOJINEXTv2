@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from fleet_service.models import FleetAuditLogModel, FleetTrailer, FleetVehicle
-from fleet_service.timestamps import utc_now_naive
+from fleet_service.timestamps import utc_now_aware
 
 
 def serialize_vehicle_admin(vehicle: FleetVehicle) -> Dict[str, Any]:
@@ -76,6 +76,6 @@ async def _write_fleet_audit(
             actor_role=actor_role,
             reason=reason,
             request_id=request_id,
-            created_at_utc=utc_now_naive(),
+            created_at_utc=utc_now_aware(),
         )
     )

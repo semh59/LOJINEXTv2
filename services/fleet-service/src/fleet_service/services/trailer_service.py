@@ -11,6 +11,7 @@ import json
 import logging
 from typing import Any
 
+from platform_common import OutboxPublishStatus
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
@@ -24,7 +25,6 @@ from fleet_service.domain.enums import (
     MasterStatus,
     ReferenceCheckStatus,
 )
-from platform_common import OutboxPublishStatus
 from fleet_service.domain.etag import generate_master_etag, generate_spec_etag, parse_master_etag, parse_spec_etag
 from fleet_service.domain.idempotency import compute_endpoint_fingerprint, compute_request_hash
 from fleet_service.domain.normalization import normalize_plate
@@ -71,7 +71,7 @@ from fleet_service.schemas.responses import (
     TrailerListItemResponse,
     TrailerSpecResponse,
 )
-from fleet_service.timestamps import to_utc_naive, utc_now_naive
+from fleet_service.timestamps import to_utc_aware, utc_now_aware
 
 logger = logging.getLogger("fleet_service.trailer_service")
 
@@ -81,7 +81,7 @@ _IDEMPOTENCY_TTL_HOURS = 72
 
 def _utc_now() -> datetime.datetime:
     """Return the current naive UTC timestamp for the Fleet schema."""
-    return utc_now_naive()
+    return utc_now_aware()
 
 
 def serialize_trailer_admin(trailer: FleetTrailer) -> dict[str, Any]:
@@ -168,7 +168,7 @@ async def create_trailer(
         if body.initial_spec is not None:
             trailer.spec_stream_version = 1
             effective_from = (
-                to_utc_naive(body.initial_spec.effective_from_utc) if body.initial_spec.effective_from_utc else now
+                to_utc_aware(body.initial_spec.effective_from_utc) if body.initial_spec.effective_from_utc else now
             )
             current_spec = FleetTrailerSpecVersion(
                 trailer_spec_version_id=str(ULID()),
@@ -252,7 +252,6 @@ async def create_trailer(
         created_at_utc=now,
     )
     await outbox_repo.insert_outbox_event(session, outbox_event)
-    await session.commit()
 
     response = _build_trailer_detail_response(trailer, current_spec=current_spec)
 
@@ -268,6 +267,7 @@ async def create_trailer(
         expires_at_utc=now + datetime.timedelta(hours=_IDEMPOTENCY_TTL_HOURS),
     )
     await idempotency_repo.insert_record(session, idem_record)
+    await session.commit()
     # committed above
 
     etag = generate_master_etag("TRAILER", trailer_id, 1)
@@ -857,7 +857,7 @@ async def create_trailer_spec_version(
         raise SpecEtagMismatchError()
 
     now = _utc_now()
-    effective_from = to_utc_naive(body.effective_from_utc) if body.effective_from_utc else now
+    effective_from = to_utc_aware(body.effective_from_utc) if body.effective_from_utc else now
 
     max_version = await trailer_spec_repo.get_max_version_no(session, trailer_id)
     new_version_no = max_version + 1
@@ -1003,7 +1003,7 @@ async def get_spec_as_of(
     if not trailer:
         raise TrailerNotFoundError(trailer_id)
 
-    spec = await trailer_spec_repo.get_spec_as_of(session, trailer_id, to_utc_naive(at))
+    spec = await trailer_spec_repo.get_spec_as_of(session, trailer_id, to_utc_aware(at))
     if not spec:
         raise SpecNotFoundForInstantError(at.isoformat())
 

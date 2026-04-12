@@ -33,6 +33,11 @@ from driver_service.errors import (
     driver_validation_error,
     driver_version_mismatch,
 )
+from driver_service.idempotency import (
+    check_idempotency,
+    compute_endpoint_fingerprint,
+    save_idempotency_record,
+)
 from driver_service.models import DriverAuditLogModel, DriverModel, DriverOutboxModel
 from driver_service.normalization import etag_from_row_version, mask_phone_for_manager, parse_if_match
 from driver_service.serializers import serialize_driver_admin, serialize_driver_for_role
@@ -85,7 +90,16 @@ async def _write_audit(
     session.add(audit)
 
 
-async def _write_outbox(session: AsyncSession, driver_id: str, event_name: str, payload: dict[str, Any]) -> None:
+async def _write_outbox(
+    session: AsyncSession,
+    driver_id: str,
+    event_name: str,
+    payload: dict[str, Any],
+    *,
+    request_id: str | None = None,
+    correlation_id: str | None = None,
+    causation_id: str | None = None,
+) -> None:
     outbox = DriverOutboxModel(
         outbox_id=_new_ulid(),
         aggregate_type="DRIVER",
@@ -98,6 +112,9 @@ async def _write_outbox(session: AsyncSession, driver_id: str, event_name: str, 
         partition_key=driver_id,
         publish_status="PENDING",
         attempt_count=0,
+        request_id=request_id,
+        correlation_id=correlation_id,
+        causation_id=causation_id,
         created_at_utc=_now_utc(),
         next_attempt_at_utc=_now_utc(),
     )
@@ -158,6 +175,14 @@ async def inactivate_driver(
     request_id = getattr(request.state, "request_id", None)
     now = _now_utc()
 
+    # Idempotency Check
+    fingerprint = compute_endpoint_fingerprint("POST", f"/api/v1/drivers/{driver_id}/inactivate")
+    if request_id:
+        existing = await check_idempotency(session, request_id, fingerprint)
+        if existing:
+            response.status_code = 200
+            return json.loads(existing.response_body_json) if existing.response_body_json else {}
+
     driver = await _get_driver_with_etag_check(session, driver_id, if_match)
 
     # Parse body
@@ -211,7 +236,21 @@ async def inactivate_driver(
             "row_version": driver.row_version,
             "updated_at_utc": now.isoformat(),
         },
+        request_id=request_id,
+        correlation_id=request_id,
     )
+
+    # Save Idempotency
+    result_body = serialize_driver_for_role(driver, auth.role)
+    if request_id:
+        await save_idempotency_record(
+            session,
+            request_id,
+            fingerprint,
+            200,
+            result_body,
+            auth.actor_id,
+        )
 
     try:
         await session.commit()
@@ -243,6 +282,14 @@ async def reactivate_driver(
     """
     request_id = getattr(request.state, "request_id", None)
     now = _now_utc()
+
+    # Idempotency Check
+    fingerprint = compute_endpoint_fingerprint("POST", f"/api/v1/drivers/{driver_id}/reactivate")
+    if request_id:
+        existing = await check_idempotency(session, request_id, fingerprint)
+        if existing:
+            response.status_code = 200
+            return json.loads(existing.response_body_json) if existing.response_body_json else {}
 
     driver = await _get_driver_with_etag_check(session, driver_id, if_match)
 
@@ -288,7 +335,21 @@ async def reactivate_driver(
             "row_version": driver.row_version,
             "updated_at_utc": now.isoformat(),
         },
+        request_id=request_id,
+        correlation_id=request_id,
     )
+
+    # Save Idempotency
+    result_body = serialize_driver_for_role(driver, auth.role)
+    if request_id:
+        await save_idempotency_record(
+            session,
+            request_id,
+            fingerprint,
+            200,
+            result_body,
+            auth.actor_id,
+        )
 
     try:
         await session.commit()
@@ -322,6 +383,14 @@ async def soft_delete_driver(
 
     request_id = getattr(request.state, "request_id", None)
     now = _now_utc()
+
+    # Idempotency Check
+    fingerprint = compute_endpoint_fingerprint("POST", f"/api/v1/drivers/{driver_id}/soft-delete")
+    if request_id:
+        existing = await check_idempotency(session, request_id, fingerprint)
+        if existing:
+            response.status_code = 200
+            return json.loads(existing.response_body_json) if existing.response_body_json else {}
 
     driver = await _get_driver_with_etag_check(session, driver_id, if_match)
 
@@ -375,7 +444,21 @@ async def soft_delete_driver(
             "row_version": driver.row_version,
             "cancelled_at_utc": now.isoformat(),
         },
+        request_id=request_id,
+        correlation_id=request_id,
     )
+
+    # Save Idempotency
+    result_body = serialize_driver_for_role(driver, auth.role)
+    if request_id:
+        await save_idempotency_record(
+            session,
+            request_id,
+            fingerprint,
+            200,
+            result_body,
+            auth.actor_id,
+        )
 
     try:
         await session.commit()

@@ -1,0 +1,23 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: fleet-outbox-scaledobject
+  namespace: default
+spec:
+  scaleTargetRef:
+    name: fleet-outbox-worker
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  triggers:
+    - type: postgresql
+      metadata:
+        dbName: fleet_service
+        host: postgres
+        port: "5432"
+        userName: lojinext
+        # Scaling based on pending outbox events across partitions
+        query: "SELECT count(*) FROM fleet_outbox WHERE publish_status IN ('PENDING', 'FAILED', 'READY')"
+        targetValue: "100"
+        sslmode: "disable"
+      authenticationRef:
+        name: keda-postgres-auth

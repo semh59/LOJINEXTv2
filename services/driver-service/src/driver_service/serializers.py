@@ -80,7 +80,7 @@ def serialize_driver_internal(driver: DriverModel) -> dict[str, Any]:
 
 def serialize_driver_for_role(driver: DriverModel, role: str) -> dict[str, Any]:
     """Serialize a driver resource based on the caller's role."""
-    if role == PlatformRole.SUPER_ADMIN:
+    if role in {PlatformRole.SUPER_ADMIN, "ADMIN"}:
         return serialize_driver_admin(driver)
     if role == PlatformRole.MANAGER:
         return serialize_driver_manager(driver)
@@ -89,6 +89,6 @@ def serialize_driver_for_role(driver: DriverModel, role: str) -> dict[str, Any]:
 
 def serialize_driver_list_item(driver: DriverModel, role: str) -> dict[str, Any]:
     """Serialize a driver for list responses — uses MANAGER shape by default, SUPER_ADMIN gets full."""
-    if role == PlatformRole.SUPER_ADMIN:
+    if role in {PlatformRole.SUPER_ADMIN, "ADMIN"}:
         return serialize_driver_admin(driver)
     return serialize_driver_manager(driver)

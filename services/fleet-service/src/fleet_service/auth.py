@@ -28,6 +28,7 @@ from platform_auth import (
     async_decode_bearer_token,
 )
 from platform_auth.key_provider import build_verification_provider
+from platform_auth.roles import PlatformActorType
 
 logger = logging.getLogger("fleet_service.auth")
 
@@ -164,7 +165,7 @@ async def require_admin_token(authorization: str | None) -> AuthContext:
     actor_id = claims.sub.strip()
     if not actor_id:
         raise AuthInvalidError("Token is missing sub.")
-    return AuthContext(actor_id=actor_id, role=role)
+    return AuthContext(actor_id=actor_id, role=role, actor_type="ADMIN")
 
 
 async def require_super_admin_token(authorization: str | None) -> AuthContext:
@@ -178,7 +179,7 @@ async def require_super_admin_token(authorization: str | None) -> AuthContext:
     actor_id = claims.sub.strip()
     if not actor_id:
         raise AuthInvalidError("Token is missing sub.")
-    return AuthContext(actor_id=actor_id, role=role)
+    return AuthContext(actor_id=actor_id, role=role, actor_type="SUPER_ADMIN")
 
 
 async def require_service_token(authorization: str | None, *, allowed_services: set[str] | None = None) -> AuthContext:
@@ -195,7 +196,9 @@ async def require_service_token(authorization: str | None, *, allowed_services: 
         raise UnauthorizedInternalCallError()
     if allowed_services is not None and service_name not in allowed_services:
         raise UnauthorizedInternalCallError()
-    return AuthContext(actor_id=actor_id, role=PlatformRole.SERVICE, service_name=service_name)
+    return AuthContext(
+        actor_id=actor_id, role=PlatformRole.SERVICE, service_name=service_name, actor_type=PlatformActorType.SERVICE
+    )
 
 
 async def admin_auth(

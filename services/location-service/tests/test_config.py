@@ -90,6 +90,7 @@ def test_prod_validation_accepts_complete_rs256_config() -> None:
         ors_base_url="https://api.openrouteservice.org/v2/directions/driving-hgv",
         provider_timeout_ms=4000,
         provider_retry_max=2,
+        allow_plaintext_in_prod=True,
     )
 
     validate_prod_settings(candidate)
