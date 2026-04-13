@@ -25,6 +25,9 @@ async def _run_worker(shutdown_event: asyncio.Event) -> None:
         await run_outbox_relay(broker, shutdown_event=shutdown_event)
     finally:
         await broker.close()
+        from location_service.database import engine
+
+        await engine.dispose()
         shutdown_tracing()
 
 

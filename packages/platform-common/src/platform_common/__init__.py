@@ -2,6 +2,7 @@ from .logging import setup_logging
 from .outbox import OutboxPublishStatus
 from .data_quality import compute_data_quality_flag
 from .state_machine import StateMachine
+from .consumer import KafkaConsumerBase
 from .broker import (
     MessageBroker,
     OutboxMessage,
@@ -61,4 +62,5 @@ __all__ = [
     "AsyncTimeout",
     "OutboxRelayBase",
     "setup_logging",
+    "KafkaConsumerBase",
 ]

@@ -123,11 +123,19 @@ async def handle_photo(message: Message, state: FSMContext) -> None:
     # Download highest-resolution photo
     photo: PhotoSize = message.photo[-1]
     bot = message.bot
-    assert bot is not None
+    if bot is None:
+        logger.error("Bot instance not found in message")
+        return
+
     file = await bot.get_file(photo.file_id)
-    assert file.file_path is not None
+    if not file.file_path:
+        logger.error("File path not found for photo %s", photo.file_id)
+        return
+
     image_bytes = await bot.download_file(file.file_path)
-    assert image_bytes is not None
+    if not image_bytes:
+        logger.error("Failed to download photo from %s", file.file_path)
+        return
 
     try:
         fields = extract_slip_fields(image_bytes.read())
@@ -191,7 +199,9 @@ async def handle_confirm(callback: CallbackQuery, state: FSMContext) -> None:
 
     await state.clear()
 
-    assert callback.message is not None
+    if callback.message is None:
+        logger.error("Callback message is missing in handle_confirm")
+        return
 
     if fields.ocr_confidence >= settings.ocr_confidence_threshold and _is_full_slip(fields):
         try:
@@ -246,7 +256,8 @@ async def handle_confirm(callback: CallbackQuery, state: FSMContext) -> None:
 async def handle_edit(callback: CallbackQuery, state: FSMContext) -> None:
     """Show field selection keyboard for manual correction."""
     await callback.answer()
-    assert callback.message is not None
+    if callback.message is None:
+        return
     await callback.message.edit_reply_markup(reply_markup=_edit_keyboard())
 
 
@@ -260,7 +271,8 @@ async def handle_field_select(callback: CallbackQuery, state: FSMContext) -> Non
     await state.set_state(SlipStates.correcting_field)
     await state.update_data(correcting_field=field_key)
 
-    assert callback.message is not None
+    if callback.message is None:
+        return
     await callback.message.answer(MSG_SLIP_PROMPT_EDIT.format(label=label))
 
 
@@ -300,7 +312,8 @@ async def handle_field_value(message: Message, state: FSMContext) -> None:
 async def handle_back(callback: CallbackQuery, state: FSMContext) -> None:
     """Return to main confirmation keyboard."""
     await callback.answer()
-    assert callback.message is not None
+    if callback.message is None:
+        return
     await callback.message.edit_reply_markup(reply_markup=_confirmation_keyboard())
 
 
@@ -309,7 +322,8 @@ async def handle_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     """Cancel the slip submission."""
     await callback.answer()
     await state.clear()
-    assert callback.message is not None
+    if callback.message is None:
+        return
     await callback.message.edit_text(MSG_SLIP_CANCELLED)
 
 

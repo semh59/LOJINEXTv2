@@ -182,7 +182,7 @@ class DriverOutboxModel(Base):
 
     __tablename__ = "driver_outbox"
 
-    event_id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    outbox_id: Mapped[str] = mapped_column(String(26), primary_key=True)
     aggregate_type: Mapped[str] = mapped_column(String(16), nullable=False, default="DRIVER")
     aggregate_id: Mapped[str] = mapped_column(String(26), nullable=False)
     aggregate_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
@@ -191,7 +191,7 @@ class DriverOutboxModel(Base):
     )
     event_name: Mapped[str] = mapped_column(String(128), nullable=False)
     event_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    payload_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
     partition_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     publish_status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING")
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -208,7 +208,7 @@ class DriverOutboxModel(Base):
     # Traceability headers
     request_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     correlation_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
-    causation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    causation_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
 
     __table_args__ = (
         CheckConstraint(

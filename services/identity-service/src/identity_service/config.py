@@ -24,15 +24,18 @@ class Settings(BaseSettings):
     access_token_ttl_seconds: int = 900
     refresh_token_ttl_seconds: int = 60 * 60 * 24 * 14
     service_token_ttl_seconds: int = 300
-    broker_backend: Literal["kafka", "log", "noop"] | None = None
+    broker_type: Literal["kafka", "log", "noop"] | None = None
     outbox_poll_interval_seconds: int = 5
     outbox_publish_batch_size: int = 50
     outbox_retry_max: int = 10
-    kafka_topic: str = "identity-events"
+    kafka_topic: str = "identity.events.v1"
     kafka_bootstrap_servers: str = "localhost:9092"
     kafka_client_id: str = "identity-service"
     kafka_acks: str = "all"
     kafka_enable_idempotence: bool = True
+    kafka_linger_ms: int = 5
+    kafka_batch_size: int = 32768
+    kafka_compression_type: str = "lz4"
     kafka_security_protocol: str | None = None
     kafka_sasl_mechanism: str | None = None
     kafka_sasl_username: str | None = None
@@ -73,15 +76,11 @@ class Settings(BaseSettings):
         return os.getenv(self.service_client_secret_env_name(service_name), "").strip()
 
     @property
-    def resolved_broker_backend(self) -> Literal["kafka", "log", "noop"]:
-        """Resolve the broker backend from env override or runtime environment."""
-        if self.broker_backend is not None:
-            return self.broker_backend
-        if self.environment == "prod":
-            return "kafka"
-        if self.environment == "test":
-            return "noop"
-        return "log"
+    def resolved_broker_type(self) -> Literal["kafka", "log", "noop"]:
+        """Resolve the broker type from env override or runtime environment."""
+        if self.broker_type is not None:
+            return self.broker_type
+        return "kafka" if self.environment == "prod" else "log"
 
     @property
     def outbox_claim_ttl_seconds(self) -> int:
@@ -105,8 +104,8 @@ def validate_prod_settings(current: Settings) -> None:
     errors: list[str] = []
     if current.auth_jwt_algorithm.upper() != "RS256":
         errors.append("IDENTITY_AUTH_JWT_ALGORITHM must be RS256 in prod.")
-    if current.resolved_broker_backend != "kafka":
-        errors.append("IDENTITY_BROKER_BACKEND must resolve to kafka in prod.")
+    if current.resolved_broker_type != "kafka":
+        errors.append("IDENTITY_BROKER_TYPE must resolve to kafka in prod.")
     if not current.database_url or current.database_url == DEFAULT_DATABASE_URL:
         errors.append("IDENTITY_DATABASE_URL must be set to a non-default value in prod.")
     if current.kafka_bootstrap_servers == "localhost:9092":

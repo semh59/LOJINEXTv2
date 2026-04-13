@@ -31,14 +31,21 @@ class FleetOutboxRelay(OutboxRelayBase):
         """Map FleetOutbox row to the canonical OutboxMessage."""
         import json
 
-        # fleet-service outbox stores payload as a JSON string in payload_json
-        payload = json.loads(row.payload_json) if isinstance(row.payload_json, str) else row.payload_json
+        # fleet-service stores payload as Text (JSON string).
+        # Guard against JSONB fallback returning a dict on older DB schemas.
+        raw = row.payload_json
+        if isinstance(raw, dict):
+            payload_str = json.dumps(raw, default=str)
+        else:
+            # Validate it is parseable JSON so we surface corruption early.
+            json.loads(raw)  # raises ValueError if malformed
+            payload_str = raw
 
         return OutboxMessage(
             event_id=str(row.outbox_id),
             event_name=row.event_name,
-            partition_key=row.aggregate_id,
-            payload=payload,
+            partition_key=row.partition_key,
+            payload=payload_str,
             schema_version=row.event_version,
             aggregate_type=row.aggregate_type,
             aggregate_id=str(row.aggregate_id),

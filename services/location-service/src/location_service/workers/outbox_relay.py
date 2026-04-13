@@ -8,7 +8,7 @@ from typing import Any
 
 from location_service.database import async_session_factory
 from location_service.models import LocationOutboxModel
-from platform_common import OutboxRelayBase, MessageBroker, OutboxMessage, RobustJSONEncoder
+from platform_common import MessageBroker, OutboxMessage, OutboxRelayBase, RobustJSONEncoder
 
 logger = logging.getLogger("location_service.outbox_relay")
 
@@ -44,6 +44,7 @@ class LocationOutboxRelay(OutboxRelayBase):
             aggregate_type=row.aggregate_type,
             aggregate_id=str(row.aggregate_id),
             causation_id=row.causation_id,
+            correlation_id=row.correlation_id,
         )
 
 

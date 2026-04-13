@@ -1,7 +1,4 @@
-"""Signing and verification key providers."""
-
-from __future__ import annotations
-
+import asyncio
 import json
 import logging
 import time
@@ -46,16 +43,12 @@ class StaticKeyProvider:
         del header
         if self.settings.uses_hmac:
             if not self.settings.shared_secret:
-                raise KeyResolutionError(
-                    "shared_secret is required for HS* verification."
-                )
+                raise KeyResolutionError("shared_secret is required for HS* verification.")
             return self.settings.shared_secret
         if self.settings.uses_rsa:
             if self.settings.public_key:
                 return self.settings.public_key
-            raise KeyResolutionError(
-                "public_key is required when no JWKS URL is configured."
-            )
+            raise KeyResolutionError("public_key is required when no JWKS URL is configured.")
         raise KeyResolutionError(f"Unsupported algorithm: {self.settings.algorithm}")
 
 
@@ -67,6 +60,7 @@ class JWKSKeyProvider:
     cache_ttl_seconds: int = 300
     _cached_at: float = 0.0
     _keys: dict[str, Any] = field(default_factory=dict)
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def _get_client(self) -> httpx.Client:
         # Use a pooled client if possible, or create one
@@ -129,16 +123,15 @@ class JWKSKeyProvider:
         if not kid:
             raise KeyResolutionError("RS256 token is missing kid header.")
 
-        if not self._keys or (
-            time.monotonic() - self._cached_at >= self.cache_ttl_seconds
-        ):
-            await self._load_jwks_async()
+        async with self._lock:
+            if not self._keys or (time.monotonic() - self._cached_at >= self.cache_ttl_seconds):
+                await self._load_jwks_async()
 
-        key = self._keys.get(kid)
-        if key is None:
-            # Refresh if key not found (possible rotation)
-            await self._load_jwks_async()
             key = self._keys.get(kid)
+            if key is None:
+                # Refresh if key not found (possible rotation)
+                await self._load_jwks_async()
+                key = self._keys.get(kid)
 
         if key is None:
             raise KeyResolutionError(f"JWKS key not found for kid={kid}.")
@@ -150,9 +143,7 @@ class JWKSKeyProvider:
         if not kid:
             raise KeyResolutionError("RS256 token is missing kid header.")
 
-        if not self._keys or (
-            time.monotonic() - self._cached_at >= self.cache_ttl_seconds
-        ):
+        if not self._keys or (time.monotonic() - self._cached_at >= self.cache_ttl_seconds):
             self._load_jwks_sync()
 
         key = self._keys.get(kid)

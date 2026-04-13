@@ -9,26 +9,23 @@ import asyncio
 import hashlib
 import json
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from tests.conftest import (
     ADMIN_HEADERS,
-    EXCEL_SERVICE_HEADERS,
     SUPER_ADMIN_HEADERS,
     TELEGRAM_SERVICE_HEADERS,
-    make_excel_payload,
-    make_fallback_payload,
     make_manual_trip_payload,
     make_slip_payload,
 )
 from trip_service.enums import TripStatus
-from trip_service.middleware import make_etag, parse_etag_version, parse_if_match
-from trip_service.models import TripIdempotencyRecord, TripOutbox, TripTrip, TripTripEnrichment
+from trip_service.middleware import make_etag
+from trip_service.models import TripIdempotencyRecord, TripOutbox, TripTrip
 from trip_service.routers.trips import _merged_payload_hash
 from trip_service.trip_helpers import (
     _REFERENCE_EXCLUDED_STATUSES,
@@ -36,7 +33,6 @@ from trip_service.trip_helpers import (
     is_deleted_trip_status,
     normalize_trip_status,
 )
-
 
 # ===========================================================================
 # 1. UNIT TESTS: Core Domain Logic
@@ -274,8 +270,8 @@ class TestIdempotencyReplays:
 
     @pytest.mark.skip(
         reason="KNOWN-BUG: Stale inflight cleanup deadlocks (FOR UPDATE lock held while "
-               "secondary session tries DELETE on same row). Test hangs indefinitely. "
-               "See KNOWN_ISSUES.md IDEMPOTENCY_STALE_DEADLOCK.",
+        "secondary session tries DELETE on same row). Test hangs indefinitely. "
+        "See KNOWN_ISSUES.md IDEMPOTENCY_STALE_DEADLOCK.",
     )
     async def test_stale_inflight_cleanup_deadlocks(self, client: AsyncClient, db_engine):
         """Stale status=0 record (>60s old) cleanup path deadlocks in production code.
@@ -484,9 +480,7 @@ class TestConcurrencyStress:
                 driver_id="driver-stress-001",
                 vehicle_id="vehicle-stress-001",
             )
-            workers.append(
-                client.post("/api/v1/trips", json=payload, headers=SUPER_ADMIN_HEADERS)
-            )
+            workers.append(client.post("/api/v1/trips", json=payload, headers=SUPER_ADMIN_HEADERS))
 
         results = await asyncio.gather(*workers, return_exceptions=True)
         statuses = []
@@ -535,10 +529,10 @@ class TestConcurrencyStress:
         session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
         async with session_factory() as session:
             rows = (
-                await session.execute(
-                    select(TripOutbox).where(TripOutbox.aggregate_id == created.json()["id"])
-                )
-            ).scalars().all()
+                (await session.execute(select(TripOutbox).where(TripOutbox.aggregate_id == created.json()["id"])))
+                .scalars()
+                .all()
+            )
 
         assert len(rows) >= 1, "Expected at least one outbox event"
         event_names = {r.event_name for r in rows}

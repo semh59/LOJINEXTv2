@@ -28,9 +28,9 @@ import asyncio  # noqa: E402
 from collections.abc import AsyncGenerator  # noqa: E402
 
 import pytest  # noqa: E402
+import respx  # noqa: E402
 import sqlalchemy  # noqa: E402
 from httpx import ASGITransport, AsyncClient, Response  # noqa: E402
-import respx  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine  # noqa: E402
 from testcontainers.postgres import PostgresContainer  # noqa: E402
 

@@ -300,7 +300,7 @@ class FleetOutbox(Base):
     causation_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     event_name: Mapped[str] = mapped_column(String(80), nullable=False)
     event_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     partition_key: Mapped[str | None] = mapped_column(String(100))
     publish_status: Mapped[str] = mapped_column(String(16), nullable=False)
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -316,6 +316,8 @@ class FleetOutbox(Base):
     __table_args__ = (
         Index("ix_fleet_outbox_partition", "partition_key", "publish_status", "created_at_utc"),
         Index("ix_fleet_outbox_status_retry", "publish_status", "next_attempt_at_utc", "created_at_utc"),
+        Index("ix_fleet_outbox_correlation", "correlation_id"),
+        Index("ix_fleet_outbox_causation", "causation_id"),
     )
 
 

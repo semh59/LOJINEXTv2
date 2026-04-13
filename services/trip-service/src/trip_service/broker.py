@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Literal
 
+from platform_common import KafkaBroker, LogBroker, MessageBroker, NoOpBroker
+
 from trip_service.config import settings
 from trip_service.observability import correlation_id
-from platform_common import KafkaBroker, LogBroker, NoOpBroker, MessageBroker
 
 
 def _kafka_config() -> dict[str, object]:

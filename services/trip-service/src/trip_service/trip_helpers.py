@@ -1,29 +1,27 @@
-"""Trip-domain helper functions shared across routers."""
-
 from __future__ import annotations
 
 import hashlib
 import json
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 from fastapi.responses import JSONResponse
-from platform_auth import TokenClaims
+from platform_auth import AuthContext, TokenClaims
 from sqlalchemy import and_, func, select, text
 from sqlalchemy.dialects.postgresql import INTERVAL
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DBAPIError, IntegrityError, NoResultFound, OperationalError
-
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from ulid import ULID
 
-from trip_service.config import settings
-from trip_service.database import async_session_factory
-from trip_service.dependencies import LocationTripContext
 from platform_common import OutboxPublishStatus, compute_data_quality_flag
-from trip_service.enums import ActorType, ReviewReasonCode, SourceType, TripStatus
+from trip_service.config import settings
+from trip_service.database import get_session
+from trip_service.dependencies import LocationTripContext
+from trip_service.enums import  
+from platform_auth import PlatformRole, PlatformActorType ReviewReasonCode, SourceType, TripStatus
 from trip_service.errors import (
     idempotency_in_flight,
     idempotency_payload_mismatch,
@@ -44,7 +42,7 @@ from trip_service.models import (
     TripTripEvidence,
 )
 from trip_service.observability import get_standard_labels  # noqa: F401
-from trip_service.schemas import EnrichmentSummary, EvidenceSummary, TripResource
+from trip_service.schemas import EditTripRequest, EnrichmentSummary, EvidenceSummary, TripResource
 from trip_service.state_machine import TripStateMachine
 
 _REFERENCE_EXCLUDED_STATUSES = (
@@ -381,7 +379,7 @@ def _build_outbox_row(
         aggregate_id=trip_id,
         aggregate_version=aggregate_version,
         event_name=event_name,
-        schema_version=1,
+        event_version=1,
         payload_json=json.dumps(payload, default=str),
         partition_key=trip_id,
         causation_id=effective_causation,
@@ -528,26 +526,30 @@ async def _check_idempotency_key(
         return None
 
     now = utc_now()
-    async with async_session_factory() as secondary_session:
-        claim_stmt = (
-            pg_insert(TripIdempotencyRecord)
-            .values(
-                idempotency_key=idempotency_key,
-                endpoint_fingerprint=endpoint_fingerprint,
-                request_hash=request_hash,
-                response_status=0,
-                response_headers_json={},
-                response_body_json="{}",
-                created_at_utc=now,
-                expires_at_utc=now + timedelta(hours=settings.idempotency_retention_hours),
-            )
-            .on_conflict_do_nothing(index_elements=["idempotency_key", "endpoint_fingerprint"])
-        )
-        claim_result = await secondary_session.execute(claim_stmt)
-        await secondary_session.commit()
+    # Elite Hardening: Use the main session to ensure atomicity.
+    # We use a unique constraint violation + advisory lock to manage concurrent claims.
+    lock_key = _advisory_lock_key("idempotency", f"{endpoint_fingerprint}:{idempotency_key}")
+    await session.execute(select(func.pg_advisory_xact_lock(lock_key)))
 
-        if getattr(claim_result, "rowcount", 0) == 1:
-            return None
+    claim_stmt = (
+        pg_insert(TripIdempotencyRecord)
+        .values(
+            idempotency_key=idempotency_key,
+            endpoint_fingerprint=endpoint_fingerprint,
+            request_hash=request_hash,
+            response_status=0,
+            response_headers_json={},
+            response_body_json="{}",
+            created_at_utc=now,
+            expires_at_utc=now + timedelta(hours=settings.idempotency_retention_hours),
+        )
+        .on_conflict_do_nothing(index_elements=["idempotency_key", "endpoint_fingerprint"])
+    )
+    claim_result = await session.execute(claim_stmt)
+
+    if getattr(claim_result, "rowcount", 0) == 1:
+        # We claimed it in the main transaction.
+        return None
 
     try:
         record = (
@@ -568,22 +570,8 @@ async def _check_idempotency_key(
 
     if record.response_status == 0:
         # If the placeholder is stale (> 60s), notify client to retry.
-        # We cleanup the stale record in a separate session.
-        if (utc_now() - record.created_at_utc).total_seconds() > _IDEMPOTENCY_STALE_THRESHOLD_SECONDS:
-            logger.warning(
-                "Idempotency %s: Stale in-flight record detected (created at %s)",
-                idempotency_key,
-                record.created_at_utc,
-            )
-            async with async_session_factory() as cleanup_session:
-                await cleanup_session.execute(
-                    text(
-                        "DELETE FROM trip_idempotency_records WHERE idempotency_key = :k AND endpoint_fingerprint = :f"
-                    ),
-                    {"k": idempotency_key, "f": endpoint_fingerprint},
-                )
-                await cleanup_session.commit()
-
+        # Note: We don't delete here to avoid breaking the current session's potential locks,
+        # but the standard error will trigger a client retry.
         raise idempotency_in_flight()
 
     content = record.response_body_json
@@ -731,7 +719,7 @@ def _maybe_require_change_reason(
 async def _classify_manual_status(auth: AuthContext, trip_datetime_utc: datetime) -> tuple[TripStatus, str | None]:
     """Determine initial status and review reason for a manually created trip."""
     now = datetime.now(UTC)
-    if auth.role == ActorType.SUPER_ADMIN.value:
+    if auth.role == PlatformRole.SUPER_ADMIN.value:
         if trip_datetime_utc > now:
             return TripStatus.PENDING_REVIEW, ReviewReasonCode.FUTURE_MANUAL
         return TripStatus.COMPLETED, None
@@ -807,36 +795,30 @@ async def _save_idempotency_record(
     response_body: dict[str, Any],
     response_headers: dict[str, str],
 ) -> None:
-    """Persist idempotency replay material for later requests.
-
-    Note: We use a secondary session to ensure the result is committed
-    even if the main transaction has already finished or if we want
-    to ensure atomic persistence of the replay data.
-    """
+    """Persist idempotency replay material for later requests in the main transaction."""
     now = utc_now()
-    async with async_session_factory() as secondary_session:
-        stmt = (
-            pg_insert(TripIdempotencyRecord)
-            .values(
-                idempotency_key=idempotency_key,
-                endpoint_fingerprint=endpoint_fingerprint,
-                request_hash=request_hash,
-                response_status=response_status,
-                response_headers_json=response_headers,
-                response_body_json=json.dumps(response_body, default=str),
-                created_at_utc=now,
-                expires_at_utc=now + timedelta(hours=settings.idempotency_retention_hours),
-            )
-            .on_conflict_do_update(
-                index_elements=["idempotency_key", "endpoint_fingerprint"],
-                set_={
-                    "request_hash": request_hash,
-                    "response_status": response_status,
-                    "response_headers_json": response_headers,
-                    "response_body_json": json.dumps(response_body, default=str),
-                    "expires_at_utc": now + timedelta(hours=settings.idempotency_retention_hours),
-                },
-            )
+    stmt = (
+        pg_insert(TripIdempotencyRecord)
+        .values(
+            idempotency_key=idempotency_key,
+            endpoint_fingerprint=endpoint_fingerprint,
+            request_hash=request_hash,
+            response_status=response_status,
+            response_headers_json=response_headers,
+            response_body_json=json.dumps(response_body, default=str),
+            created_at_utc=now,
+            expires_at_utc=now + timedelta(hours=settings.idempotency_retention_hours),
         )
-        await secondary_session.execute(stmt)
-        await secondary_session.commit()
+        .on_conflict_do_update(
+            index_elements=["idempotency_key", "endpoint_fingerprint"],
+            set_={
+                "request_hash": request_hash,
+                "response_status": response_status,
+                "response_headers_json": response_headers,
+                "response_body_json": json.dumps(response_body, default=str),
+                "expires_at_utc": now + timedelta(hours=settings.idempotency_retention_hours),
+            },
+        )
+    )
+    await session.execute(stmt)
+    # The session will be committed by the caller along with the main transaction.

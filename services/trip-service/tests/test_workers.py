@@ -7,7 +7,8 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
-from sqlalchemy import insert, select, update
+from platform_common import compute_data_quality_flag
+from sqlalchemy import insert
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -15,10 +16,9 @@ import trip_service.workers.enrichment_worker as enrichment_worker_module
 import trip_service.workers.outbox_relay as outbox_relay_module
 from trip_service.broker import MessageBroker, OutboxMessage
 from trip_service.config import settings
-from trip_service.dependencies import LocationRouteResolution, LocationTripContext
+from trip_service.dependencies import LocationTripContext
 from trip_service.enums import EnrichmentStatus, RouteStatus
 from trip_service.models import TripOutbox, TripTrip, TripTripEnrichment, TripTripEvidence
-from platform_common import compute_data_quality_flag
 from trip_service.workers.enrichment_worker import (
     _claim_and_process_batch,
     _derive_final_enrichment_status,

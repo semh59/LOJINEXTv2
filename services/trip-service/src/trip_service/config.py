@@ -138,8 +138,8 @@ def validate_prod_settings(current: Settings) -> None:
         errors.append("TRIP_AUTH_SERVICE_CLIENT_SECRET must be set for RS256 outbound auth in prod.")
     if not current.database_url or current.database_url == DEFAULT_DATABASE_URL:
         errors.append("TRIP_DATABASE_URL must be set to a non-default value in prod.")
-    if current.broker_type is None:
-        errors.append("TRIP_BROKER_TYPE must be explicitly set in prod.")
+    if current.resolved_broker_type != "kafka":
+        errors.append("TRIP_BROKER_TYPE must resolve to kafka in prod.")
     if not current.kafka_bootstrap_servers or current.kafka_bootstrap_servers == DEFAULT_KAFKA_BOOTSTRAP:
         errors.append("TRIP_KAFKA_BOOTSTRAP_SERVERS must be set to a non-default value in prod.")
     if current.kafka_security_protocol == "PLAINTEXT" and not current.allow_plaintext_in_prod:

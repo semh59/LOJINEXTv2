@@ -16,13 +16,13 @@ from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
+from platform_common import OutboxPublishStatus
 from prometheus_client import Counter, Histogram, Info
 from sqlalchemy import CursorResult, delete
 from sqlalchemy.exc import DBAPIError
 
 from trip_service.config import settings
 from trip_service.database import async_session_factory
-from platform_common import OutboxPublishStatus
 from trip_service.models import TripIdempotencyRecord, TripOutbox
 from trip_service.worker_heartbeats import record_worker_heartbeat
 

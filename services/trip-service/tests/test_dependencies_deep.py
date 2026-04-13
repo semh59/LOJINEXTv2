@@ -90,9 +90,7 @@ def test_problem_code_and_compat_helpers_cover_edge_cases() -> None:
     assert deps._compat_errors_for_field(
         {"errors": [None, {"field": "vehicle_id"}, {"field": "driver_id"}]},
         "driver_id",
-    ) == [
-        {"field": "driver_id"}
-    ]
+    ) == [{"field": "driver_id"}]
     assert deps._compat_bool(None) is None
     assert deps._compat_bool(False) is False
     assert deps._compat_bool("yes") is True

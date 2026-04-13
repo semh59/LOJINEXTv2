@@ -6,12 +6,13 @@ import asyncio
 import logging
 import signal
 
+from platform_common import setup_tracing, shutdown_tracing
+
 from trip_service.broker import create_broker
 from trip_service.config import settings, validate_prod_settings
 from trip_service.observability import setup_logging
-from trip_service.redis_client import setup_redis, close_redis
+from trip_service.redis_client import close_redis, setup_redis
 from trip_service.workers.outbox_relay import run_outbox_relay
-from platform_common import setup_tracing, shutdown_tracing
 
 logger = logging.getLogger("trip_service.entrypoints.outbox_worker")
 
@@ -26,6 +27,9 @@ async def _run_worker(shutdown_event: asyncio.Event) -> None:
         await run_outbox_relay(broker, shutdown_event=shutdown_event)
     finally:
         await broker.close()
+        from trip_service.database import engine
+
+        await engine.dispose()
         await close_redis()
         shutdown_tracing()
 

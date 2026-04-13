@@ -1,45 +1,38 @@
-# Alerting Rules for Prometheus
+# LOJINEXTv2 Standardized Alerting Rules
 
 groups:
-  - name: trip_service_alerts
+  - name: lojinext_outbox_alerts
     rules:
-      - alert: TripServiceHighErrorRate
-        expr: rate(trip_http_requests_total{status_code=~"5.."}[5m]) / rate(trip_http_requests_total[5m]) > 0.05
-        for: 2m
+      - alert: OutboxHighLag
+        expr: outbox_pending_count > 1000
+        for: 5m
         labels:
           severity: critical
         annotations:
-          summary: "High HTTP 5xx error rate on {{ $labels.service }}"
-          description: "Error rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+          summary: "High outbox lag on {{ $labels.service }}"
+          description: "Outbox table has more than 1000 pending events for 5 minutes. Potential worker stall."
 
-      - alert: TripServiceCircuitOpen
-        expr: sum by (breaker_name) (rate(trip_cb_state_changes_total{state="OPEN"}[5m])) > 0
-        for: 1m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Circuit Breaker OPEN: {{ $labels.breaker_name }}"
-          description: "The circuit breaker for {{ $labels.breaker_name }} has transitioned to OPEN due to high failure rates."
-
-      - alert: TripServiceHighLatencyP95
-        expr: histogram_quantile(0.95, sum by (endpoint, le) (rate(trip_http_request_duration_seconds_bucket[5m]))) > 1.0
+      - alert: OutboxPublishFailures
+        expr: rate(outbox_publish_errors_total[2m]) > 0.05
         for: 2m
         labels:
           severity: warning
         annotations:
-          summary: "High P95 Latency on {{ $labels.endpoint }}"
-          description: "P95 latency is {{ $value | humanizeDuration }} over the last 5 minutes."
+          summary: "Outbox publish failure rate high"
+          description: "Outbox relay for {{ $labels.service }} is failing to publish to Kafka."
 
-      - alert: TripServiceHighLatencyP99
-        expr: histogram_quantile(0.99, sum by (endpoint, le) (rate(trip_http_request_duration_seconds_bucket[5m]))) > 5.0
-        for: 1m
+  - name: lojinext_service_health
+    rules:
+      - alert: MicroserviceDown
+        expr: up == 0
+        for: 1min
         labels:
           severity: critical
         annotations:
-          summary: "Critical P99 Latency Spike: {{ $labels.endpoint }}"
-          description: "P99 latency reached {{ $value | humanizeDuration }}."
+          summary: "Service {{ $labels.job }} is down"
+          description: "Instance {{ $labels.instance }} has been unreachable for more than 1 minute."
 
-      - alert: TripServiceMemoryHigh
+      - alert: HighMemoryUsage
         expr: (process_resident_memory_bytes / process_virtual_memory_bytes) > 0.8
         for: 5m
         labels:
@@ -48,11 +41,33 @@ groups:
           summary: "High Memory Usage for {{ $labels.service }}"
           description: "Memory utilization is above 80%."
 
-      - alert: TripServiceRedisDown
-        expr: redis_up == 0
+  - name: lojinext_resilience_alerts
+    rules:
+      - alert: CircuitBreakerOpen
+        expr: circuit_breaker_state{state="open"} == 1
         for: 1m
         labels:
           severity: critical
         annotations:
-          summary: "Redis is DOWN for Trip Service"
-          description: "The primary Redis instance is unreachable."
+          summary: "Circuit Breaker OPEN in {{ $labels.service }}"
+          description: "Circuit breaker for {{ $labels.target_service }} is in OPEN state, failing fast."
+
+  - name: lojinext_api_performance
+    rules:
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status_code=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High HTTP 5xx error rate on {{ $labels.service }}"
+          description: "Error rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+
+      - alert: HighLatencyP99
+        expr: histogram_quantile(0.99, sum by (service, endpoint, le) (rate(http_request_duration_seconds_bucket[5m]))) > 5.0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical P99 Latency Spike: {{ $labels.service }} -> {{ $labels.endpoint }}"
+          description: "P99 latency reached {{ $value | humanizeDuration }}."

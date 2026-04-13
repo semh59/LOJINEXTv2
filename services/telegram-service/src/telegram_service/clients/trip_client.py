@@ -20,12 +20,18 @@ async def ingest_slip(
     timezone: str = "Europe/Istanbul",
 ) -> TripIngestResult:
     """Submit a fully parsed slip to trip-service ingest endpoint."""
-    assert fields.tare_kg is not None
-    assert fields.gross_kg is not None
-    assert fields.net_kg is not None
-    assert fields.origin is not None
-    assert fields.destination is not None
-    assert fields.trip_date is not None
+    if fields.tare_kg is None:
+        raise ValueError("tare_kg is required")
+    if fields.gross_kg is None:
+        raise ValueError("gross_kg is required")
+    if fields.net_kg is None:
+        raise ValueError("net_kg is required")
+    if fields.origin is None:
+        raise ValueError("origin is required")
+    if fields.destination is None:
+        raise ValueError("destination is required")
+    if fields.trip_date is None:
+        raise ValueError("trip_date is required")
 
     # Convert DD.MM.YYYY HH:MM → trip_start_local format (YYYY-MM-DDTHH:MM:00)
     trip_start_local = _to_iso_local(fields.trip_date, fields.trip_time)
@@ -48,8 +54,8 @@ async def ingest_slip(
         "normalized_trailer_plate": fields.trailer_plate,
     }
 
-    client = http_manager.get_client()
-    resp = await client.post(
+    resp = await http_manager.request(
+        "POST",
         f"{settings.trip_service_url}/internal/v1/trips/slips/ingest",
         json=payload,
         headers=await get_headers(),
@@ -73,8 +79,8 @@ async def ingest_fallback(
         "fallback_reason": fallback_reason,
     }
 
-    client = http_manager.get_client()
-    resp = await client.post(
+    resp = await http_manager.request(
+        "POST",
         f"{settings.trip_service_url}/internal/v1/trips/slips/ingest-fallback",
         json=payload,
         headers=await get_headers(),
@@ -94,10 +100,9 @@ async def get_driver_statement(
     rows: list[StatementRow] = []
     page = 1
 
-    client = http_manager.get_client()
-    headers = await get_headers()
     while True:
-        resp = await client.get(
+        resp = await http_manager.request(
+            "GET",
             f"{settings.trip_service_url}/internal/v1/driver/trips",
             params={
                 "driver_id": driver_id,
@@ -107,7 +112,7 @@ async def get_driver_statement(
                 "page": page,
                 "per_page": 100,
             },
-            headers=headers,
+            headers=await get_headers(),
         )
         resp.raise_for_status()
         data = resp.json()

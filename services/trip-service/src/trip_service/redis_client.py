@@ -5,13 +5,20 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from trip_service.config import settings
 from platform_common import (
     RedisConfig,
-    init_redis as _platform_init_redis,
-    get_redis as _platform_get_redis,
+)
+from platform_common import (
     close_redis as _platform_close_redis,
 )
+from platform_common import (
+    get_redis as _platform_get_redis,
+)
+from platform_common import (
+    init_redis as _platform_init_redis,
+)
+
+from trip_service.config import settings
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis

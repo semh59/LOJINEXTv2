@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Optional
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -137,10 +136,10 @@ class IdentityOutboxModel(Base):
     aggregate_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     event_name: Mapped[str] = mapped_column(String(128), nullable=False)
     event_version: Mapped[int] = mapped_column(nullable=False)
-    payload_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
     partition_key: Mapped[str] = mapped_column(String(100), nullable=False, default="identity")
-    correlation_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    causation_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    correlation_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    causation_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     publish_status: Mapped[str] = mapped_column(String(20), default="PENDING", nullable=False)
     attempt_count: Mapped[int] = mapped_column(default=0, nullable=False)
     last_error_code: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

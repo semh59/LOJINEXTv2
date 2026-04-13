@@ -1,5 +1,3 @@
-import re
-import pytest
 from trip_service.middleware import parse_etag_version
 
 

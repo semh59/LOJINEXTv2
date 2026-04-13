@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from platform_auth import PlatformRole
+
 from driver_service.models import DriverModel
 from driver_service.normalization import derive_lifecycle_state, mask_phone_for_manager
 

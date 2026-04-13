@@ -16,6 +16,9 @@ def _kafka_config() -> dict[str, object]:
         "client.id": settings.kafka_client_id,
         "acks": settings.kafka_acks,
         "enable.idempotence": settings.kafka_enable_idempotence,
+        "linger.ms": settings.kafka_linger_ms,
+        "batch.size": settings.kafka_batch_size,
+        "compression.type": settings.kafka_compression_type,
         "security.protocol": settings.kafka_security_protocol,
     }
 

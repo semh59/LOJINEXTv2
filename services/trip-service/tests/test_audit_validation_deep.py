@@ -1,15 +1,13 @@
 """Deep verification of the 5 audit claims."""
 
-import logging
 from pathlib import Path
 from unittest.mock import Mock
-import pytest
 
-from trip_service.service import TripService
-from trip_service.database import engine
-from trip_service.resiliency import CircuitBreaker
 from trip_service.config import settings
+from trip_service.database import engine
 from trip_service.models import TripTrip
+from trip_service.resiliency import CircuitBreaker
+from trip_service.service import TripService
 
 
 # 1. Verify ETag bug claim

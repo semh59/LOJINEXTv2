@@ -9,6 +9,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from platform_common import (
+    instrument_app,
+    setup_logging,
+    setup_tracing,
+    shutdown_tracing,
+)
 
 from trip_service.broker import create_broker
 from trip_service.config import settings, validate_prod_settings
@@ -22,12 +28,6 @@ from trip_service.http_clients import close_http_clients
 from trip_service.middleware import PrometheusMiddleware, RequestIdMiddleware
 from trip_service.redis_client import close_redis, setup_redis
 from trip_service.routers import driver_statement, health, removed_endpoints, trips
-from platform_common import (
-    instrument_app,
-    setup_logging,
-    setup_tracing,
-    shutdown_tracing,
-)
 
 logger = logging.getLogger("trip_service")
 
@@ -51,6 +51,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     broker = create_broker(settings.resolved_broker_type)
     app.state.broker = broker
 
+    from trip_service.consumers import TripSagaEventConsumer
+
+    # Instantiate consumer targeting topics SAGA cares about
+    saga_consumer = TripSagaEventConsumer(
+        config={
+            "bootstrap.servers": settings.kafka_bootstrap_servers,
+            "group.id": "trip_service_saga_cg",
+            "client.id": "trip_service_saga_consumer",
+        },
+        topics=["driver.events.v1", "fleet.events.v1", "location-events"],
+    )
+    await saga_consumer.start()
+
     logger.info(
         "Trip Service starting on port %s (env=%s, broker=%s)",
         settings.service_port,
@@ -61,6 +74,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         yield
     finally:
+        await saga_consumer.stop()
         await broker.close()
         await close_redis()
         await close_http_clients()

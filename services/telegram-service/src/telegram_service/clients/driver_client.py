@@ -25,8 +25,8 @@ async def lookup_by_telegram_id(telegram_user_id: int) -> DriverLookupResult | N
             is_assignable=True,
         )
 
-    client = http_manager.get_client()
-    resp = await client.get(
+    resp = await http_manager.request(
+        "GET",
         f"{settings.driver_service_url}/internal/v1/drivers/lookup",
         params={"telegram_user_id": str(telegram_user_id)},
         headers=await get_headers(),

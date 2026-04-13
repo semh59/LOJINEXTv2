@@ -1,11 +1,10 @@
+from uuid import uuid4
+
 import pytest
 import yaml
-from uuid import uuid4
-from datetime import UTC, datetime
-
 from trip_service.saga import TripBookingSagaOrchestrator
+
 from trip_service.models import TripOutbox
-from trip_service.broker import OutboxMessage
 
 
 def test_keda_scaledobject_validity():
@@ -25,8 +24,6 @@ def test_keda_scaledobject_validity():
 @pytest.mark.asyncio
 async def test_saga_causation_trace_propagation(test_session, db_engine, monkeypatch: pytest.MonkeyPatch):
     """Verify that saga compensations correctly propagate causation_id to the broker/outbox."""
-    from sqlalchemy.ext.asyncio import async_sessionmaker
-    import trip_service.saga as saga_module
 
     async def mock_get_redis():
         return AsyncMockRedis()
@@ -57,22 +54,7 @@ async def test_saga_causation_trace_propagation(test_session, db_engine, monkeyp
         async def execute(self):
             pass
 
-    # We need to mock the broker to inspect the outbox messages
-    class MockBroker:
-        def __init__(self):
-            self.messages = []
-
-        async def publish(self, message: OutboxMessage) -> None:
-            self.messages.append(message)
-
-        async def close(self) -> None:
-            pass
-
-        async def check_health(self) -> None:
-            pass
-
-    mock_broker = MockBroker()
-    monkeypatch.setattr("trip_service.saga.create_broker", lambda x: mock_broker)
+    # No need to mock create_broker anymore as we use the outbox directly
 
     # Establish a correlation context with an active causation_id
     from trip_service.observability import causation_id
@@ -81,15 +63,21 @@ async def test_saga_causation_trace_propagation(test_session, db_engine, monkeyp
     token = causation_id.set(initial_causation)
 
     try:
-        saga = TripBookingSagaOrchestrator(trip_id="trip-saga-001")
+        saga = TripBookingSagaOrchestrator(trip_id="trip-saga-001", session=test_session)
         # Trigger compensation
         await saga.compensate(reason="customer canceled")
 
-        assert len(mock_broker.messages) == 3  # 3 steps: vehicle, driver, failed
+        from sqlalchemy import select
 
-        for msg in mock_broker.messages:
+        result = await test_session.execute(select(TripOutbox).where(TripOutbox.aggregate_id == "trip-saga-001"))
+        messages = result.scalars().all()
+
+        assert len(messages) == 3  # 3 steps: vehicle, driver, failed
+
+        for msg in messages:
             assert msg.causation_id == initial_causation, f"Message {msg.event_name} did not propagate causation_id"
             assert msg.aggregate_id == "trip-saga-001"
+            assert "trip_id" in msg.payload_json
 
     finally:
         causation_id.reset(token)

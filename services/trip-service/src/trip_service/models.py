@@ -310,16 +310,16 @@ class TripOutbox(Base):
 
     __tablename__ = "trip_outbox"
 
-    event_id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    outbox_id: Mapped[str] = mapped_column(String(26), primary_key=True)
     aggregate_type: Mapped[str] = mapped_column(String(10), nullable=False, default="TRIP")
     aggregate_id: Mapped[str] = mapped_column(String(26), nullable=False)
     aggregate_version: Mapped[int] = mapped_column(Integer, nullable=False)
     event_name: Mapped[str] = mapped_column(String(50), nullable=False)
-    schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    payload_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    event_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
     partition_key: Mapped[str] = mapped_column(String(100), nullable=False)
-    correlation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    causation_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
+    correlation_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    causation_id: Mapped[str | None] = mapped_column(String(26), nullable=True, index=True)
     publish_status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING")
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     next_attempt_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -354,6 +354,28 @@ class TripIdempotencyRecord(Base):
     expires_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     __table_args__ = (Index("ix_trip_idempotency_expires", "expires_at_utc"),)
+
+
+class TripSagaRecord(Base):
+    """SAGA Orchestrator state tracking for Trip Booking transactions."""
+
+    __tablename__ = "trip_saga_states"
+
+    id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    trip_id: Mapped[str] = mapped_column(String(26), ForeignKey("trip_trips.id"), unique=True, nullable=False)
+    saga_status: Mapped[str] = mapped_column(String(50), nullable=False)
+    current_step: Mapped[str] = mapped_column(String(100), nullable=False)
+    failures_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at_utc: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=text("timezone('utc', now())"),
+        nullable=False,
+    )
+    updated_at_utc: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=text("timezone('utc', now())"),
+        nullable=False,
+    )
 
 
 class WorkerHeartbeat(Base):

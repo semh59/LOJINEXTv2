@@ -33,19 +33,27 @@ def upgrade() -> None:
     op.alter_column("trip_trips", "trailer_id", existing_type=sa.String(50), type_=sa.String(26), nullable=True)
     op.alter_column("trip_trips", "route_pair_id", existing_type=sa.String(50), type_=sa.String(26), nullable=True)
     op.alter_column("trip_trips", "route_id", existing_type=sa.String(50), type_=sa.String(26), nullable=True)
-    op.alter_column("trip_trips", "created_by_actor_id", existing_type=sa.String(50), type_=sa.String(26), nullable=False)
+    op.alter_column(
+        "trip_trips", "created_by_actor_id", existing_type=sa.String(50), type_=sa.String(26), nullable=False
+    )
 
     # trip_trips — actor_type: String(20) → String(32)
-    op.alter_column("trip_trips", "created_by_actor_type", existing_type=sa.String(20), type_=sa.String(32), nullable=False)
+    op.alter_column(
+        "trip_trips", "created_by_actor_type", existing_type=sa.String(20), type_=sa.String(32), nullable=False
+    )
 
     # trip_trip_timeline — actor_id: String(50) → String(26)
     op.alter_column("trip_trip_timeline", "actor_id", existing_type=sa.String(50), type_=sa.String(26), nullable=False)
 
     # trip_trip_timeline — actor_type: String(20) → String(32)
-    op.alter_column("trip_trip_timeline", "actor_type", existing_type=sa.String(20), type_=sa.String(32), nullable=False)
+    op.alter_column(
+        "trip_trip_timeline", "actor_type", existing_type=sa.String(20), type_=sa.String(32), nullable=False
+    )
 
     # trip_trip_delete_audit — actor_id: String(64) → String(26)
-    op.alter_column("trip_trip_delete_audit", "actor_id", existing_type=sa.String(64), type_=sa.String(26), nullable=False)
+    op.alter_column(
+        "trip_trip_delete_audit", "actor_id", existing_type=sa.String(64), type_=sa.String(26), nullable=False
+    )
 
 
 def downgrade() -> None:
@@ -55,8 +63,16 @@ def downgrade() -> None:
     op.alter_column("trip_trips", "trailer_id", existing_type=sa.String(26), type_=sa.String(50), nullable=True)
     op.alter_column("trip_trips", "route_pair_id", existing_type=sa.String(26), type_=sa.String(50), nullable=True)
     op.alter_column("trip_trips", "route_id", existing_type=sa.String(26), type_=sa.String(50), nullable=True)
-    op.alter_column("trip_trips", "created_by_actor_id", existing_type=sa.String(26), type_=sa.String(50), nullable=False)
-    op.alter_column("trip_trips", "created_by_actor_type", existing_type=sa.String(32), type_=sa.String(20), nullable=False)
+    op.alter_column(
+        "trip_trips", "created_by_actor_id", existing_type=sa.String(26), type_=sa.String(50), nullable=False
+    )
+    op.alter_column(
+        "trip_trips", "created_by_actor_type", existing_type=sa.String(32), type_=sa.String(20), nullable=False
+    )
     op.alter_column("trip_trip_timeline", "actor_id", existing_type=sa.String(26), type_=sa.String(50), nullable=False)
-    op.alter_column("trip_trip_timeline", "actor_type", existing_type=sa.String(32), type_=sa.String(20), nullable=False)
-    op.alter_column("trip_trip_delete_audit", "actor_id", existing_type=sa.String(26), type_=sa.String(64), nullable=False)
+    op.alter_column(
+        "trip_trip_timeline", "actor_type", existing_type=sa.String(32), type_=sa.String(20), nullable=False
+    )
+    op.alter_column(
+        "trip_trip_delete_audit", "actor_id", existing_type=sa.String(26), type_=sa.String(64), nullable=False
+    )

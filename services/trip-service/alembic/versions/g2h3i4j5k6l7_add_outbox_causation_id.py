@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "g2h3i4j5k6l7"

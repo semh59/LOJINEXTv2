@@ -8,7 +8,6 @@ from sqlalchemy import func, select
 
 from trip_service.auth import AuthContext
 from trip_service.enums import ActorType, SourceType, TripStatus
-from sqlalchemy.ext.asyncio import AsyncSession
 from trip_service.models import TripOutbox, TripTrip
 from trip_service.service import TripService
 from trip_service.trip_helpers import (
@@ -68,7 +67,7 @@ async def test_header_casing_normalization_robustness(test_session):
 @pytest.mark.asyncio
 async def test_high_concurrency_idempotency_safety(client: AsyncClient):
     """Stress test parallel idempotency requests to ensure zero duplication."""
-    from tests.test_integration import make_manual_trip_payload, SUPER_ADMIN_HEADERS
+    from tests.test_integration import SUPER_ADMIN_HEADERS, make_manual_trip_payload
 
     idempotency_key = "STRESS-KEY-" + str(asyncio.get_event_loop().time())
     payload = make_manual_trip_payload(trip_no="TR-STRESS")
@@ -98,8 +97,9 @@ async def test_high_concurrency_idempotency_safety(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_reference_release_after_soft_delete(db_engine):
     """Verify that soft-deleted trips (and legacy CANCELLED) are ignored in overlap checks."""
-    from trip_service.trip_helpers import _find_overlap
     from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from trip_service.trip_helpers import _find_overlap
 
     now = datetime.now(UTC)
 
@@ -141,8 +141,9 @@ async def test_reference_release_after_soft_delete(db_engine):
 @pytest.mark.asyncio
 async def test_outbox_atomicity_and_schema(client: AsyncClient, db_engine):
     """Verify that outbox records are created transactionally and follow v1 schema."""
-    from tests.test_integration import make_manual_trip_payload, SUPER_ADMIN_HEADERS
     from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from tests.test_integration import SUPER_ADMIN_HEADERS, make_manual_trip_payload
 
     payload = make_manual_trip_payload(trip_no="TR-OUTBOX-V1")
     response = await client.post("/api/v1/trips", json=payload, headers=SUPER_ADMIN_HEADERS)

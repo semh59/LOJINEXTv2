@@ -20,7 +20,8 @@ from driver_service.routers.health import router as health_router
 from driver_service.routers.import_jobs import router as import_jobs_router
 from driver_service.routers.internal import router as internal_router
 from driver_service.routers.lifecycle import router as lifecycle_router
-from driver_service.routers.maintenance import close_http_client, router as maintenance_router
+from driver_service.routers.maintenance import close_http_client
+from driver_service.routers.maintenance import router as maintenance_router
 from driver_service.routers.public import router as public_router
 
 logger = logging.getLogger("driver_service")
@@ -29,9 +30,10 @@ logger = logging.getLogger("driver_service")
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: startup and shutdown hooks."""
+    from platform_common import instrument_app, setup_tracing, shutdown_tracing
+
     from driver_service.observability import setup_logging
     from driver_service.redis_client import setup_redis
-    from platform_common import setup_tracing, instrument_app, shutdown_tracing
 
     setup_logging(logging.INFO)
     validate_prod_settings(settings)
@@ -49,6 +51,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     broker = create_broker(settings.resolved_broker_type)
     app.state.broker = broker
 
+    from driver_service.consumers import TripCommandConsumer
+
+    command_consumer = TripCommandConsumer(
+        config={
+            "bootstrap.servers": settings.kafka_bootstrap_servers,
+            "group.id": "driver_service_command_cg",
+            "client.id": "driver_service_command_consumer",
+        },
+        topics=["trip.commands.v1"],
+    )
+    await command_consumer.start()
+
     logger.info(
         "Driver Service starting on port %s (env=%s, broker=%s)",
         settings.service_port,
@@ -56,7 +70,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         settings.resolved_broker_type,
     )
 
-    yield
+    try:
+        yield
+    finally:
+        await command_consumer.stop()
 
     await broker.close()
     from driver_service.redis_client import close_redis

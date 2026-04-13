@@ -21,6 +21,10 @@ dependencies = [
     "redis[asyncio]>=5.0.0",
     "platform-auth",
     "platform-common",
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp-proto-grpc",
+    "opentelemetry-instrumentation-fastapi",
+    "opentelemetry-instrumentation-httpx",
 ]
 
 [project.scripts]

@@ -6,22 +6,20 @@ import urllib.request
 from typing import Any, cast
 
 import anyio
-
 from fastapi import Header
 from platform_auth import (
     AuthContext,
     AuthSettings,
+    PlatformRole,
     ServiceTokenAcquisitionError,
     ServiceTokenCache,
     TokenClaims,
-    TokenInvalidError,
     TokenMissingError,
-    decode_bearer_token,
+    async_decode_bearer_token,
 )
 from platform_auth.key_provider import build_verification_provider
 
 from trip_service.config import settings
-from trip_service.enums import ActorType
 from trip_service.errors import (
     trip_auth_invalid,
     trip_auth_required,
@@ -106,10 +104,10 @@ async def auth_outbound_status(*, audience: str | None = None) -> str:
     return "ok"
 
 
-def _decode_claims(authorization: str | None) -> TokenClaims:
+async def _decode_claims(authorization: str | None) -> TokenClaims:
     """Decode an Authorization header into normalized claims."""
     try:
-        return decode_bearer_token(authorization, _platform_auth_settings())
+        return await async_decode_bearer_token(authorization, _platform_auth_settings())
     except TokenMissingError as exc:
         raise trip_auth_required() from exc
     except Exception as exc:  # noqa: BLE001
@@ -135,17 +133,18 @@ async def issue_internal_service_token(*, audience: str | None = None) -> str:
         raise RuntimeError(str(exc)) from exc
 
 
-def require_user_token(
+async def require_user_token(
     authorization: str | None,
 ) -> AuthContext:
     """Validate a user bearer token and return the caller context."""
     if authorization is None:
         raise trip_auth_required()
 
-    claims = _decode_claims(authorization)
+    claims = await _decode_claims(authorization)
     role = str(claims.role)
 
-    authorized_roles = {ActorType.MANAGER.value, ActorType.OPERATOR.value, ActorType.SUPER_ADMIN.value}
+    # §5.1 Alignment: Use PlatformRole directly instead of local ActorType aliases
+    authorized_roles = {PlatformRole.MANAGER.value, PlatformRole.OPERATOR.value, PlatformRole.SUPER_ADMIN.value}
     if role not in authorized_roles:
         raise trip_forbidden(f"User token does not have an authorized role: {role}")
 
@@ -155,42 +154,42 @@ def require_user_token(
     return AuthContext(actor_id=actor_id, role=role)
 
 
-def require_service_token(authorization: str | None, allowed_services: set[str]) -> AuthContext:
+async def require_service_token(authorization: str | None, allowed_services: set[str]) -> AuthContext:
     """Validate a service bearer token and enforce the allowed service names."""
-    claims = _decode_claims(authorization)
+    claims = await _decode_claims(authorization)
     role = str(claims.role)
     service_name = (claims.service or "").strip()
     actor_id = claims.sub.strip()
-    if role != ActorType.SERVICE.value or not service_name or not actor_id:
+    if role != PlatformRole.SERVICE.value or not service_name or not actor_id:
         raise trip_forbidden("Token is not a valid service token.")
     if service_name not in allowed_services:
         raise trip_forbidden("Service token is not allowed for this endpoint.")
     return AuthContext(actor_id=actor_id, role=role, service_name=service_name)
 
 
-def user_auth_dependency(
+async def user_auth_dependency(
     authorization: str | None = Header(None, alias="Authorization"),
 ) -> AuthContext:
     """FastAPI dependency for public user-authenticated endpoints."""
-    return require_user_token(authorization)
+    return await require_user_token(authorization)
 
 
-def telegram_service_auth_dependency(
+async def telegram_service_auth_dependency(
     authorization: str | None = Header(None, alias="Authorization"),
 ) -> AuthContext:
     """FastAPI dependency for Telegram-owned internal endpoints."""
-    return require_service_token(authorization, {"telegram-service"})
+    return await require_service_token(authorization, {"telegram-service"})
 
 
-def excel_service_auth_dependency(
+async def excel_service_auth_dependency(
     authorization: str | None = Header(None, alias="Authorization"),
 ) -> AuthContext:
     """FastAPI dependency for Excel-owned internal endpoints."""
-    return require_service_token(authorization, {"excel-service"})
+    return await require_service_token(authorization, {"excel-service"})
 
 
-def reference_service_auth_dependency(
+async def reference_service_auth_dependency(
     authorization: str | None = Header(None, alias="Authorization"),
 ) -> AuthContext:
     """FastAPI dependency for service-only trip reference checks."""
-    return require_service_token(authorization, {"driver-service", "fleet-service"})
+    return await require_service_token(authorization, {"driver-service", "fleet-service"})

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
+from platform_common import MessageBroker, OutboxMessage, OutboxRelayBase, RobustJSONEncoder
+
 from driver_service.database import async_session_factory
 from driver_service.models import DriverOutboxModel
-from platform_common import OutboxRelayBase, MessageBroker, OutboxMessage
 
 logger = logging.getLogger("driver_service.outbox_relay")
 
@@ -34,11 +36,15 @@ class DriverOutboxRelay(OutboxRelayBase):
 
         partition_key = row.partition_key or row.driver_id or "unknown"
 
+        # Serialize payload using the robust encoder (BUG-002 fix)
+        payload_dict = row.payload_json if isinstance(row.payload_json, dict) else json.loads(row.payload_json)
+        payload_str = json.dumps(payload_dict, cls=RobustJSONEncoder)
+
         return OutboxMessage(
-            event_id=str(row.event_id),
+            event_id=str(row.outbox_id),
             event_name=row.event_name,
             partition_key=partition_key,
-            payload=row.payload_json,
+            payload=payload_str,
             schema_version=getattr(row, "event_version", 1),
             aggregate_type=row.aggregate_type,
             aggregate_id=str(row.aggregate_id),

@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     service_version: str = "0.1.0"
     service_port: int = 8104
     environment: Literal["dev", "test", "prod"] = "dev"
-    otel_exporter_otlp_endpoint: str | None = None
+    otel_exporter_otlp_endpoint: str = "http://localhost:4317"
 
     # --- Database ---
     database_url: str = DEFAULT_DATABASE_URL
@@ -72,6 +72,9 @@ class Settings(BaseSettings):
     allow_plaintext_in_prod: bool = False
     kafka_acks: str = "all"
     kafka_enable_idempotence: bool = True
+    kafka_linger_ms: int = 5
+    kafka_batch_size: int = 32768
+    kafka_compression_type: str = "lz4"
     kafka_sasl_mechanism: str | None = None
     kafka_sasl_username: str | None = None
     kafka_sasl_password: str | None = None
@@ -123,8 +126,8 @@ def validate_prod_settings(current: Settings) -> None:
         errors.append("DRIVER_DATABASE_URL must be set to a non-default value in prod.")
     if current.platform_jwt_secret is not None:
         errors.append("DRIVER_PLATFORM_JWT_SECRET must not be set in prod; verification must use JWKS.")
-    if current.broker_type is None:
-        errors.append("DRIVER_BROKER_TYPE must be explicitly set in prod.")
+    if current.resolved_broker_type != "kafka":
+        errors.append("DRIVER_BROKER_TYPE must resolve to kafka in prod.")
     if not current.kafka_bootstrap_servers or current.kafka_bootstrap_servers == "localhost:9092":
         errors.append("DRIVER_KAFKA_BOOTSTRAP_SERVERS must be set to a non-default value in prod.")
     if current.kafka_security_protocol == "PLAINTEXT" and not current.allow_plaintext_in_prod:

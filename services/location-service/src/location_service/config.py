@@ -69,7 +69,9 @@ class Settings(BaseSettings):
     outbox_poll_interval_seconds: int = 5
     outbox_publish_batch_size: int = 50
     outbox_retry_max: int = 10
-    kafka_topic: str = "location-events"
+
+    broker_type: Literal["kafka", "log", "noop"] | None = None
+    kafka_topic: str = "location.events.v1"
     kafka_bootstrap_servers: str = "localhost:9092"
     kafka_client_id: str = "location-service"
     kafka_security_protocol: str = "PLAINTEXT"
@@ -78,12 +80,22 @@ class Settings(BaseSettings):
     allow_plaintext_in_prod: bool = False
     kafka_acks: str = "all"
     kafka_enable_idempotence: bool = True
+    kafka_linger_ms: int = 5
+    kafka_batch_size: int = 32768
+    kafka_compression_type: str = "lz4"
     otel_exporter_otlp_endpoint: str = "http://localhost:4317"
 
     @property
     def provider_timeout_seconds(self) -> float:
         """Return the provider timeout in seconds for HTTPX clients."""
         return max(self.provider_timeout_ms, 1) / 1000.0
+
+    @property
+    def resolved_broker_type(self) -> Literal["kafka", "log", "noop"]:
+        """Resolve the broker type from env override or runtime environment."""
+        if self.broker_type is not None:
+            return self.broker_type
+        return "kafka" if self.environment == "prod" else "log"
 
     model_config = {"env_prefix": "LOCATION_", "env_file": ".env", "extra": "ignore"}
 
@@ -99,6 +111,8 @@ def validate_prod_settings(current: Settings) -> None:
     errors: list[str] = []
     if current.auth_jwt_algorithm.upper() != "RS256":
         errors.append("LOCATION_AUTH_JWT_ALGORITHM must be RS256 in prod.")
+    if current.resolved_broker_type != "kafka":
+        errors.append("LOCATION_BROKER_TYPE must resolve to kafka in prod.")
     if not current.auth_issuer:
         errors.append("LOCATION_AUTH_ISSUER must be set for RS256 auth in prod.")
     if not current.auth_audience:

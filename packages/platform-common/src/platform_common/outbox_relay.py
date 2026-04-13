@@ -16,7 +16,7 @@ import logging
 import random
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, TypeVar, Generic, Sequence
+from typing import Any, Callable, TypeVar
 
 from sqlalchemy import and_, not_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,7 +48,7 @@ class OutboxRelayBase:
         session_factory: Callable[[], AsyncSession],
         batch_size: int = 20,
         claim_ttl_seconds: int = 60,
-        max_failures: int = 10,
+        max_failures: int = 5,
         poll_interval_seconds: float = 5.0,
         metrics_callback: Callable[[str, str, Any], None] | None = None,
     ):
@@ -122,9 +122,18 @@ class OutboxRelayBase:
 
             # HOL blocking logic: Earliest non-published row wins.
             # Assumes model has 'partition_key', 'publish_status', 'created_at_utc'
+            # HOL blocking: block only on *active* statuses.
+            # DEAD_LETTER is intentionally excluded — a permanently-failed row
+            # must NOT block all subsequent events on the same partition_key.
             hol_subq = select(1).where(
                 m2.partition_key == m1.partition_key,
-                m2.publish_status != OutboxPublishStatus.PUBLISHED.value,
+                m2.publish_status.in_(
+                    [
+                        OutboxPublishStatus.PENDING.value,
+                        OutboxPublishStatus.PUBLISHING.value,
+                        OutboxPublishStatus.FAILED.value,
+                    ]
+                ),
                 m2.created_at_utc < m1.created_at_utc,
             )
 
@@ -141,7 +150,6 @@ class OutboxRelayBase:
                         m1.publish_status.in_(
                             [
                                 OutboxPublishStatus.PENDING.value,
-                                OutboxPublishStatus.READY.value,
                                 OutboxPublishStatus.FAILED.value,
                             ]
                         ),
@@ -181,9 +189,8 @@ class OutboxRelayBase:
 
     async def _publish_single(self, event_id: str, claim_token: str) -> bool:
         """Internal helper to publish a single event."""
-        # This part requires mapping row fields to OutboxMessage.
-        # Since models vary, we should probably have a 'map_row_to_message' method
-        # that can be overridden by subclasses.
+        # Hardening: Fetch row, close session, then publish.
+        # This prevents holding DB connections/locks during external I/O.
         async with self.session_factory() as session:
             pk_col = getattr(
                 self.model_class, "outbox_id", getattr(self.model_class, "event_id", None)
@@ -201,17 +208,45 @@ class OutboxRelayBase:
                 return False
 
             message = self.map_row_to_message(row)
-            try:
-                await self.broker.publish(message)
+
+        # Session is closed now. Perform network I/O.
+        try:
+            await self.broker.publish(message)
+            success = True
+            error = None
+        except Exception as exc:
+            success = False
+            error = exc
+
+        # Open new session to finalize status.
+        async with self.session_factory() as session:
+            # We must re-fetch/re-bind the row to the new session
+            row = (
+                await session.execute(
+                    select(self.model_class).where(
+                        pk_col == event_id,
+                        self.model_class.claim_token == claim_token,
+                    )
+                )
+            ).scalar_one_or_none()
+
+            if not row:
+                # Should not happen as claim is ours, unless it expired
+                return success
+
+            if success:
                 await self._mark_published(session, row)
                 if self.metrics_callback:
                     self.metrics_callback("success", message.event_name, None)
-                return True
-            except Exception as exc:
-                await self._mark_failed(session, row, exc)
+            else:
+                await self._mark_failed(session, row, error)
                 if self.metrics_callback:
-                    self.metrics_callback("failure", message.event_name, exc)
-                return False
+                    self.metrics_callback("failure", message.event_name, error)
+
+            # Ensure the finalizing update is committed
+            await session.commit()
+
+        return success
 
     def map_row_to_message(self, row: Any) -> OutboxMessage:
         """Map generic model row to canonical OutboxMessage.
@@ -224,7 +259,7 @@ class OutboxRelayBase:
             event_name=row.event_name,
             partition_key=row.partition_key,
             payload=row.payload_json,
-            schema_version=getattr(row, "schema_version", 1),
+            schema_version=getattr(row, "event_version", getattr(row, "schema_version", 1)),
             aggregate_type=row.aggregate_type,
             aggregate_id=row.aggregate_id,
             causation_id=getattr(row, "causation_id", None),
@@ -256,8 +291,16 @@ class OutboxRelayBase:
             )
         else:
             row.publish_status = OutboxPublishStatus.FAILED.value
-            # Simple exponential backoff: 2^attempt * 5s
-            delay = (2**row.attempt_count) * 5
-            row.next_attempt_at_utc = _now_utc() + timedelta(seconds=delay)
+            # §9.3 backoff schedule: 30s, 2m, 10m, 1h
+            schedules = {
+                1: 30,  # 30s
+                2: 120,  # 2m
+                3: 600,  # 10m
+                4: 3600,  # 1h
+            }
+            base_delay = schedules.get(row.attempt_count, 3600)
+            # Apply Jitter (HATA-3): +/- 10%
+            delay_seconds = base_delay * random.uniform(0.9, 1.1)
+            row.next_attempt_at_utc = _now_utc() + timedelta(seconds=delay_seconds)
 
         await session.commit()

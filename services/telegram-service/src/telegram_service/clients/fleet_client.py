@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 
-
 from telegram_service.config import settings
 from telegram_service.http_clients import get_headers, http_manager
 
@@ -13,9 +12,9 @@ logger = logging.getLogger(__name__)
 
 async def lookup_vehicle_by_plate(normalized_plate: str) -> str | None:
     """Lookup a vehicle's ULID by its normalized plate via fleet-service."""
-    client = http_manager.get_client()
     try:
-        resp = await client.get(
+        resp = await http_manager.request(
+            "GET",
             f"{settings.fleet_service_url}/internal/v1/vehicles/by-plate/{normalized_plate}",
             headers=await get_headers(),
         )
@@ -32,9 +31,9 @@ async def lookup_vehicle_by_plate(normalized_plate: str) -> str | None:
 
 async def lookup_trailer_by_plate(normalized_plate: str) -> str | None:
     """Lookup a trailer's ULID by its normalized plate via fleet-service."""
-    client = http_manager.get_client()
     try:
-        resp = await client.get(
+        resp = await http_manager.request(
+            "GET",
             f"{settings.fleet_service_url}/internal/v1/trailers/by-plate/{normalized_plate}",
             headers=await get_headers(),
         )

@@ -9,9 +9,9 @@ from functools import wraps
 from typing import Any, Callable
 
 import httpx
-from trip_service.redis_client import get_redis
 
 from trip_service.observability import TRIP_CB_STATE_CHANGES_TOTAL, get_standard_labels
+from trip_service.redis_client import get_redis
 
 logger = logging.getLogger("trip_service.resiliency")
 

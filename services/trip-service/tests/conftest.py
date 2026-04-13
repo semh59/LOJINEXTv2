@@ -24,6 +24,8 @@ async def _global_mock_get_token(*args, **kwargs):
 # Overwrite the class method directly at the very beginning
 platform_auth.service_tokens.ServiceTokenCache.get_token = _global_mock_get_token
 
+import asyncio  # noqa: E402
+import os  # noqa: E402
 from collections.abc import AsyncGenerator  # noqa: E402
 from contextlib import asynccontextmanager  # noqa: E402
 from dataclasses import dataclass  # noqa: E402
@@ -32,10 +34,8 @@ from pathlib import Path  # noqa: E402
 from typing import Any  # noqa: E402
 from zoneinfo import ZoneInfo  # noqa: E402
 
-import os  # noqa: E402
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
-import asyncio  # noqa: E402
 
 if os.name == "nt":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -76,10 +76,10 @@ from testcontainers.postgres import PostgresContainer  # noqa: E402
 from alembic import command  # noqa: E402
 from trip_service.broker import NoOpBroker  # noqa: E402
 from trip_service.config import settings  # noqa: E402
-from trip_service.http_clients import close_http_clients  # noqa: E402
 from trip_service.database import get_session  # noqa: E402
 from trip_service.dependencies import LocationRouteResolution, LocationTripContext  # noqa: E402
 from trip_service.errors import ProblemDetailError, problem_detail_handler, validation_exception_handler  # noqa: E402
+from trip_service.http_clients import close_http_clients  # noqa: E402
 from trip_service.middleware import PrometheusMiddleware, RequestIdMiddleware  # noqa: E402
 from trip_service.routers import driver_statement, health, removed_endpoints, trips  # noqa: E402
 from trip_service.worker_heartbeats import record_worker_heartbeat  # noqa: E402

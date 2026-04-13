@@ -6,9 +6,10 @@ import json
 import logging
 from typing import Any
 
+from platform_common import MessageBroker, OutboxMessage, OutboxRelayBase, RobustJSONEncoder
+
 from trip_service.database import async_session_factory
 from trip_service.models import TripOutbox
-from platform_common import OutboxRelayBase, MessageBroker, OutboxMessage, RobustJSONEncoder
 
 logger = logging.getLogger("trip_service.outbox_relay")
 
@@ -36,11 +37,11 @@ class TripOutboxRelay(OutboxRelayBase):
         payload_str = json.dumps(payload_dict, cls=RobustJSONEncoder)
 
         return OutboxMessage(
-            event_id=str(row.event_id),
+            event_id=str(row.outbox_id),
             event_name=row.event_name,
             partition_key=row.partition_key,
             payload=payload_str,
-            schema_version=row.schema_version,
+            schema_version=row.event_version,
             aggregate_type=row.aggregate_type,
             aggregate_id=str(row.aggregate_id),
             correlation_id=row.correlation_id,

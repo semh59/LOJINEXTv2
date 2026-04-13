@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import signal
 
 from identity_service.broker import create_broker
@@ -42,9 +41,10 @@ async def _run() -> None:
             tg.create_task(run_cleanup(shutdown_event=shutdown_event))
     finally:
         await broker.close()
-        await setup_redis()  # Need to call close_redis instead? No, setup_redis is init.
+        from identity_service.database import engine
         from identity_service.redis_client import close_redis
 
+        await engine.dispose()
         await close_redis()
         shutdown_tracing()
 

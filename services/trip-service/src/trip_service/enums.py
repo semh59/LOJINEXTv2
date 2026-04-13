@@ -1,8 +1,5 @@
 import enum
 
-from platform_auth import PlatformActorType, PlatformRole
-from platform_common import OutboxPublishStatus
-
 
 class TripStatus(str, enum.Enum):
     PLANNED = "PLANNED"
@@ -41,17 +38,6 @@ class DataQualityFlag(str, enum.Enum):
     HIGH = "HIGH"
     MEDIUM = "MEDIUM"
     LOW = "LOW"
-
-
-class ActorType(str, enum.Enum):
-    """Local alias for platform actor types for backward compatibility and trip-specific actors."""
-
-    SUPER_ADMIN = str(PlatformRole.SUPER_ADMIN.value)
-    MANAGER = str(PlatformRole.MANAGER.value)
-    OPERATOR = str(PlatformRole.OPERATOR.value)
-    SERVICE = str(PlatformRole.SERVICE.value)
-    SYSTEM = str(PlatformActorType.SYSTEM.value)
-    DRIVER = str(PlatformActorType.DRIVER.value)
 
 
 class EvidenceSource(str, enum.Enum):

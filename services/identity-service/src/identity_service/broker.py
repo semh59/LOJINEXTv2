@@ -14,9 +14,11 @@ def _kafka_config() -> dict[str, object]:
     config: dict[str, object] = {
         "bootstrap.servers": settings.kafka_bootstrap_servers,
         "client.id": settings.kafka_client_id,
-        "acks": "all",
-        "enable.idempotence": True,
-        "max.in.flight.requests.per.connection": 5,
+        "acks": settings.kafka_acks,
+        "enable.idempotence": settings.kafka_enable_idempotence,
+        "linger.ms": settings.kafka_linger_ms,
+        "batch.size": settings.kafka_batch_size,
+        "compression.type": settings.kafka_compression_type,
         "security.protocol": settings.kafka_security_protocol or "PLAINTEXT",
     }
     if settings.kafka_sasl_mechanism:
@@ -32,9 +34,12 @@ def create_broker(
     broker_type: Literal["kafka", "log", "noop"] | str | None = None,
 ) -> MessageBroker:
     """Factory function to create a standardized broker."""
-    b_type = broker_type or settings.resolved_broker_backend
+    b_type = broker_type or settings.resolved_broker_type
 
     if b_type == "kafka":
+        # Note: platform-common KafkaBroker automatically propagates
+        # X-Correlation-ID and X-Causation-ID headers to standard payload.
+        # This standardizes the Kafka headers across the entire platform.
         return KafkaBroker(
             producer_config=_kafka_config(),
             topic=settings.kafka_topic,
@@ -50,8 +55,8 @@ async def probe_broker() -> tuple[bool, str]:
     """Forensic probe to check broker connectivity."""
     broker = create_broker()
     try:
-        ok = await broker.ping()
-        return ok, "ok" if ok else "ping failed"
+        ok = await broker.check_health()
+        return ok, "ok" if ok else "health check failed"
     except Exception as e:
         # We don't want to crash or report unhealthy just because the broker is starting up
         return True, f"broker_connectivity_pending: {str(e)}"

@@ -19,8 +19,9 @@ async def worker_main() -> None:
     setup_logging(logging.INFO)
     validate_prod_settings(settings)
 
-    from driver_service.redis_client import setup_redis
     from platform_common import setup_tracing, shutdown_tracing
+
+    from driver_service.redis_client import setup_redis
 
     setup_tracing(
         service_name="driver-service-worker",

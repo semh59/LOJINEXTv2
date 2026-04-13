@@ -19,7 +19,12 @@ OUTBOX_WORKER_NAME = "identity_outbox_relay"
 
 
 class IdentityOutboxRelay(OutboxRelayBase):
-    """Identity-specific implementation of the canonical outbox relay."""
+    """Identity-specific implementation of the canonical outbox relay.
+    
+    Delegates to platform-common OutboxRelayBase which correctly handles:
+    - Dead-letter counter must check for actual DEAD_LETTER status, ensuring
+      publish_status == "DEAD_LETTER" instead of legacy null payload checks.
+    """
 
     def __init__(
         self,

@@ -20,6 +20,10 @@ dependencies = [
     "platform-auth",
     "confluent-kafka>=2.5.0",
     "redis>=7.2.0",
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp-proto-grpc",
+    "opentelemetry-instrumentation-fastapi",
+    "opentelemetry-instrumentation-httpx",
 ]
 
 [project.optional-dependencies]

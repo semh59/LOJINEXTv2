@@ -22,14 +22,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import httpx
-
+from platform_common import compute_data_quality_flag
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import DBAPIError
 
-from platform_common import compute_data_quality_flag
 from trip_service.config import settings
 from trip_service.database import async_session_factory
-from trip_service.dependencies import fetch_trip_context, resolve_route_by_names
+from trip_service.dependencies import fetch_trip_context
 from trip_service.enums import (
     EnrichmentStatus,
     RouteStatus,

@@ -1,3 +1,5 @@
+from platform_auth import PlatformActorType, PlatformRole
+
 """Trip endpoints aligned to the locked product contract."""
 
 from __future__ import annotations
@@ -8,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import JSONResponse, Response
-from sqlalchemy import func, select, Select
+from sqlalchemy import Select, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -28,11 +30,12 @@ from trip_service.dependencies import (
     resolve_route_by_names,
 )
 from trip_service.enums import (
-    ActorType,
     DataQualityFlag,
     EnrichmentStatus,
     EvidenceKind,
     EvidenceSource,
+    PlatformActorType,
+    PlatformRole,
     ReviewReasonCode,
     RouteStatus,
     SourceType,
@@ -87,6 +90,13 @@ from trip_service.timezones import local_datetime_to_utc
 
 if TYPE_CHECKING:
     from trip_service.service import TripService
+from platform_common import compute_data_quality_flag
+
+from trip_service.observability import (
+    TRIP_CREATED_TOTAL,
+    TRIP_HARD_DELETED_TOTAL,
+    get_standard_labels,
+)
 from trip_service.trip_helpers import (
     _REFERENCE_EXCLUDED_STATUSES,
     _check_idempotency_key,
@@ -104,12 +114,6 @@ from trip_service.trip_helpers import (
     normalize_trip_status,
     trip_to_resource,
     utc_now,
-)
-from platform_common import compute_data_quality_flag
-from trip_service.observability import (
-    TRIP_CREATED_TOTAL,
-    TRIP_HARD_DELETED_TOTAL,
-    get_standard_labels,
 )
 
 router = APIRouter(tags=["trips"])
@@ -138,7 +142,7 @@ def _response_headers_for_trip(trip: TripTrip) -> dict[str, str]:
 
 def _require_admin(auth: AuthContext) -> AuthContext:
     """Ensure the current caller is an admin or super admin."""
-    authorized_roles = {ActorType.MANAGER.value, ActorType.OPERATOR.value, ActorType.SUPER_ADMIN.value}
+    authorized_roles = {PlatformRole.MANAGER.value, PlatformRole.OPERATOR.value, PlatformRole.SUPER_ADMIN.value}
     if auth.role not in authorized_roles:
         raise trip_forbidden("User token does not have an admin role.")
     return auth
@@ -153,7 +157,7 @@ def _require_super_admin(auth: AuthContext) -> AuthContext:
 
 def _require_reference_service_access(auth: AuthContext) -> None:
     """Restrict internal reference endpoints to the known service callers."""
-    if auth.role != ActorType.SERVICE.value or auth.service_name not in _REFERENCE_ALLOWED_SERVICES:
+    if auth.role != PlatformRole.SERVICE.value or auth.service_name not in _REFERENCE_ALLOWED_SERVICES:
         raise trip_forbidden("Service token is not allowed for reference-check endpoints.")
 
 
@@ -347,7 +351,7 @@ async def ingest_trip_slip(
         is_empty_return=False,
         status=TripStatus.PENDING_REVIEW,
         version=1,
-        created_by_actor_type=ActorType.SERVICE,
+        created_by_actor_type=PlatformActorType.SERVICE,
         created_by_actor_id=auth.service_name or auth.actor_id,
         created_at_utc=now,
         updated_at_utc=now,
@@ -391,7 +395,7 @@ async def ingest_trip_slip(
             id=_generate_id(),
             trip_id=trip_id,
             event_type="TRIP_CREATED",
-            actor_type=ActorType.SERVICE.value,
+            actor_type=PlatformRole.SERVICE.value,
             actor_id=auth.service_name or auth.actor_id,
             note=f"Telegram slip {body.source_slip_no} ingested for review.",
             payload_json=json.dumps({"source_reference_key": body.source_reference_key}),
@@ -474,7 +478,7 @@ async def ingest_trip_slip_fallback(
         is_empty_return=False,
         status=TripStatus.PENDING_REVIEW,
         version=1,
-        created_by_actor_type=ActorType.SERVICE,
+        created_by_actor_type=PlatformActorType.SERVICE,
         created_by_actor_id=auth.service_name or auth.actor_id,
         created_at_utc=now,
         updated_at_utc=now,
@@ -511,7 +515,7 @@ async def ingest_trip_slip_fallback(
             id=_generate_id(),
             trip_id=trip_id,
             event_type="TRIP_CREATED",
-            actor_type=ActorType.SERVICE.value,
+            actor_type=PlatformRole.SERVICE.value,
             actor_id=auth.service_name or auth.actor_id,
             note="Fallback Telegram trip created for manual completion.",
             payload_json=json.dumps({"fallback_reason": body.fallback_reason}),
@@ -593,7 +597,7 @@ async def ingest_excel_trip(
         is_empty_return=False,
         status=TripStatus.PENDING_REVIEW,
         version=1,
-        created_by_actor_type=ActorType.SERVICE.value,
+        created_by_actor_type=PlatformRole.SERVICE.value,
         created_by_actor_id=auth.service_name or auth.actor_id,
         created_at_utc=now,
         updated_at_utc=now,
@@ -628,7 +632,7 @@ async def ingest_excel_trip(
             id=_generate_id(),
             trip_id=trip_id,
             event_type="TRIP_CREATED",
-            actor_type=ActorType.SERVICE.value,
+            actor_type=PlatformRole.SERVICE.value,
             actor_id=auth.service_name or auth.actor_id,
             note="Excel row ingested for review.",
             payload_json=json.dumps({"source_reference_key": body.source_reference_key, "row_number": body.row_number}),

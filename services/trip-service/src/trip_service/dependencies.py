@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import httpx
 from fastapi import Depends
@@ -316,9 +316,9 @@ async def fetch_trip_context(pair_id: str, *, field_name: str = "body.route_pair
         raise trip_dependency_unavailable("Location Service trip context is unavailable.") from exc
 
     problem_code = _problem_code(response)
-    if (
-        (response.status_code == 404 and problem_code == "LOCATION_ROUTE_PAIR_NOT_FOUND")
-        or (response.status_code == 409 and problem_code in {"LOCATION_ROUTE_PAIR_NOT_ACTIVE_USE_CALCULATE", "LOCATION_ROUTE_PAIR_SOFT_DELETED"})
+    if (response.status_code == 404 and problem_code == "LOCATION_ROUTE_PAIR_NOT_FOUND") or (
+        response.status_code == 409
+        and problem_code in {"LOCATION_ROUTE_PAIR_NOT_ACTIVE_USE_CALCULATE", "LOCATION_ROUTE_PAIR_SOFT_DELETED"}
     ):
         raise trip_invalid_route_pair(
             f"The provided route pair cannot be used for trip creation: {problem_code}.",
