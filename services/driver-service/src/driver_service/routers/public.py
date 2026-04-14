@@ -113,14 +113,14 @@ async def _write_outbox(
 ) -> None:
     """Write an outbox row for reliable event publishing."""
     outbox = DriverOutboxModel(
-        event_id=_new_ulid(),
+        outbox_id=_new_ulid(),
         aggregate_type="DRIVER",
         aggregate_id=driver_id,
         aggregate_version=1,
         driver_id=driver_id,
         event_name=event_name,
         event_version=1,
-        payload_json=payload,
+        payload_json=json.dumps(payload),
         partition_key=driver_id,
         publish_status="PENDING",
         attempt_count=0,
@@ -157,7 +157,7 @@ async def create_driver(
     response: Response,
     auth: AuthContext = Depends(admin_auth_dependency),
     session: AsyncSession = Depends(get_session),
-) -> dict:
+) -> dict[str, Any]:
     """Create a new canonical driver record (spec §3.1)."""
     now = _now_utc()
     request_id = getattr(request.state, "request_id", None)
@@ -319,7 +319,7 @@ async def list_drivers(
     per_page = min(per_page, cfg.max_page_size)
 
     # Base query: Exclude CANCELLED by default unless searching for ALL or CANCELLED
-    query: Select = select(DriverModel)  # type: ignore[type-arg]
+    query: Select[Any] = select(DriverModel)
 
     # Status filter
     if status == "ALL":
@@ -369,13 +369,14 @@ async def list_drivers(
     total = (await session.execute(count_query)).scalar() or 0
 
     # Sorting
-    sort_col_map = {
+    sort_col_map: dict[str, Any] = {
         "full_name": DriverModel.full_name,
         "created_at": DriverModel.created_at_utc,
         "updated_at": DriverModel.updated_at_utc,
         "employment_start_date": DriverModel.employment_start_date,
     }
-    sort_col = sort_col_map.get(sort_by, DriverModel.updated_at_utc)
+    # Sentinel default ensures non-None
+    sort_col: Any = sort_col_map.get(sort_by, DriverModel.updated_at_utc)
     if sort_order == "desc":
         query = query.order_by(sort_col.desc(), DriverModel.driver_id.asc())
     else:

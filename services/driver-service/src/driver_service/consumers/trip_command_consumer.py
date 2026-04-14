@@ -8,7 +8,7 @@ from driver_service.database import async_session_factory
 logger = logging.getLogger("driver_service.command_consumer")
 
 
-class TripCommandConsumer(KafkaConsumerBase):
+class TripCommandConsumer(KafkaConsumerBase):  # type: ignore[misc]
     """Consumer for processing commands targeting the Driver bounded context."""
 
     async def process(

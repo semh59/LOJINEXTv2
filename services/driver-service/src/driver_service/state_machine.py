@@ -5,7 +5,7 @@ from platform_common.state_machine import StateMachine
 from driver_service.enums import DriverStatus
 
 
-class DriverStateMachine(StateMachine[DriverStatus]):
+class DriverStateMachine(StateMachine[DriverStatus]):  # type: ignore[misc]
     """
     Formal state machine for the Driver lifecycle.
     """

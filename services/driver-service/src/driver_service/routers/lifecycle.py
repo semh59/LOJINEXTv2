@@ -201,7 +201,7 @@ async def inactivate_driver(
     old_status = driver.status
 
     # Transition to INACTIVE
-    sm = DriverStateMachine(driver.status)
+    sm = DriverStateMachine(DriverStatus(driver.status))
     sm.transition_to(DriverStatus.INACTIVE)
 
     driver.status = DriverStatus.INACTIVE
@@ -303,7 +303,7 @@ async def reactivate_driver(
     old_snapshot = serialize_driver_admin(driver)
 
     # Transition to ACTIVE
-    sm = DriverStateMachine(driver.status)
+    sm = DriverStateMachine(DriverStatus(driver.status))
     sm.transition_to(DriverStatus.ACTIVE)
 
     driver.status = DriverStatus.ACTIVE
@@ -410,7 +410,7 @@ async def soft_delete_driver(
     old_status = driver.status
 
     # Transition to CANCELLED
-    sm = DriverStateMachine(driver.status)
+    sm = DriverStateMachine(DriverStatus(driver.status))
     sm.transition_to(DriverStatus.CANCELLED)
 
     driver.status = DriverStatus.CANCELLED

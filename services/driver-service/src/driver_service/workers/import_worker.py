@@ -123,7 +123,7 @@ async def _run_job_logic(session: AsyncSession, job_id: str) -> None:
             # The payload is stored in the row record
             from driver_service.schemas import ImportRowInput
 
-            row_data = ImportRowInput.model_validate_json(row.source_payload_json)
+            row_data = ImportRowInput.model_validate_json(row.source_payload_json or "{}")
 
             # Phone normalization
             phone_result = normalize_phone(row_data.phone, allow_missing=True)

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from platform_common import (
     RedisConfig,
+    close_redis,
     init_redis,
 )
+
+__all__ = ["setup_redis", "close_redis"]
 
 from driver_service.config import settings
 

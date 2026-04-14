@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from fastapi import Header
 from platform_auth import (
@@ -28,6 +28,21 @@ from driver_service.errors import (
 
 _ALLOWED_INTERNAL_SERVICES = {"driver-service", "fleet-service"}
 _SERVICE_TOKEN_CACHE = ServiceTokenCache()
+
+__all__ = [
+    "AuthContext",
+    "auth_verify_status",
+    "auth_outbound_status",
+    "issue_internal_service_token",
+    "require_admin_token",
+    "require_admin_or_manager_token",
+    "require_internal_service_token",
+    "require_admin_or_internal_token",
+    "admin_auth_dependency",
+    "admin_or_manager_auth_dependency",
+    "internal_service_auth_dependency",
+    "admin_or_internal_auth_dependency",
+]
 
 
 def _verification_auth_settings() -> AuthSettings:
@@ -99,7 +114,7 @@ async def _decode_claims(authorization: str | None) -> Any:
     except TokenMissingError as exc:
         raise driver_auth_required() from exc
     except TokenInvalidError as exc:
-        detail = str(exc).strip() or None
+        detail = str(exc).strip() or ""
         raise driver_auth_invalid(detail) from exc
     except Exception as exc:
         # Fallback for unexpected JWT errors (e.g. InvalidKeyError from PyJWT)
@@ -109,7 +124,7 @@ async def _decode_claims(authorization: str | None) -> Any:
 async def issue_internal_service_token(*, audience: str | None = None) -> str:
     """Return an outbound service token acquired from identity-service."""
     try:
-        return await _SERVICE_TOKEN_CACHE.get_token(**_outbound_token_request(audience=audience))
+        return cast(str, await _SERVICE_TOKEN_CACHE.get_token(**_outbound_token_request(audience=audience)))
     except ServiceTokenAcquisitionError as exc:
         raise RuntimeError(str(exc)) from exc
 

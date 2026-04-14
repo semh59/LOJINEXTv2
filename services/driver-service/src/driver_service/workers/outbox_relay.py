@@ -14,7 +14,7 @@ from driver_service.models import DriverOutboxModel
 logger = logging.getLogger("driver_service.outbox_relay")
 
 
-class DriverOutboxRelay(OutboxRelayBase):
+class DriverOutboxRelay(OutboxRelayBase):  # type: ignore[misc]
     """Driver-specific implementation of the canonical outbox relay."""
 
     def __init__(

@@ -88,6 +88,8 @@ class DriverModel(Base):
     updated_by_actor_id: Mapped[str] = mapped_column(String(64), nullable=False)
     updated_by_actor_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     soft_deleted_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    soft_deleted_by_actor_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    soft_delete_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     __table_args__ = (
         # Check constraints

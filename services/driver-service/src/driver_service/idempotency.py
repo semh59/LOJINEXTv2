@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -68,4 +68,6 @@ async def purge_expired_idempotency_records(session: AsyncSession) -> int:
     result = await session.execute(
         delete(DriverIdempotencyRecordModel).where(DriverIdempotencyRecordModel.expires_at_utc <= now)
     )
-    return result.rowcount  # type: ignore[no-any-return]
+    from typing import Any
+
+    return cast(int, cast(Any, result).rowcount)

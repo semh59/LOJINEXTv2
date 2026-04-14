@@ -9,6 +9,10 @@ from platform_common import KafkaBroker, LogBroker, MessageBroker, NoOpBroker
 from driver_service.config import settings
 from driver_service.observability import correlation_id
 
+EventBroker = MessageBroker
+
+__all__ = ["EventBroker", "MessageBroker", "KafkaBroker", "LogBroker", "NoOpBroker", "create_broker"]
+
 
 def _kafka_config() -> dict[str, object]:
     """Production-hardened Kafka configuration."""
