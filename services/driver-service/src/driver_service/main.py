@@ -16,6 +16,7 @@ from driver_service.errors import (
     validation_exception_handler,
 )
 from driver_service.middleware import PrometheusMiddleware, RequestIdMiddleware
+from driver_service.observability import HTTP_REQUESTS_TOTAL, REQUEST_DURATION, get_standard_labels
 from driver_service.routers.health import router as health_router
 from driver_service.routers.import_jobs import router as import_jobs_router
 from driver_service.routers.internal import router as internal_router
@@ -89,8 +90,6 @@ app = FastAPI(
     description="Canonical driver master data, lifecycle, search, and import",
     lifespan=lifespan,
 )
-
-from driver_service.observability import HTTP_REQUESTS_TOTAL, REQUEST_DURATION, get_standard_labels
 
 app.add_middleware(RequestIdMiddleware)
 app.add_middleware(
