@@ -5,10 +5,8 @@ from __future__ import annotations
 from datetime import date
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 from telegram_service.handlers.statement import _parse_date
-from telegram_service.schemas import SlipFields, StatementRow
+from telegram_service.schemas import SlipFields
 
 
 class TestParseDateHelper:
@@ -83,8 +81,9 @@ class TestDriverClientCacheLogic:
 class TestStatementDateValidation:
     async def test_date_range_exceeding_max_raises_message(self):
         """When date range exceeds max_date_range_days, user gets an error message."""
+        from unittest.mock import MagicMock
+
         from aiogram.fsm.context import FSMContext
-        from unittest.mock import AsyncMock, MagicMock
 
         message = MagicMock()
         message.text = "31.03.2026"
@@ -109,8 +108,9 @@ class TestStatementDateValidation:
         assert "31 gün" in call_text
 
     async def test_date_to_before_date_from_rejected(self):
+        from unittest.mock import MagicMock
+
         from aiogram.fsm.context import FSMContext
-        from unittest.mock import AsyncMock, MagicMock
 
         message = MagicMock()
         message.text = "01.01.2025"  # Before date_from

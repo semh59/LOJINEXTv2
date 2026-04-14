@@ -2,7 +2,6 @@ import httpx
 import asyncio
 import jwt
 import time
-from datetime import datetime, timedelta, timezone
 
 # Target configuration from trigger_parity_trace.py
 IDENTITY_URL = "http://localhost:8180"

@@ -21,7 +21,7 @@ import asyncio
 import enum
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, TypeVar
 
 logger = logging.getLogger("platform_common.circuit_breaker")

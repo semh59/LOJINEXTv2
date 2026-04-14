@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import sys
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -18,19 +20,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import NullPool
 from testcontainers.postgres import PostgresContainer
 
-import sys
-import asyncio
-
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+import httpx
 
 from alembic import command
 from fleet_service.broker import NoOpBroker
 from fleet_service.config import settings
 from fleet_service.database import get_session
-import httpx
-import respx
-
 
 TEST_JWKS_BUNDLE = build_test_jwks_bundle()
 settings.auth_issuer = TEST_JWKS_BUNDLE.issuer

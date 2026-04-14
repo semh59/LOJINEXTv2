@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-import redis.asyncio as aioredis
+import redis.asyncio as aioredis  # type: ignore
 
 logger = logging.getLogger("platform_common.redis")
 
@@ -74,7 +74,7 @@ async def close_redis() -> None:
     """Close the Redis connection pool on application shutdown."""
     global _redis
     if _redis is not None:
-        await _redis.aclose()
+        await _redis.close()
         _redis = None
         logger.info("Redis connection closed")
 
@@ -95,7 +95,17 @@ def override_redis(client: aioredis.Redis) -> None:
 def _mask_url(url: str) -> str:
     """Mask password in Redis URL for safe logging."""
     if "@" in url:
-        prefix, rest = url.rsplit("@", 1)
-        scheme_end = prefix.find("://") + 3
-        return prefix[:scheme_end] + "***@" + rest
+        try:
+            prefix, rest = url.rsplit("@", 1)
+            # Safe slice: find scheme end
+            sep_idx = prefix.find("://")
+            if sep_idx != -1:
+                scheme_end = sep_idx + 3
+                # ELITE HARDENING: Case to str and use explicit slicing logic
+                s_prefix = str(prefix)
+                masked_prefix = s_prefix[:scheme_end]  # type: ignore
+                return f"{masked_prefix}***@{str(rest)}"
+            return f"***@{str(rest)}"
+        except Exception:
+            return "redis://***@masked"
     return url

@@ -6,9 +6,10 @@ import json
 import logging
 from typing import Any
 
+from platform_common import MessageBroker, OutboxMessage, OutboxRelayBase, RobustJSONEncoder
+
 from location_service.database import async_session_factory
 from location_service.models import LocationOutboxModel
-from platform_common import MessageBroker, OutboxMessage, OutboxRelayBase, RobustJSONEncoder
 
 logger = logging.getLogger("location_service.outbox_relay")
 

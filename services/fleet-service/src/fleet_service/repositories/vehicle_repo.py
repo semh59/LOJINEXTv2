@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import CursorResult, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fleet_service.models import FleetVehicle, FleetVehicleSpecVersion
@@ -124,7 +124,7 @@ async def delete_vehicle_spec_versions(session: AsyncSession, vehicle_id: str) -
     """
     stmt = delete(FleetVehicleSpecVersion).where(FleetVehicleSpecVersion.vehicle_id == vehicle_id)
     result = await session.execute(stmt)
-    return result.rowcount or 0
+    return cast(CursorResult, result).rowcount or 0
 
 
 async def get_current_vehicle_spec(session: AsyncSession, vehicle_id: str) -> FleetVehicleSpecVersion | None:

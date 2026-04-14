@@ -1,8 +1,6 @@
 import asyncio
 import httpx
 import uuid
-import json
-from datetime import UTC, datetime
 
 # Configuration
 TRIP_URL = "http://localhost:8001"  # Assume Trip service is on 8001

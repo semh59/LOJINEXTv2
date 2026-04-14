@@ -23,9 +23,9 @@ logger = logging.getLogger("fleet_service")
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: startup and shutdown hooks."""
-    from fleet_service.observability import setup_logging
+    from platform_common import instrument_app, setup_logging, setup_tracing, shutdown_tracing
+
     from fleet_service.redis_client import setup_redis
-    from platform_common import setup_tracing, instrument_app, shutdown_tracing
 
     setup_logging(logging.INFO)
     validate_prod_settings(settings)
@@ -73,8 +73,14 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    from fleet_service.observability import HTTP_REQUESTS_TOTAL, REQUEST_DURATION, get_standard_labels
     application.add_middleware(RequestIdMiddleware)
-    application.add_middleware(PrometheusMiddleware)
+    application.add_middleware(
+        PrometheusMiddleware,
+        requests_counter=HTTP_REQUESTS_TOTAL,
+        duration_histogram=REQUEST_DURATION,
+        label_provider=get_standard_labels,
+    )
 
     application.add_exception_handler(ProblemDetailError, problem_detail_handler)  # type: ignore[arg-type]
     application.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore[arg-type]

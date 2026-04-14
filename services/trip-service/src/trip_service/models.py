@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
 from sqlalchemy import (
     Boolean,
@@ -365,3 +364,19 @@ class WorkerHeartbeat(Base):
 
     worker_name: Mapped[str] = mapped_column(String(100), primary_key=True)
     recorded_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class TripSagaRecord(Base):
+    """Persistence for SAGA state machine (Section 12)."""
+
+    __tablename__ = "trip_saga_records"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    trip_id: Mapped[str] = mapped_column(String(26), nullable=False)
+    saga_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    current_step: Mapped[str] = mapped_column(String(50), nullable=False)
+    failures_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (Index("ix_trip_saga_trip_id", "trip_id"),)

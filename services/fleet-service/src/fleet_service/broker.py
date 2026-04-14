@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Literal
 
+from platform_common import KafkaBroker, LogBroker, MessageBroker, NoOpBroker
+
 from fleet_service.config import settings
 from fleet_service.observability import correlation_id
-from platform_common import KafkaBroker, LogBroker, NoOpBroker, MessageBroker, OutboxMessage
 
 
 def _kafka_config() -> dict[str, object]:
@@ -32,7 +33,7 @@ def _kafka_config() -> dict[str, object]:
 
 def create_broker(broker_type: Literal["kafka", "log", "noop"] | str | None = None) -> MessageBroker:
     """Factory function to create a standardized broker."""
-    b_type = broker_type or settings.broker_type
+    b_type = broker_type or settings.resolved_broker_type
 
     if b_type == "kafka":
         return KafkaBroker(

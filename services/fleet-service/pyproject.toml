@@ -16,7 +16,9 @@ dependencies = [
     "prometheus-client>=0.20.0",
     "PyJWT>=2.10.1",
     "confluent-kafka>=2.13.2",
+    "starlette>=0.38.0",
     "platform-auth",
+    "platform-common",
     "redis>=7.2.0",
     "opentelemetry-sdk",
     "opentelemetry-exporter-otlp-proto-grpc",
@@ -67,3 +69,7 @@ known-first-party = ["fleet_service", "platform_auth"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
+
+[tool.uv.sources]
+platform-auth = { workspace = true }
+platform-common = { workspace = true }

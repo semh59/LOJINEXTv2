@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from platform_auth.roles import PlatformActorType, PlatformRole
+from platform_auth.roles import PlatformRole
 
 
 @dataclass(frozen=True)

@@ -58,8 +58,9 @@ async def worker_main() -> None:
     """Start all background worker loops with graceful shutdown support."""
     setup_logging(logging.INFO)
 
-    from fleet_service.redis_client import setup_redis
     from platform_common import setup_tracing, shutdown_tracing
+
+    from fleet_service.redis_client import setup_redis
 
     setup_tracing(
         service_name="fleet-service-worker",

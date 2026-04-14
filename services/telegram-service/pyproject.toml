@@ -16,6 +16,8 @@ dependencies = [
     "reportlab>=4.2.0",
     "redis>=5.0.0",
     "platform-auth",
+    "platform-common",
+    "starlette>=0.38.0",
     "prometheus-client>=0.21.0",
 ]
 
@@ -53,3 +55,7 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W"]
+
+[tool.uv.sources]
+platform-auth = { workspace = true }
+platform-common = { workspace = true }

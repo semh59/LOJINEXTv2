@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from PIL import Image
 
 from telegram_service.ocr.extractor import (
-    _parse_weight,
-    _PLATE_RE,
     _DATE_RE,
-    _TIME_RE,
-    _PLAKA_RE,
-    _TARIH2_RE,
-    _SLIP_NO_RE,
     _DORSE_RE,
+    _PLAKA_RE,
+    _PLATE_RE,
+    _SLIP_NO_RE,
+    _TARIH2_RE,
+    _TIME_RE,
+    _parse_weight,
     extract_slip_fields,
 )
 

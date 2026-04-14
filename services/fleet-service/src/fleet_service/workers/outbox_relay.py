@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 from platform_common import MessageBroker, OutboxMessage, OutboxRelayBase, RobustJSONEncoder
+
 from fleet_service.database import async_session_factory
 from fleet_service.models import FleetOutbox
 

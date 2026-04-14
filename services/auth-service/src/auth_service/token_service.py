@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from datetime import UTC, date, datetime, timedelta
 from functools import partial
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from uuid import uuid4
 
 import jwt

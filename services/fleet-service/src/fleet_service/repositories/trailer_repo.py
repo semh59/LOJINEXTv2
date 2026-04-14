@@ -5,9 +5,9 @@ Handles all direct database queries for fleet_trailers.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import CursorResult, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fleet_service.models import FleetTrailer, FleetTrailerSpecVersion
@@ -117,7 +117,7 @@ async def delete_trailer_spec_versions(session: AsyncSession, trailer_id: str) -
     """
     stmt = delete(FleetTrailerSpecVersion).where(FleetTrailerSpecVersion.trailer_id == trailer_id)
     result = await session.execute(stmt)
-    return result.rowcount or 0
+    return cast(CursorResult, result).rowcount or 0
 
 
 async def get_current_trailer_spec(session: AsyncSession, trailer_id: str) -> FleetTrailerSpecVersion | None:

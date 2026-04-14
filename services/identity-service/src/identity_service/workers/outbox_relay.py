@@ -11,7 +11,6 @@ from identity_service.database import async_session_factory
 from identity_service.models import IdentityOutboxModel, IdentityWorkerHeartbeatModel
 from platform_common import OutboxRelayBase, MessageBroker, OutboxMessage, RobustJSONEncoder
 
-from datetime import datetime, UTC
 from sqlalchemy.dialects.postgresql import insert
 
 logger = logging.getLogger("identity_service.outbox_relay")
@@ -40,13 +39,15 @@ class IdentityOutboxRelay(OutboxRelayBase):
 
     async def _heartbeat(self) -> None:
         """Standardized heartbeat for forensic certification."""
+        from platform_common import utc_now
         try:
             async with async_session_factory() as session:
+                now = utc_now()
                 stmt = (
                     insert(IdentityWorkerHeartbeatModel)
-                    .values(worker_name=OUTBOX_WORKER_NAME, last_seen_at_utc=datetime.now(UTC))
+                    .values(worker_name=OUTBOX_WORKER_NAME, last_seen_at_utc=now)
                     .on_conflict_do_update(
-                        index_elements=["worker_name"], set_={"last_seen_at_utc": datetime.now(UTC)}
+                        index_elements=["worker_name"], set_={"last_seen_at_utc": now}
                     )
                 )
                 await session.execute(stmt)
@@ -57,9 +58,18 @@ class IdentityOutboxRelay(OutboxRelayBase):
     async def run(self, shutdown_event: Any = None) -> None:
         """Extended run loop with heartbeat for certified readiness."""
         logger.info("Starting outbox relay with forensic heartbeat: %s", OUTBOX_WORKER_NAME)
-        while not (shutdown_event and shutdown_event.is_set()):
-            await self._heartbeat()
-            await self.process_batch()
+        while True:
+            if shutdown_event and shutdown_event.is_set():
+                break
+
+            try:
+                await self._heartbeat()
+                await self.process_batch()
+            except Exception as exc:
+                logger.error("Outbox relay loop error, retrying in 5s: %s", exc, exc_info=True)
+                await asyncio.sleep(5.0)
+                continue
+
             await asyncio.sleep(self.poll_interval_seconds)
 
     def map_row_to_message(self, row: IdentityOutboxModel) -> OutboxMessage:

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import datetime
 from decimal import Decimal
-from typing import Any
 
 from sqlalchemy import (
     BigInteger,
@@ -24,6 +23,7 @@ from sqlalchemy import (
     String,
     Text,
 )
+
 # JSONB was removed as part of hardening (Section 8.11)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -306,7 +306,10 @@ class FleetOutbox(Base):
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_error_code: Mapped[str | None] = mapped_column(String(64))
     last_error_message: Mapped[str | None] = mapped_column(Text)
-    next_attempt_at_utc: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    from .utils import utc_now  # Circular import risk if in models? Let's use lambda
+    next_attempt_at_utc: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.datetime.now(datetime.UTC)
+    )
     claim_token: Mapped[str | None] = mapped_column(String(50))
     claim_expires_at_utc: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
     claimed_by_worker: Mapped[str | None] = mapped_column(String(50))

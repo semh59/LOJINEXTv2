@@ -12,11 +12,11 @@ from fastapi.responses import JSONResponse
 from location_service.broker import create_broker
 from location_service.config import settings, validate_prod_settings
 from location_service.database import engine
+from location_service.routers.approval import router as approval_router
+from location_service.routers.bulk_refresh import router as bulk_refresh_router
 
 # Correct router imports based on filesystem audit
 from location_service.routers.health import router as health_router
-from location_service.routers.approval import router as approval_router
-from location_service.routers.bulk_refresh import router as bulk_refresh_router
 from location_service.routers.internal_routes import router as internal_router
 from location_service.routers.pairs import router as pairs_router
 from location_service.routers.points import router as points_router
@@ -29,8 +29,7 @@ logger = logging.getLogger("location_service")
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifetime: startup and shutdown hooks."""
-    from location_service.observability import setup_logging
-    from platform_common import setup_tracing, instrument_app, shutdown_tracing
+    from platform_common import instrument_app, setup_logging, setup_tracing, shutdown_tracing
 
     setup_logging(logging.INFO)
     validate_prod_settings(settings)
@@ -69,6 +68,17 @@ app = FastAPI(
     lifespan=lifespan,
     docs_url=None if settings.environment == "prod" else "/docs",
     redoc_url=None if settings.environment == "prod" else "/redoc",
+)
+
+from location_service.middleware import PrometheusMiddleware, RequestIdMiddleware
+from location_service.observability import HTTP_REQUESTS_TOTAL, REQUEST_DURATION, get_standard_labels
+
+app.add_middleware(RequestIdMiddleware)
+app.add_middleware(
+    PrometheusMiddleware,
+    requests_counter=HTTP_REQUESTS_TOTAL,
+    duration_histogram=REQUEST_DURATION,
+    label_provider=get_standard_labels,
 )
 
 

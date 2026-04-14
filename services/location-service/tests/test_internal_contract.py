@@ -18,7 +18,6 @@ from location_service.domain.normalization import normalize_en, normalize_tr
 from location_service.enums import PairStatus, ProcessingStatus
 from location_service.models import LocationPoint, Route, RoutePair, RouteVersion
 
-
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
@@ -216,7 +215,7 @@ async def test_resolve_ambiguous_error_schema(internal_client: AsyncClient, test
 @pytest.mark.asyncio
 async def test_resolve_requires_trip_service_token(raw_client: AsyncClient) -> None:
     """Internal routes must reject user tokens and unknown service tokens."""
-    from conftest import ADMIN_HEADERS, SUPER_ADMIN_HEADERS, FORBIDDEN_SERVICE_HEADERS
+    from conftest import ADMIN_HEADERS, FORBIDDEN_SERVICE_HEADERS, SUPER_ADMIN_HEADERS
 
     payload = {"origin_name": "X", "destination_name": "Y", "profile_code": "TIR"}
 
@@ -378,7 +377,7 @@ async def test_trip_context_soft_deleted_pair_error_schema(
 @pytest.mark.asyncio
 async def test_trip_context_requires_trip_service_token(raw_client: AsyncClient) -> None:
     """Internal routes must reject user tokens and unknown service tokens."""
-    from conftest import ADMIN_HEADERS, SUPER_ADMIN_HEADERS, FORBIDDEN_SERVICE_HEADERS
+    from conftest import ADMIN_HEADERS, FORBIDDEN_SERVICE_HEADERS, SUPER_ADMIN_HEADERS
 
     for headers, label in [
         (ADMIN_HEADERS, "MANAGER user"),

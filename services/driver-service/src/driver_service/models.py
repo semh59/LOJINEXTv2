@@ -10,7 +10,6 @@ Tables:
 """
 
 from datetime import date, datetime, timezone
-from typing import Any
 
 from sqlalchemy import (
     Boolean,
@@ -18,7 +17,6 @@ from sqlalchemy import (
     Computed,
     Date,
     DateTime,
-    ForeignKey,
     Index,
     Integer,
     String,
@@ -185,9 +183,7 @@ class DriverOutboxModel(Base):
     aggregate_type: Mapped[str] = mapped_column(String(16), nullable=False, default="DRIVER")
     aggregate_id: Mapped[str] = mapped_column(String(26), nullable=False)
     aggregate_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    driver_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("driver_drivers.driver_id", ondelete="RESTRICT"), nullable=False
-    )
+    driver_id: Mapped[str] = mapped_column(String(26), nullable=False)
     event_name: Mapped[str] = mapped_column(String(128), nullable=False)
     event_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     payload_json: Mapped[str] = mapped_column(Text, nullable=False)

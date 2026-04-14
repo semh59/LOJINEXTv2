@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from location_service.worker_heartbeats import (
     HeartbeatSnapshot,
@@ -18,7 +18,6 @@ from location_service.worker_heartbeats import (
     read_worker_heartbeat,
     record_worker_heartbeat,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixture: patch async_session_factory for each test

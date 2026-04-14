@@ -10,7 +10,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from fleet_service.database import async_session_factory
 from fleet_service.models import FleetWorkerHeartbeat
-from fleet_service.timestamps import to_utc_aware, to_utc_aware, utc_now_aware
+from fleet_service.timestamps import to_utc_aware, utc_now_aware
 
 
 @dataclass(frozen=True)

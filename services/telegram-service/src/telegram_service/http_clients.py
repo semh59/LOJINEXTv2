@@ -2,9 +2,9 @@ import logging
 import uuid
 
 import httpx
+from platform_common.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from redis.asyncio import Redis
 
-from platform_common.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from telegram_service.config import settings
 
 logger = logging.getLogger(__name__)

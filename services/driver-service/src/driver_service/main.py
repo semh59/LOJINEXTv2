@@ -30,9 +30,8 @@ logger = logging.getLogger("driver_service")
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: startup and shutdown hooks."""
-    from platform_common import instrument_app, setup_tracing, shutdown_tracing
+    from platform_common import instrument_app, setup_logging, setup_tracing, shutdown_tracing
 
-    from driver_service.observability import setup_logging
     from driver_service.redis_client import setup_redis
 
     setup_logging(logging.INFO)
@@ -74,15 +73,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         yield
     finally:
         await command_consumer.stop()
+        await broker.close()
+        from driver_service.redis_client import close_redis
 
-    await broker.close()
-    from driver_service.redis_client import close_redis
-
-    await close_redis()
-    shutdown_tracing()
-    await close_http_client()
-    await engine.dispose()
-    logger.info("Shutdown complete")
+        await close_redis()
+        shutdown_tracing()
+        await close_http_client()
+        await engine.dispose()
+        logger.info("Shutdown complete")
 
 
 app = FastAPI(
@@ -92,8 +90,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+from driver_service.observability import HTTP_REQUESTS_TOTAL, REQUEST_DURATION, get_standard_labels
+
 app.add_middleware(RequestIdMiddleware)
-app.add_middleware(PrometheusMiddleware)
+app.add_middleware(
+    PrometheusMiddleware,
+    requests_counter=HTTP_REQUESTS_TOTAL,
+    duration_histogram=REQUEST_DURATION,
+    label_provider=get_standard_labels,
+)
 
 app.add_exception_handler(ProblemDetailError, problem_detail_handler)  # type: ignore[arg-type]
 app.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore[arg-type]

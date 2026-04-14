@@ -21,7 +21,7 @@ def upgrade() -> None:
     # 2. Add Trace IDs
     op.add_column("trip_outbox", sa.Column("correlation_id", sa.String(64), nullable=True))
     op.add_column("trip_outbox", sa.Column("causation_id", sa.String(64), nullable=True))
-    
+
     # 3. Add trace indexes
     op.create_index("ix_trip_outbox_correlation", "trip_outbox", ["correlation_id"])
     op.create_index("ix_trip_outbox_causation", "trip_outbox", ["causation_id"])

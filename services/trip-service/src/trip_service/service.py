@@ -213,6 +213,9 @@ class TripService:
             await _create_outbox_event(self.session, trip, "trip.completed.v1")
             TRIP_COMPLETED_TOTAL.labels(**get_standard_labels()).inc()
 
+        resource_dict = trip_to_resource(trip).model_dump(mode="json")
+        headers = self._response_headers(trip)
+
         try:
             if effective_key:
                 await _save_idempotency_record(

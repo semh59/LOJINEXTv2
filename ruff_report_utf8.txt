@@ -1,0 +1,2444 @@
+﻿F401 [*] `platform_auth.roles.PlatformActorType` imported but unused
+ --> packages\platform-auth\src\platform_auth\auth_context.py:5:33
+  |
+3 | from dataclasses import dataclass
+4 |
+5 | from platform_auth.roles import PlatformActorType, PlatformRole
+  |                                 ^^^^^^^^^^^^^^^^^
+  |
+help: Remove unused import: `platform_auth.roles.PlatformActorType`
+
+F401 [*] `dataclasses.field` imported but unused
+  --> packages\platform-common\src\platform_common\circuit_breaker.py:24:36
+   |
+22 | import logging
+23 | import time
+24 | from dataclasses import dataclass, field
+   |                                    ^^^^^
+25 | from typing import Any, Callable, TypeVar
+   |
+help: Remove unused import: `dataclasses.field`
+
+F401 [*] `sqlalchemy.dialects.postgresql` imported but unused
+  --> services\auth-service\alembic\versions\a0b1c2d3e4f5_initial_auth_schema.py:11:33
+   |
+ 9 | import sqlalchemy as sa
+10 | from alembic import op
+11 | from sqlalchemy.dialects import postgresql
+   |                                 ^^^^^^^^^^
+12 |
+13 | # revision identifiers, used by Alembic.
+   |
+help: Remove unused import: `sqlalchemy.dialects.postgresql`
+
+F401 [*] `sqlalchemy.text` imported but unused
+  --> services\auth-service\src\auth_service\main.py:29:24
+   |
+28 | import logging
+29 | from sqlalchemy import text
+   |                        ^^^^
+30 |
+31 | logger = logging.getLogger("auth_service")
+   |
+help: Remove unused import: `sqlalchemy.text`
+
+F841 Local variable `session` is assigned to but never used
+  --> services\auth-service\src\auth_service\main.py:58:43
+   |
+56 |     await setup_redis()
+57 |
+58 |     async with async_session_factory() as session:
+   |                                           ^^^^^^^
+59 |         try:
+60 |             # We don't have bootstrap state for auth service currently
+   |
+help: Remove assignment to unused variable `session`
+
+E402 Module level import not at top of file
+  --> services\auth-service\src\auth_service\main.py:86:1
+   |
+84 | )
+85 |
+86 | from auth_service.observability import HTTP_REQUESTS_TOTAL, REQUEST_DURATION, get_standard_labels
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+87 | # Middleware stack (outermost first ÔÇö Starlette applies in reverse registration order)
+88 | app.add_middleware(RequestIdMiddleware)
+   |
+
+F401 [*] `datetime.UTC` imported but unused
+ --> services\auth-service\src\auth_service\models.py:1:22
+  |
+1 | from datetime import UTC, datetime
+  |                      ^^^
+2 | from typing import Optional
+  |
+help: Remove unused import: `datetime.UTC`
+
+F401 [*] `sqlalchemy.ForeignKey` imported but unused
+ --> services\auth-service\src\auth_service\models.py:4:43
+  |
+2 | from typing import Optional
+3 |
+4 | from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
+  |                                           ^^^^^^^^^^
+5 | from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+  |
+help: Remove unused import: `sqlalchemy.ForeignKey`
+
+F401 [*] `typing.TYPE_CHECKING` imported but unused
+  --> services\auth-service\src\auth_service\token_service.py:14:20
+   |
+12 | from datetime import UTC, date, datetime, timedelta
+13 | from functools import partial
+14 | from typing import TYPE_CHECKING, Any
+   |                    ^^^^^^^^^^^^^
+15 | from uuid import uuid4
+   |
+help: Remove unused import: `typing.TYPE_CHECKING`
+
+F401 [*] `unittest.mock.AsyncMock` imported but unused
+  --> services\auth-service\tests\test_phase1_verification.py:14:27
+   |
+12 | import json
+13 | from datetime import datetime, timezone
+14 | from unittest.mock import AsyncMock, MagicMock, patch
+   |                           ^^^^^^^^^
+15 |
+16 | import pytest
+   |
+help: Remove unused import
+
+F401 [*] `unittest.mock.MagicMock` imported but unused
+  --> services\auth-service\tests\test_phase1_verification.py:14:38
+   |
+12 | import json
+13 | from datetime import datetime, timezone
+14 | from unittest.mock import AsyncMock, MagicMock, patch
+   |                                      ^^^^^^^^^
+15 |
+16 | import pytest
+   |
+help: Remove unused import
+
+F401 [*] `unittest.mock.patch` imported but unused
+  --> services\auth-service\tests\test_phase1_verification.py:14:49
+   |
+12 | import json
+13 | from datetime import datetime, timezone
+14 | from unittest.mock import AsyncMock, MagicMock, patch
+   |                                                 ^^^^^
+15 |
+16 | import pytest
+   |
+help: Remove unused import
+
+F401 [*] `ast` imported but unused
+   --> services\auth-service\tests\test_phase1_verification.py:184:16
+    |
+182 |     def test_broker_header_format(self):
+183 |         """HIGH-01: Header must be X-Correlation-ID, not x-correlation-id."""
+184 |         import ast
+    |                ^^^
+185 |         from pathlib import Path
+    |
+help: Remove unused import: `ast`
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\driver-service\alembic\versions\003_eda_standardization_v2.py:8:1
+   |
+ 6 |   """
+ 7 |
+ 8 | / import sqlalchemy as sa
+ 9 | | from alembic import op
+   | |______________________^
+10 |
+11 |   revision = "003_eda_standardization_v2"
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\driver-service\alembic\versions\004_fix_jsonb_and_event_id.py:8:1
+   |
+ 6 |   """
+ 7 |
+ 8 | / import sqlalchemy as sa
+ 9 | | from alembic import op
+10 | | from sqlalchemy.dialects import postgresql
+   | |__________________________________________^
+11 |
+12 |   revision = "004_fix_jsonb_and_event_id"
+   |
+help: Organize imports
+
+F401 [*] `sqlalchemy` imported but unused
+  --> services\driver-service\alembic\versions\004_fix_jsonb_and_event_id.py:8:22
+   |
+ 6 | """
+ 7 |
+ 8 | import sqlalchemy as sa
+   |                      ^^
+ 9 | from alembic import op
+10 | from sqlalchemy.dialects import postgresql
+   |
+help: Remove unused import: `sqlalchemy`
+
+F401 [*] `sqlalchemy.dialects.postgresql` imported but unused
+  --> services\driver-service\alembic\versions\004_fix_jsonb_and_event_id.py:10:33
+   |
+ 8 | import sqlalchemy as sa
+ 9 | from alembic import op
+10 | from sqlalchemy.dialects import postgresql
+   |                                 ^^^^^^^^^^
+11 |
+12 | revision = "004_fix_jsonb_and_event_id"
+   |
+help: Remove unused import: `sqlalchemy.dialects.postgresql`
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\driver-service\alembic\versions\67d2b6c9a2d4_final_forensic_parity.py:8:1
+   |
+ 6 |   """
+ 7 |
+ 8 | / from alembic import op
+ 9 | | import sqlalchemy as sa
+10 | | from sqlalchemy.dialects import postgresql
+   | |__________________________________________^
+11 |
+12 |   revision = "67d2b6c9a2d4"
+   |
+help: Organize imports
+
+F401 [*] `sqlalchemy` imported but unused
+  --> services\driver-service\alembic\versions\67d2b6c9a2d4_final_forensic_parity.py:9:22
+   |
+ 8 | from alembic import op
+ 9 | import sqlalchemy as sa
+   |                      ^^
+10 | from sqlalchemy.dialects import postgresql
+   |
+help: Remove unused import: `sqlalchemy`
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\driver-service\alembic\versions\68d3e7c9a3d5_driver_outbox_canonical_fields.py:8:1
+   |
+ 6 |   """
+ 7 |
+ 8 | / from alembic import op
+ 9 | | import sqlalchemy as sa
+   | |_______________________^
+10 |
+11 |   revision = "68d3e7c9a3d5"
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\driver-service\alembic\versions\70e5g9d1c5f7_faza_1_driver_outbox.py:8:1
+   |
+ 6 |   """
+ 7 |
+ 8 | / from alembic import op
+ 9 | | import sqlalchemy as sa
+10 | | from sqlalchemy.dialects import postgresql
+   | |__________________________________________^
+11 |
+12 |   revision = "70e5g9d1c5f7"
+   |
+help: Organize imports
+
+F401 [*] `sqlalchemy` imported but unused
+  --> services\driver-service\alembic\versions\70e5g9d1c5f7_faza_1_driver_outbox.py:9:22
+   |
+ 8 | from alembic import op
+ 9 | import sqlalchemy as sa
+   |                      ^^
+10 | from sqlalchemy.dialects import postgresql
+   |
+help: Remove unused import: `sqlalchemy`
+
+F401 [*] `sqlalchemy.dialects.postgresql` imported but unused
+  --> services\driver-service\alembic\versions\70e5g9d1c5f7_faza_1_driver_outbox.py:10:33
+   |
+ 8 | from alembic import op
+ 9 | import sqlalchemy as sa
+10 | from sqlalchemy.dialects import postgresql
+   |                                 ^^^^^^^^^^
+11 |
+12 | revision = "70e5g9d1c5f7"
+   |
+help: Remove unused import: `sqlalchemy.dialects.postgresql`
+
+W293 [*] Blank line contains whitespace
+  --> services\driver-service\alembic\versions\70e5g9d1c5f7_faza_1_driver_outbox.py:33:1
+   |
+31 |     op.execute("ALTER TABLE driver_outbox DROP COLUMN payload_json")
+32 |     op.execute("ALTER TABLE driver_outbox RENAME COLUMN payload_jsonb TO payload_json")
+33 |     
+   | ^^^^
+34 |     # Reverse rename
+35 |     op.alter_column('driver_outbox', 'outbox_id', new_column_name='event_id')
+   |
+help: Remove whitespace from blank line
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\driver-service\src\driver_service\main.py:33:5
+   |
+31 |   async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+32 |       """Application lifespan: startup and shutdown hooks."""
+33 | /     from platform_common import instrument_app, setup_logging, setup_tracing, shutdown_tracing
+34 | |     from driver_service.redis_client import setup_redis
+   | |_______________________________________________________^
+35 |
+36 |       setup_logging(logging.INFO)
+   |
+help: Organize imports
+
+E402 Module level import not at top of file
+  --> services\driver-service\src\driver_service\main.py:92:1
+   |
+90 | )
+91 |
+92 | from driver_service.observability import HTTP_REQUESTS_TOTAL, REQUEST_DURATION, get_standard_labels
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+93 | app.add_middleware(RequestIdMiddleware)
+94 | app.add_middleware(
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\driver-service\src\driver_service\main.py:92:1
+   |
+90 | )
+91 |
+92 | from driver_service.observability import HTTP_REQUESTS_TOTAL, REQUEST_DURATION, get_standard_labels
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+93 | app.add_middleware(RequestIdMiddleware)
+94 | app.add_middleware(
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\driver-service\src\driver_service\middleware.py:6:1
+   |
+ 4 |   """
+ 5 |
+ 6 | / from __future__ import annotations
+ 7 | |
+ 8 | | from starlette.types import ASGIApp, Receive, Scope, Send
+ 9 | | from platform_common import RequestIdMiddleware, PrometheusMiddleware
+   | |_____________________________________________________________________^
+10 |
+11 |   __all__ = ["RequestIdMiddleware", "PrometheusMiddleware"]
+   |
+help: Organize imports
+
+F401 [*] `starlette.types.ASGIApp` imported but unused
+ --> services\driver-service\src\driver_service\middleware.py:8:29
+  |
+6 | from __future__ import annotations
+7 |
+8 | from starlette.types import ASGIApp, Receive, Scope, Send
+  |                             ^^^^^^^
+9 | from platform_common import RequestIdMiddleware, PrometheusMiddleware
+  |
+help: Remove unused import
+
+F401 [*] `starlette.types.Receive` imported but unused
+ --> services\driver-service\src\driver_service\middleware.py:8:38
+  |
+6 | from __future__ import annotations
+7 |
+8 | from starlette.types import ASGIApp, Receive, Scope, Send
+  |                                      ^^^^^^^
+9 | from platform_common import RequestIdMiddleware, PrometheusMiddleware
+  |
+help: Remove unused import
+
+F401 [*] `starlette.types.Scope` imported but unused
+ --> services\driver-service\src\driver_service\middleware.py:8:47
+  |
+6 | from __future__ import annotations
+7 |
+8 | from starlette.types import ASGIApp, Receive, Scope, Send
+  |                                               ^^^^^
+9 | from platform_common import RequestIdMiddleware, PrometheusMiddleware
+  |
+help: Remove unused import
+
+F401 [*] `starlette.types.Send` imported but unused
+ --> services\driver-service\src\driver_service\middleware.py:8:54
+  |
+6 | from __future__ import annotations
+7 |
+8 | from starlette.types import ASGIApp, Receive, Scope, Send
+  |                                                      ^^^^
+9 | from platform_common import RequestIdMiddleware, PrometheusMiddleware
+  |
+help: Remove unused import
+
+F401 [*] `typing.Any` imported but unused
+  --> services\driver-service\src\driver_service\models.py:13:20
+   |
+12 | from datetime import date, datetime, timezone
+13 | from typing import Any
+   |                    ^^^
+14 |
+15 | from sqlalchemy import (
+   |
+help: Remove unused import: `typing.Any`
+
+F401 [*] `sqlalchemy.ForeignKey` imported but unused
+  --> services\driver-service\src\driver_service\models.py:21:5
+   |
+19 |     Date,
+20 |     DateTime,
+21 |     ForeignKey,
+   |     ^^^^^^^^^^
+22 |     Index,
+23 |     Integer,
+   |
+help: Remove unused import: `sqlalchemy.ForeignKey`
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\fleet-service\alembic\versions\007_outbox_correlation_id.py:8:1
+   |
+ 6 |   """
+ 7 |
+ 8 | / from __future__ import annotations
+ 9 | |
+10 | | import sqlalchemy as sa
+11 | | from alembic import op
+   | |______________________^
+12 |
+13 |   revision = "007_outbox_correlation_id"
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\fleet-service\alembic\versions\008_outbox_jsonb_trace_idx.py:8:1
+   |
+ 6 |   """
+ 7 |
+ 8 | / from __future__ import annotations
+ 9 | |
+10 | | import sqlalchemy as sa
+11 | | from alembic import op
+12 | | from sqlalchemy.dialects import postgresql
+   | |__________________________________________^
+13 |
+14 |   revision = "008_outbox_jsonb_trace_idx"
+   |
+help: Organize imports
+
+F401 [*] `sqlalchemy` imported but unused
+  --> services\fleet-service\alembic\versions\008_outbox_jsonb_trace_idx.py:10:22
+   |
+ 8 | from __future__ import annotations
+ 9 |
+10 | import sqlalchemy as sa
+   |                      ^^
+11 | from alembic import op
+12 | from sqlalchemy.dialects import postgresql
+   |
+help: Remove unused import: `sqlalchemy`
+
+F401 [*] `sqlalchemy.dialects.postgresql` imported but unused
+  --> services\fleet-service\alembic\versions\008_outbox_jsonb_trace_idx.py:12:33
+   |
+10 | import sqlalchemy as sa
+11 | from alembic import op
+12 | from sqlalchemy.dialects import postgresql
+   |                                 ^^^^^^^^^^
+13 |
+14 | revision = "008_outbox_jsonb_trace_idx"
+   |
+help: Remove unused import: `sqlalchemy.dialects.postgresql`
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\fleet-service\alembic\versions\4182cecbfaad_add_causation_id_to_fleet_outbox.py:8:1
+   |
+ 6 |   """
+ 7 |
+ 8 | / from typing import Sequence, Union
+ 9 | |
+10 | | import sqlalchemy as sa
+11 | | from alembic import op
+   | |______________________^
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+ --> services\fleet-service\src\fleet_service\broker.py:3:1
+  |
+1 |   """Event broker for Fleet Service ÔÇö standardized to platform-common."""
+2 |
+3 | / from __future__ import annotations
+4 | |
+5 | | from typing import Literal
+6 | |
+7 | | from fleet_service.config import settings
+8 | | from fleet_service.observability import correlation_id
+9 | | from platform_common import KafkaBroker, LogBroker, NoOpBroker, MessageBroker, OutboxMessage
+  | |____________________________________________________________________________________________^
+  |
+help: Organize imports
+
+F401 [*] `platform_common.OutboxMessage` imported but unused
+ --> services\fleet-service\src\fleet_service\broker.py:9:80
+  |
+7 | from fleet_service.config import settings
+8 | from fleet_service.observability import correlation_id
+9 | from platform_common import KafkaBroker, LogBroker, NoOpBroker, MessageBroker, OutboxMessage
+  |                                                                                ^^^^^^^^^^^^^
+  |
+help: Remove unused import: `platform_common.OutboxMessage`
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\fleet-service\src\fleet_service\entrypoints\worker.py:61:5
+   |
+59 |       setup_logging(logging.INFO)
+60 |
+61 | /     from fleet_service.redis_client import setup_redis
+62 | |     from platform_common import setup_tracing, shutdown_tracing
+   | |_______________________________________________________________^
+63 |
+64 |       setup_tracing(
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\fleet-service\src\fleet_service\main.py:26:5
+   |
+24 |   async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+25 |       """Application lifespan: startup and shutdown hooks."""
+26 | /     from platform_common import setup_tracing, instrument_app, shutdown_tracing, setup_logging
+27 | |     from fleet_service.redis_client import setup_redis
+   | |______________________________________________________^
+28 |
+29 |       setup_logging(logging.INFO)
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\fleet-service\src\fleet_service\middleware.py:6:1
+   |
+ 4 |   """
+ 5 |
+ 6 | / from __future__ import annotations
+ 7 | |
+ 8 | | from starlette.types import ASGIApp, Receive, Scope, Send
+ 9 | | from platform_common import RequestIdMiddleware, PrometheusMiddleware
+   | |_____________________________________________________________________^
+10 |
+11 |   __all__ = ["RequestIdMiddleware", "PrometheusMiddleware"]
+   |
+help: Organize imports
+
+F401 [*] `starlette.types.ASGIApp` imported but unused
+ --> services\fleet-service\src\fleet_service\middleware.py:8:29
+  |
+6 | from __future__ import annotations
+7 |
+8 | from starlette.types import ASGIApp, Receive, Scope, Send
+  |                             ^^^^^^^
+9 | from platform_common import RequestIdMiddleware, PrometheusMiddleware
+  |
+help: Remove unused import
+
+F401 [*] `starlette.types.Receive` imported but unused
+ --> services\fleet-service\src\fleet_service\middleware.py:8:38
+  |
+6 | from __future__ import annotations
+7 |
+8 | from starlette.types import ASGIApp, Receive, Scope, Send
+  |                                      ^^^^^^^
+9 | from platform_common import RequestIdMiddleware, PrometheusMiddleware
+  |
+help: Remove unused import
+
+F401 [*] `starlette.types.Scope` imported but unused
+ --> services\fleet-service\src\fleet_service\middleware.py:8:47
+  |
+6 | from __future__ import annotations
+7 |
+8 | from starlette.types import ASGIApp, Receive, Scope, Send
+  |                                               ^^^^^
+9 | from platform_common import RequestIdMiddleware, PrometheusMiddleware
+  |
+help: Remove unused import
+
+F401 [*] `starlette.types.Send` imported but unused
+ --> services\fleet-service\src\fleet_service\middleware.py:8:54
+  |
+6 | from __future__ import annotations
+7 |
+8 | from starlette.types import ASGIApp, Receive, Scope, Send
+  |                                                      ^^^^
+9 | from platform_common import RequestIdMiddleware, PrometheusMiddleware
+  |
+help: Remove unused import
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\fleet-service\src\fleet_service\models.py:7:1
+   |
+ 5 |   """
+ 6 |
+ 7 | / from __future__ import annotations
+ 8 | |
+ 9 | | import datetime
+10 | | from decimal import Decimal
+11 | | from typing import Any
+12 | |
+13 | | from sqlalchemy import (
+14 | |     BigInteger,
+15 | |     Boolean,
+16 | |     Computed,
+17 | |     Date,
+18 | |     DateTime,
+19 | |     ForeignKey,
+20 | |     Index,
+21 | |     Integer,
+22 | |     Numeric,
+23 | |     SmallInteger,
+24 | |     String,
+25 | |     Text,
+26 | | )
+27 | | # JSONB was removed as part of hardening (Section 8.11)
+28 | | from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+   | |_______________________________________________________________________________^
+   |
+help: Organize imports
+
+F401 [*] `typing.Any` imported but unused
+  --> services\fleet-service\src\fleet_service\models.py:11:20
+   |
+ 9 | import datetime
+10 | from decimal import Decimal
+11 | from typing import Any
+   |                    ^^^
+12 |
+13 | from sqlalchemy import (
+   |
+help: Remove unused import: `typing.Any`
+
+I001 [*] Import block is un-sorted or un-formatted
+   --> services\fleet-service\src\fleet_service\models.py:309:5
+    |
+307 |     last_error_code: Mapped[str | None] = mapped_column(String(64))
+308 |     last_error_message: Mapped[str | None] = mapped_column(Text)
+309 |     from .utils import utc_now # Circular import risk if in models? Let's use lambda
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+310 |     next_attempt_at_utc: Mapped[datetime.datetime] = mapped_column(
+311 |         DateTime(timezone=True), nullable=False, default=lambda: datetime.datetime.now(datetime.UTC)
+    |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\fleet-service\src\fleet_service\redis_client.py:3:1
+   |
+ 1 |   """Pooled Redis client for Fleet Service ÔÇö standardized to platform-common."""
+ 2 |
+ 3 | / from __future__ import annotations
+ 4 | |
+ 5 | | from fleet_service.config import settings
+ 6 | | from platform_common import (
+ 7 | |     RedisConfig,
+ 8 | |     init_redis,
+ 9 | |     get_redis,
+10 | |     close_redis,
+11 | |     check_redis_health,
+12 | |     override_redis,
+13 | | )
+   | |_^
+   |
+help: Organize imports
+
+F401 [*] `platform_common.get_redis` imported but unused
+  --> services\fleet-service\src\fleet_service\redis_client.py:9:5
+   |
+ 7 |     RedisConfig,
+ 8 |     init_redis,
+ 9 |     get_redis,
+   |     ^^^^^^^^^
+10 |     close_redis,
+11 |     check_redis_health,
+   |
+help: Remove unused import
+
+F401 [*] `platform_common.close_redis` imported but unused
+  --> services\fleet-service\src\fleet_service\redis_client.py:10:5
+   |
+ 8 |     init_redis,
+ 9 |     get_redis,
+10 |     close_redis,
+   |     ^^^^^^^^^^^
+11 |     check_redis_health,
+12 |     override_redis,
+   |
+help: Remove unused import
+
+F401 [*] `platform_common.check_redis_health` imported but unused
+  --> services\fleet-service\src\fleet_service\redis_client.py:11:5
+   |
+ 9 |     get_redis,
+10 |     close_redis,
+11 |     check_redis_health,
+   |     ^^^^^^^^^^^^^^^^^^
+12 |     override_redis,
+13 | )
+   |
+help: Remove unused import
+
+F401 [*] `platform_common.override_redis` imported but unused
+  --> services\fleet-service\src\fleet_service\redis_client.py:12:5
+   |
+10 |     close_redis,
+11 |     check_redis_health,
+12 |     override_redis,
+   |     ^^^^^^^^^^^^^^
+13 | )
+   |
+help: Remove unused import
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\fleet-service\src\fleet_service\services\vehicle_spec_service.py:6:1
+   |
+ 4 |   """
+ 5 |
+ 6 | / from __future__ import annotations
+ 7 | |
+ 8 | | import datetime
+ 9 | | import json
+10 | | import logging
+11 | |
+12 | | from sqlalchemy.exc import IntegrityError
+13 | | from sqlalchemy.ext.asyncio import AsyncSession
+14 | | from ulid import ULID
+15 | |
+16 | | from fleet_service.auth import AuthContext
+17 | | from fleet_service.config import settings
+18 | | from fleet_service.constraint_error_mapper import map_integrity_error
+19 | | from fleet_service.domain.enums import AggregateType
+20 | | from platform_common import OutboxPublishStatus
+21 | | from fleet_service.domain.etag import generate_spec_etag, parse_spec_etag
+22 | | from fleet_service.errors import (
+23 | |     AssetInactiveOrDeletedError,
+24 | |     EtagRequiredError,
+25 | |     SpecEtagMismatchError,
+26 | |     SpecNotFoundForInstantError,
+27 | |     SpecNotInitializedError,
+28 | |     SpecVersionOverlapError,
+29 | |     VehicleNotFoundError,
+30 | | )
+31 | | from fleet_service.models import (
+32 | |     FleetAssetTimelineEvent,
+33 | |     FleetOutbox,
+34 | |     FleetVehicleSpecVersion,
+35 | | )
+36 | | from fleet_service.repositories import (
+37 | |     outbox_repo,
+38 | |     timeline_repo,
+39 | |     vehicle_repo,
+40 | |     vehicle_spec_repo,
+41 | | )
+42 | | from fleet_service.schemas.requests import VehicleSpecVersionRequest
+43 | | from fleet_service.schemas.responses import VehicleSpecResponse
+44 | | from fleet_service.timestamps import to_utc_aware, utc_now_aware
+   | |________________________________________________________________^
+45 |
+46 |   logger = logging.getLogger("fleet_service.vehicle_spec_service")
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\fleet-service\src\fleet_service\worker_heartbeats.py:3:1
+   |
+ 1 |   """Async worker heartbeat helpers for fleet-service."""
+ 2 |
+ 3 | / from __future__ import annotations
+ 4 | |
+ 5 | | from dataclasses import dataclass
+ 6 | | from datetime import UTC, datetime, timedelta
+ 7 | |
+ 8 | | from sqlalchemy import select
+ 9 | | from sqlalchemy.dialects.postgresql import insert
+10 | |
+11 | | from fleet_service.database import async_session_factory
+12 | | from fleet_service.models import FleetWorkerHeartbeat
+13 | | from fleet_service.timestamps import to_utc_aware, to_utc_aware, utc_now_aware
+   | |______________________________________________________________________________^
+   |
+help: Organize imports
+
+F811 [*] Redefinition of unused `to_utc_aware` from line 13
+  --> services\fleet-service\src\fleet_service\worker_heartbeats.py:13:38
+   |
+11 | from fleet_service.database import async_session_factory
+12 | from fleet_service.models import FleetWorkerHeartbeat
+13 | from fleet_service.timestamps import to_utc_aware, to_utc_aware, utc_now_aware
+   |                                      ------------  ^^^^^^^^^^^^ `to_utc_aware` redefined here
+   |                                      |
+   |                                      previous definition of `to_utc_aware` here
+   |
+help: Remove definition: `to_utc_aware`
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\fleet-service\src\fleet_service\workers\outbox_relay.py:3:1
+   |
+ 1 |   """Hardened outbox relay worker for Fleet Service ÔÇö standardized to platform-common."""
+ 2 |
+ 3 | / import json
+ 4 | | import logging
+ 5 | | from typing import Any
+ 6 | |
+ 7 | | from platform_common import MessageBroker, OutboxMessage, OutboxRelayBase, RobustJSONEncoder
+ 8 | | from fleet_service.database import async_session_factory
+ 9 | | from fleet_service.models import FleetOutbox
+   | |____________________________________________^
+10 |
+11 |   logger = logging.getLogger("fleet_service.outbox_relay")
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\fleet-service\tests\conftest.py:3:1
+   |
+ 1 |   """Shared test fixtures for Fleet Service tests."""
+ 2 |
+ 3 | / from __future__ import annotations
+ 4 | |
+ 5 | | from collections.abc import AsyncGenerator
+ 6 | | from contextlib import asynccontextmanager
+ 7 | | from pathlib import Path
+ 8 | | from typing import Any
+ 9 | |
+10 | | import pytest
+11 | | import pytest_asyncio
+12 | | from alembic.config import Config
+13 | | from fastapi import FastAPI
+14 | | from httpx import ASGITransport, AsyncClient
+15 | | from platform_auth_testing import build_test_jwks_bundle, install_jwks_urlopen_mock, sign_test_token
+16 | | from sqlalchemy import text
+17 | | from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+18 | | from sqlalchemy.pool import NullPool
+19 | | from testcontainers.postgres import PostgresContainer
+20 | |
+21 | | import sys
+22 | | import asyncio
+   | |______________^
+23 |
+24 |   if sys.platform == "win32":
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\fleet-service\tests\conftest.py:27:1
+   |
+25 |       asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+26 |
+27 | / from alembic import command
+28 | | from fleet_service.broker import NoOpBroker
+29 | | from fleet_service.config import settings
+30 | | from fleet_service.database import get_session
+31 | | import httpx
+32 | | import respx
+   | |____________^
+   |
+help: Organize imports
+
+F401 [*] `respx` imported but unused
+  --> services\fleet-service\tests\conftest.py:32:8
+   |
+30 | from fleet_service.database import get_session
+31 | import httpx
+32 | import respx
+   |        ^^^^^
+   |
+help: Remove unused import: `respx`
+
+E402 Module level import not at top of file
+  --> services\fleet-service\tests\conftest.py:39:1
+   |
+37 | settings.auth_audience = TEST_JWKS_BUNDLE.audience
+38 | settings.auth_jwks_url = TEST_JWKS_BUNDLE.jwks_url
+39 | from fleet_service.worker_heartbeats import record_worker_heartbeat
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+40 |
+41 | TRUNCATE_TABLES = (
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+ --> services\fleet-service\tests\integration\test_outbox.py:1:1
+  |
+1 | / import json
+2 | | import pytest
+3 | | from httpx import AsyncClient
+4 | | from sqlalchemy import select
+5 | |
+6 | | from fleet_service.models import FleetOutbox
+7 | | from tests.conftest import ADMIN_HEADERS
+  | |________________________________________^
+  |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\fleet-service\tests\integration\test_worker_relay.py:1:1
+   |
+ 1 | / import json
+ 2 | | import datetime
+ 3 | | from unittest.mock import AsyncMock, patch
+ 4 | |
+ 5 | | import pytest
+ 6 | | from sqlalchemy import select
+ 7 | | from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+ 8 | |
+ 9 | | from fleet_service.broker import NoOpBroker
+10 | | from fleet_service.config import settings
+11 | | from fleet_service.models import FleetOutbox
+12 | | from fleet_service.timestamps import to_utc_aware, utc_now_aware, to_utc_aware
+13 | | from fleet_service.workers.outbox_relay import _relay_batch
+   | |___________________________________________________________^
+   |
+help: Organize imports
+
+F811 [*] Redefinition of unused `to_utc_aware` from line 12
+  --> services\fleet-service\tests\integration\test_worker_relay.py:12:38
+   |
+10 | from fleet_service.config import settings
+11 | from fleet_service.models import FleetOutbox
+12 | from fleet_service.timestamps import to_utc_aware, utc_now_aware, to_utc_aware
+   |                                      ------------                 ^^^^^^^^^^^^ `to_utc_aware` redefined here
+   |                                      |
+   |                                      previous definition of `to_utc_aware` here
+13 | from fleet_service.workers.outbox_relay import _relay_batch
+   |
+help: Remove definition: `to_utc_aware`
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\fleet-service\tests\test_phase1_verification.py:8:1
+   |
+ 6 |   """
+ 7 |
+ 8 | / from __future__ import annotations
+ 9 | |
+10 | | import json
+11 | | from datetime import datetime, timezone
+12 | |
+13 | | import pytest
+14 | | from sqlalchemy import inspect, select, text
+15 | |
+16 | | from fleet_service.models import FleetOutbox
+   | |____________________________________________^
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+   --> services\fleet-service\tests\test_phase1_verification.py:109:9
+    |
+107 |       def test_no_broker_close_in_relay(self):
+108 |           """HIGH-06: run_outbox_relay must NOT close the broker ÔÇö entrypoint handles it."""
+109 | /         from pathlib import Path
+110 | |         import ast
+    | |__________________^
+111 |
+112 |           relay_path = Path(__file__).parents[1] / "src" / "fleet_service" / "workers" / "outbox_relay.py"
+    |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+   --> services\fleet-service\tests\test_phase1_verification.py:130:9
+    |
+128 |       def test_no_orphaned_try_blocks(self):
+129 |           """Verify removing the finally block didn't leave syntax errors."""
+130 | /         from pathlib import Path
+131 | |         import ast
+    | |__________________^
+132 |
+133 |           relay_path = Path(__file__).parents[1] / "src" / "fleet_service" / "workers" / "outbox_relay.py"
+    |
+help: Organize imports
+
+F401 [*] `sqlalchemy` imported but unused
+  --> services\identity-service\alembic\versions\006_harden_outbox_schema.py:9:22
+   |
+ 8 | from alembic import op
+ 9 | import sqlalchemy as sa
+   |                      ^^
+10 | # sa is kept for potential future expansion but currently unused in this specific patch
+   |
+help: Remove unused import: `sqlalchemy`
+
+F401 [*] `sqlalchemy` imported but unused
+ --> services\identity-service\alembic\versions\008_hardening_remediation.py:9:22
+  |
+8 | from alembic import op
+9 | import sqlalchemy as sa
+  |                      ^^
+  |
+help: Remove unused import: `sqlalchemy`
+
+F401 [*] `identity_service.database.async_session_factory` imported but unused
+  --> services\identity-service\src\identity_service\main.py:13:39
+   |
+12 | from identity_service.config import settings, validate_prod_settings
+13 | from identity_service.database import async_session_factory, engine
+   |                                       ^^^^^^^^^^^^^^^^^^^^^
+14 | from identity_service.errors import (
+15 |     ProblemDetailError,
+   |
+help: Remove unused import: `identity_service.database.async_session_factory`
+
+F401 [*] `datetime.datetime` imported but unused
+  --> services\identity-service\src\identity_service\workers\outbox_relay.py:14:22
+   |
+12 | from platform_common import OutboxRelayBase, MessageBroker, OutboxMessage, RobustJSONEncoder
+13 |
+14 | from datetime import datetime, UTC
+   |                      ^^^^^^^^
+15 | from sqlalchemy.dialects.postgresql import insert
+   |
+help: Remove unused import
+
+F401 [*] `datetime.UTC` imported but unused
+  --> services\identity-service\src\identity_service\workers\outbox_relay.py:14:32
+   |
+12 | from platform_common import OutboxRelayBase, MessageBroker, OutboxMessage, RobustJSONEncoder
+13 |
+14 | from datetime import datetime, UTC
+   |                                ^^^
+15 | from sqlalchemy.dialects.postgresql import insert
+   |
+help: Remove unused import
+
+F401 [*] `sqlalchemy.ext.asyncio.AsyncSession` imported but unused
+  --> services\identity-service\src\identity_service\workers\registration_consumer.py:9:36
+   |
+ 8 | from platform_common.consumer import KafkaConsumerBase
+ 9 | from sqlalchemy.ext.asyncio import AsyncSession
+   |                                    ^^^^^^^^^^^^
+10 |
+11 | from identity_service.config import settings
+   |
+help: Remove unused import: `sqlalchemy.ext.asyncio.AsyncSession`
+
+F401 [*] `unittest.mock.AsyncMock` imported but unused
+  --> services\identity-service\tests\test_phase1_verification.py:14:27
+   |
+12 | import json
+13 | from datetime import datetime, timezone
+14 | from unittest.mock import AsyncMock, MagicMock, patch
+   |                           ^^^^^^^^^
+15 |
+16 | import pytest
+   |
+help: Remove unused import
+
+F401 [*] `unittest.mock.MagicMock` imported but unused
+  --> services\identity-service\tests\test_phase1_verification.py:14:38
+   |
+12 | import json
+13 | from datetime import datetime, timezone
+14 | from unittest.mock import AsyncMock, MagicMock, patch
+   |                                      ^^^^^^^^^
+15 |
+16 | import pytest
+   |
+help: Remove unused import
+
+F401 [*] `unittest.mock.patch` imported but unused
+  --> services\identity-service\tests\test_phase1_verification.py:14:49
+   |
+12 | import json
+13 | from datetime import datetime, timezone
+14 | from unittest.mock import AsyncMock, MagicMock, patch
+   |                                                 ^^^^^
+15 |
+16 | import pytest
+   |
+help: Remove unused import
+
+F401 [*] `ast` imported but unused
+   --> services\identity-service\tests\test_phase1_verification.py:184:16
+    |
+182 |     def test_broker_header_format(self):
+183 |         """HIGH-01: Header must be X-Correlation-ID, not x-correlation-id."""
+184 |         import ast
+    |                ^^^
+185 |         from pathlib import Path
+    |
+help: Remove unused import: `ast`
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\location-service\alembic\versions\8cf4a955f5cf_add_causation_id_to_location_outbox.py:8:1
+   |
+ 6 |   """
+ 7 |
+ 8 | / from typing import Sequence, Union
+ 9 | |
+10 | | import sqlalchemy as sa
+11 | | from alembic import op
+   | |______________________^
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\location-service\alembic\versions\a2b3c4d5e6f7_hardening_remediation.py:8:1
+   |
+ 6 |   """
+ 7 |
+ 8 | / from alembic import op
+ 9 | | import sqlalchemy as sa
+10 | | from sqlalchemy.dialects import postgresql
+   | |__________________________________________^
+   |
+help: Organize imports
+
+F401 [*] `sqlalchemy.dialects.postgresql` imported but unused
+  --> services\location-service\alembic\versions\a2b3c4d5e6f7_hardening_remediation.py:10:33
+   |
+ 8 | from alembic import op
+ 9 | import sqlalchemy as sa
+10 | from sqlalchemy.dialects import postgresql
+   |                                 ^^^^^^^^^^
+   |
+help: Remove unused import: `sqlalchemy.dialects.postgresql`
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\location-service\alembic\versions\b3c4d5e6f7a8_final_forensic_parity.py:8:1
+   |
+ 6 |   """
+ 7 |
+ 8 | / from alembic import op
+ 9 | | import sqlalchemy as sa
+   | |_______________________^
+10 |
+11 |   revision = "b3c4d5e6f7a8"
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\location-service\alembic\versions\d1e2f3a4b5c6_location_outbox_canonical_fields.py:8:1
+   |
+ 6 |   """
+ 7 |
+ 8 | / from alembic import op
+ 9 | | import sqlalchemy as sa
+   | |_______________________^
+10 |
+11 |   revision = "d1e2f3a4b5c6"
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\location-service\alembic\versions\e1f2a3b4c5d6_merge_heads.py:8:1
+   |
+ 6 |   """
+ 7 |
+ 8 | / from alembic import op
+ 9 | | import sqlalchemy as sa
+   | |_______________________^
+10 |
+11 |   revision = "e1f2a3b4c5d6"
+   |
+help: Organize imports
+
+F401 [*] `alembic.op` imported but unused
+ --> services\location-service\alembic\versions\e1f2a3b4c5d6_merge_heads.py:8:21
+  |
+6 | """
+7 |
+8 | from alembic import op
+  |                     ^^
+9 | import sqlalchemy as sa
+  |
+help: Remove unused import: `alembic.op`
+
+F401 [*] `sqlalchemy` imported but unused
+  --> services\location-service\alembic\versions\e1f2a3b4c5d6_merge_heads.py:9:22
+   |
+ 8 | from alembic import op
+ 9 | import sqlalchemy as sa
+   |                      ^^
+10 |
+11 | revision = "e1f2a3b4c5d6"
+   |
+help: Remove unused import: `sqlalchemy`
+
+I001 [*] Import block is un-sorted or un-formatted
+ --> services\location-service\src\location_service\broker.py:3:1
+  |
+1 |   """Event broker for Location Service ÔÇö standardized to platform-common."""
+2 |
+3 | / from __future__ import annotations
+4 | |
+5 | | from typing import Literal
+6 | |
+7 | | from location_service.config import settings
+8 | | from location_service.observability import correlation_id
+9 | | from platform_common import KafkaBroker, LogBroker, NoOpBroker, MessageBroker
+  | |_____________________________________________________________________________^
+  |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\location-service\src\location_service\entrypoints\outbox_worker.py:3:1
+   |
+ 1 |   """CLI entrypoint for the location-service outbox relay worker."""
+ 2 |
+ 3 | / from __future__ import annotations
+ 4 | |
+ 5 | | import asyncio
+ 6 | | import logging
+ 7 | | import signal
+ 8 | |
+ 9 | | from location_service.broker import create_broker
+10 | | from location_service.config import settings, validate_prod_settings
+11 | | from location_service.observability import setup_logging
+12 | | from location_service.workers.outbox_relay import run_outbox_relay
+13 | | from platform_common import setup_tracing, shutdown_tracing
+   | |___________________________________________________________^
+14 |
+15 |   logger = logging.getLogger("location_service.entrypoints.outbox_worker")
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\location-service\src\location_service\main.py:3:1
+   |
+ 1 |   """Location Service FastAPI application entry point ÔÇö standardized with tracing."""
+ 2 |
+ 3 | / from __future__ import annotations
+ 4 | |
+ 5 | | import logging
+ 6 | | from collections.abc import AsyncGenerator
+ 7 | | from contextlib import asynccontextmanager
+ 8 | |
+ 9 | | from fastapi import FastAPI, Request, status
+10 | | from fastapi.responses import JSONResponse
+11 | |
+12 | | from location_service.broker import create_broker
+13 | | from location_service.config import settings, validate_prod_settings
+14 | | from location_service.database import engine
+15 | |
+16 | | # Correct router imports based on filesystem audit
+17 | | from location_service.routers.health import router as health_router
+18 | | from location_service.routers.approval import router as approval_router
+19 | | from location_service.routers.bulk_refresh import router as bulk_refresh_router
+20 | | from location_service.routers.internal_routes import router as internal_router
+21 | | from location_service.routers.pairs import router as pairs_router
+22 | | from location_service.routers.points import router as points_router
+23 | | from location_service.routers.processing import router as processing_router
+24 | | from location_service.routers.routes_public import router as public_router
+   | |__________________________________________________________________________^
+25 |
+26 |   logger = logging.getLogger("location_service")
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\location-service\src\location_service\main.py:32:5
+   |
+30 | async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+31 |     """Application lifetime: startup and shutdown hooks."""
+32 |     from platform_common import setup_tracing, instrument_app, shutdown_tracing, setup_logging
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+33 |
+34 |     setup_logging(logging.INFO)
+   |
+help: Organize imports
+
+E402 Module level import not at top of file
+  --> services\location-service\src\location_service\main.py:73:1
+   |
+71 | )
+72 |
+73 | from location_service.middleware import RequestIdMiddleware, PrometheusMiddleware
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+74 | from location_service.observability import HTTP_REQUESTS_TOTAL, REQUEST_DURATION, get_standard_labels
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\location-service\src\location_service\main.py:73:1
+   |
+71 |   )
+72 |
+73 | / from location_service.middleware import RequestIdMiddleware, PrometheusMiddleware
+74 | | from location_service.observability import HTTP_REQUESTS_TOTAL, REQUEST_DURATION, get_standard_labels
+   | |_____________________________________________________________________________________________________^
+75 |
+76 |   app.add_middleware(RequestIdMiddleware)
+   |
+help: Organize imports
+
+E402 Module level import not at top of file
+  --> services\location-service\src\location_service\main.py:74:1
+   |
+73 | from location_service.middleware import RequestIdMiddleware, PrometheusMiddleware
+74 | from location_service.observability import HTTP_REQUESTS_TOTAL, REQUEST_DURATION, get_standard_labels
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+75 |
+76 | app.add_middleware(RequestIdMiddleware)
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\location-service\src\location_service\middleware.py:7:1
+   |
+ 5 |   """
+ 6 |
+ 7 | / from __future__ import annotations
+ 8 | |
+ 9 | | import hashlib
+10 | | import re
+11 | | from collections.abc import Callable
+12 | | from dataclasses import dataclass
+13 | | from typing import Any
+14 | |
+15 | | from fastapi import Request, Response
+16 | | from location_service.errors import (
+17 | |     ProblemDetailError,
+18 | |     if_match_required,
+19 | |     point_version_mismatch,
+20 | | )
+21 | | from platform_common import RequestIdMiddleware, PrometheusMiddleware
+   | |_____________________________________________________________________^
+22 |
+23 |   __all__ = [
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\location-service\src\location_service\models.py:1:1
+   |
+ 1 | / from datetime import UTC, datetime
+ 2 | | from typing import Any, Optional
+ 3 | |
+ 4 | | from sqlalchemy import (
+ 5 | |     Boolean,
+ 6 | |     CheckConstraint,
+ 7 | |     DateTime,
+ 8 | |     ForeignKey,
+ 9 | |     ForeignKeyConstraint,
+10 | |     Index,
+11 | |     Integer,
+12 | |     Numeric,
+13 | |     String,
+14 | |     Text,
+15 | |     UniqueConstraint,
+16 | |     text,
+17 | | )
+18 | |
+19 | | from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+20 | | from ulid import ULID
+21 | |
+22 | | from location_service.enums import (
+23 | |     BulkRefreshItemStatus,
+24 | |     BulkRefreshStatus,
+25 | |     DirectionCode,
+26 | |     GradeClass,
+27 | |     PairStatus,
+28 | |     ProcessingStatus,
+29 | |     RoadClass,
+30 | |     RunStatus,
+31 | |     SpeedBand,
+32 | |     SpeedLimitState,
+33 | |     TriggerType,
+34 | |     UrbanClass,
+35 | |     ValidationResult,
+36 | | )
+   | |_^
+   |
+help: Organize imports
+
+F401 [*] `typing.Any` imported but unused
+ --> services\location-service\src\location_service\models.py:2:20
+  |
+1 | from datetime import UTC, datetime
+2 | from typing import Any, Optional
+  |                    ^^^
+3 |
+4 | from sqlalchemy import (
+  |
+help: Remove unused import: `typing.Any`
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\location-service\src\location_service\workers\outbox_relay.py:3:1
+   |
+ 1 |   """Hardened outbox relay worker for Location Service ÔÇö standardized to platform-common."""
+ 2 |
+ 3 | / from __future__ import annotations
+ 4 | |
+ 5 | | import json
+ 6 | | import logging
+ 7 | | from typing import Any
+ 8 | |
+ 9 | | from location_service.database import async_session_factory
+10 | | from location_service.models import LocationOutboxModel
+11 | | from platform_common import MessageBroker, OutboxMessage, OutboxRelayBase, RobustJSONEncoder
+   | |____________________________________________________________________________________________^
+12 |
+13 |   logger = logging.getLogger("location_service.outbox_relay")
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\location-service\tests\conftest.py:13:1
+   |
+11 |       asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+12 |
+13 | / import pytest
+14 | | import pytest_asyncio
+15 | | import httpx
+16 | | from httpx import ASGITransport, AsyncClient
+17 | | import respx
+18 | | from platform_auth_testing import build_test_jwks_bundle, install_jwks_urlopen_mock, sign_test_token
+19 | | from sqlalchemy import text
+20 | | from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+21 | | from sqlalchemy.pool import NullPool
+22 | | from testcontainers.postgres import PostgresContainer
+23 | |
+24 | | from location_service.config import settings
+25 | | from location_service.database import get_db
+26 | | from location_service.main import create_app
+27 | | from location_service.models import Base
+28 | | from location_service.provider_health import ProviderProbeResult, reset_provider_probe_cache
+29 | | from location_service.worker_heartbeats import record_worker_heartbeat
+   | |______________________________________________________________________^
+30 |
+31 |   _pg_url: str = ""
+   |
+help: Organize imports
+
+F401 [*] `respx` imported but unused
+  --> services\location-service\tests\conftest.py:17:8
+   |
+15 | import httpx
+16 | from httpx import ASGITransport, AsyncClient
+17 | import respx
+   |        ^^^^^
+18 | from platform_auth_testing import build_test_jwks_bundle, install_jwks_urlopen_mock, sign_test_token
+19 | from sqlalchemy import text
+   |
+help: Remove unused import: `respx`
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\location-service\tests\test_internal_contract.py:11:1
+   |
+ 9 |   """
+10 |
+11 | / from __future__ import annotations
+12 | |
+13 | | import pytest
+14 | | from httpx import AsyncClient
+15 | | from ulid import ULID
+16 | |
+17 | | from location_service.domain.normalization import normalize_en, normalize_tr
+18 | | from location_service.enums import PairStatus, ProcessingStatus
+19 | | from location_service.models import LocationPoint, Route, RoutePair, RouteVersion
+   | |_________________________________________________________________________________^
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+   --> services\location-service\tests\test_internal_contract.py:219:5
+    |
+217 | async def test_resolve_requires_trip_service_token(raw_client: AsyncClient) -> None:
+218 |     """Internal routes must reject user tokens and unknown service tokens."""
+219 |     from conftest import ADMIN_HEADERS, SUPER_ADMIN_HEADERS, FORBIDDEN_SERVICE_HEADERS
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+220 |
+221 |     payload = {"origin_name": "X", "destination_name": "Y", "profile_code": "TIR"}
+    |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+   --> services\location-service\tests\test_internal_contract.py:381:5
+    |
+379 | async def test_trip_context_requires_trip_service_token(raw_client: AsyncClient) -> None:
+380 |     """Internal routes must reject user tokens and unknown service tokens."""
+381 |     from conftest import ADMIN_HEADERS, SUPER_ADMIN_HEADERS, FORBIDDEN_SERVICE_HEADERS
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+382 |
+383 |     for headers, label in [
+    |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\location-service\tests\test_phase2_verification.py:9:1
+   |
+ 7 |   """
+ 8 |
+ 9 | / from __future__ import annotations
+10 | |
+11 | | import ast
+12 | | from pathlib import Path
+13 | |
+14 | | import pytest
+   | |_____________^
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\location-service\tests\test_worker_heartbeats.py:7:1
+   |
+ 5 |   """
+ 6 |
+ 7 | / from __future__ import annotations
+ 8 | |
+ 9 | | from datetime import UTC, datetime, timedelta
+10 | |
+11 | | import pytest
+12 | | import pytest_asyncio
+13 | | from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+14 | |
+15 | | from location_service.worker_heartbeats import (
+16 | |     HeartbeatSnapshot,
+17 | |     get_worker_heartbeat_snapshot,
+18 | |     read_worker_heartbeat,
+19 | |     record_worker_heartbeat,
+20 | | )
+   | |_^
+   |
+help: Organize imports
+
+F401 [*] `sqlalchemy.ext.asyncio.AsyncSession` imported but unused
+  --> services\location-service\tests\test_worker_heartbeats.py:13:36
+   |
+11 | import pytest
+12 | import pytest_asyncio
+13 | from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+   |                                    ^^^^^^^^^^^^
+14 |
+15 | from location_service.worker_heartbeats import (
+   |
+help: Remove unused import: `sqlalchemy.ext.asyncio.AsyncSession`
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\telegram-service\src\telegram_service\http_clients.py:1:1
+   |
+ 1 | / import logging
+ 2 | | import uuid
+ 3 | |
+ 4 | | import httpx
+ 5 | | from redis.asyncio import Redis
+ 6 | |
+ 7 | | from platform_common.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+ 8 | | from telegram_service.config import settings
+   | |____________________________________________^
+ 9 |
+10 |   logger = logging.getLogger(__name__)
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\telegram-service\src\telegram_service\main.py:3:1
+   |
+ 1 |   """Telegram Service FastAPI application entry point ÔÇö standardized with tracing."""
+ 2 |
+ 3 | / import asyncio
+ 4 | | import logging
+ 5 | | import uuid
+ 6 | | from collections.abc import AsyncGenerator
+ 7 | | from contextlib import asynccontextmanager
+ 8 | |
+ 9 | | from aiogram.types import Update
+10 | | from fastapi import FastAPI, Request, Response
+11 | | from fastapi.responses import JSONResponse
+12 | |
+13 | | from telegram_service.bot import build_bot, build_dispatcher
+14 | | from telegram_service.config import settings, validate_prod_settings
+15 | | from telegram_service.http_clients import http_manager
+16 | | from telegram_service.middleware import PrometheusMiddleware, RequestIdMiddleware
+17 | | from platform_common import setup_tracing, instrument_app, shutdown_tracing
+   | |___________________________________________________________________________^
+18 |
+19 |   logger = logging.getLogger("telegram_service")
+   |
+help: Organize imports
+
+E501 Line too long (204 > 120)
+  --> services\telegram-service\src\telegram_service\ocr\extractor.py:20:121
+   |
+18 | ÔÇĞ
+19 | ÔÇĞ
+20 | ÔÇĞ├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼
+   |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+21 | ÔÇĞ
+22 | ÔÇĞ
+   |
+
+E501 Line too long (192 > 120)
+  --> services\telegram-service\src\telegram_service\ocr\extractor.py:31:121
+   |
+29 | ÔÇĞ
+30 | ÔÇĞ
+31 | ÔÇĞ├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼
+   |                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+32 | ÔÇĞ
+33 | ÔÇĞ
+   |
+
+E501 Line too long (210 > 120)
+  --> services\telegram-service\src\telegram_service\ocr\extractor.py:45:121
+   |
+43 | ÔÇĞ
+44 | ÔÇĞ
+45 | ÔÇĞ├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+46 | ÔÇĞ
+47 | ÔÇĞ
+   |
+
+E501 Line too long (202 > 120)
+  --> services\telegram-service\src\telegram_service\ocr\extractor.py:50:121
+   |
+48 | ÔÇĞ
+49 | ÔÇĞ
+50 | ÔÇĞÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼
+   |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+51 | ÔÇĞ
+52 | ÔÇĞ
+   |
+
+E501 Line too long (192 > 120)
+  --> services\telegram-service\src\telegram_service\ocr\extractor.py:67:121
+   |
+65 | ÔÇĞ
+66 | ÔÇĞ
+67 | ÔÇĞ├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼
+   |                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+68 | ÔÇĞ
+69 | ÔÇĞ
+   |
+
+E501 Line too long (125 > 120)
+   --> services\telegram-service\src\telegram_service\ocr\extractor.py:109:122
+    |
+107 |     fields = SlipFields(raw_text=text)
+108 |
+109 |     # ├óÔÇØÔé¼├óÔÇØÔé¼ Slip number (TARTIM F├ä┬░├à┬Ş├ä┬░: Weighing Slip NO field) ├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼
+    |                                                                                                                         ^^^^^
+110 |     slip_no_m = _SLIP_NO_RE.search(text)
+111 |     if slip_no_m:
+    |
+
+E501 Line too long (136 > 120)
+   --> services\telegram-service\src\telegram_service\ocr\extractor.py:132:121
+    |
+130 | ÔÇĞ
+131 | ÔÇĞ
+132 | ÔÇĞÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼
+    |                                                            ^^^^^^^^^^^^^^^^
+133 | ÔÇĞ
+134 | ÔÇĞ
+    |
+
+E501 Line too long (210 > 120)
+   --> services\telegram-service\src\telegram_service\ocr\extractor.py:145:121
+    |
+143 | ÔÇĞ
+144 | ÔÇĞ
+145 | ÔÇĞ├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼
+    |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+146 | ÔÇĞ
+147 | ÔÇĞ
+    |
+
+E501 Line too long (184 > 120)
+   --> services\telegram-service\src\telegram_service\ocr\extractor.py:161:121
+    |
+159 | ÔÇĞ
+160 | ÔÇĞ
+161 | ÔÇĞÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼├óÔÇØÔé¼
+    |                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+162 | ÔÇĞ
+163 | ÔÇĞ
+    |
+
+F401 [*] `datetime.datetime` imported but unused
+ --> services\telegram-service\src\telegram_service\schemas.py:5:28
+  |
+3 | from __future__ import annotations
+4 |
+5 | from datetime import date, datetime
+  |                            ^^^^^^^^
+6 | from typing import Any
+  |
+help: Remove unused import: `datetime.datetime`
+
+F401 [*] `unittest.mock.AsyncMock` imported but unused
+ --> services\telegram-service\tests\test_handlers.py:6:27
+  |
+5 | from datetime import date
+6 | from unittest.mock import AsyncMock, patch
+  |                           ^^^^^^^^^
+7 |
+8 | import pytest
+  |
+help: Remove unused import: `unittest.mock.AsyncMock`
+
+F401 [*] `pytest` imported but unused
+  --> services\telegram-service\tests\test_handlers.py:8:8
+   |
+ 6 | from unittest.mock import AsyncMock, patch
+ 7 |
+ 8 | import pytest
+   |        ^^^^^^
+ 9 |
+10 | from telegram_service.handlers.statement import _parse_date
+   |
+help: Remove unused import: `pytest`
+
+F401 [*] `telegram_service.schemas.StatementRow` imported but unused
+  --> services\telegram-service\tests\test_handlers.py:11:50
+   |
+10 | from telegram_service.handlers.statement import _parse_date
+11 | from telegram_service.schemas import SlipFields, StatementRow
+   |                                                  ^^^^^^^^^^^^
+   |
+help: Remove unused import: `telegram_service.schemas.StatementRow`
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\telegram-service\tests\test_handlers.py:86:9
+   |
+84 |       async def test_date_range_exceeding_max_raises_message(self):
+85 |           """When date range exceeds max_date_range_days, user gets an error message."""
+86 | /         from aiogram.fsm.context import FSMContext
+87 | |         from unittest.mock import AsyncMock, MagicMock
+   | |______________________________________________________^
+88 |
+89 |           message = MagicMock()
+   |
+help: Organize imports
+
+F811 [*] Redefinition of unused `AsyncMock` from line 6
+  --> services\telegram-service\tests\test_handlers.py:87:35
+   |
+85 |         """When date range exceeds max_date_range_days, user gets an error message."""
+86 |         from aiogram.fsm.context import FSMContext
+87 |         from unittest.mock import AsyncMock, MagicMock
+   |                                   ^^^^^^^^^ `AsyncMock` redefined here
+88 |
+89 |         message = MagicMock()
+   |
+  ::: services\telegram-service\tests\test_handlers.py:6:27
+   |
+ 5 | from datetime import date
+ 6 | from unittest.mock import AsyncMock, patch
+   |                           --------- previous definition of `AsyncMock` here
+ 7 |
+ 8 | import pytest
+   |
+help: Remove definition: `AsyncMock`
+
+I001 [*] Import block is un-sorted or un-formatted
+   --> services\telegram-service\tests\test_handlers.py:112:9
+    |
+111 |       async def test_date_to_before_date_from_rejected(self):
+112 | /         from aiogram.fsm.context import FSMContext
+113 | |         from unittest.mock import AsyncMock, MagicMock
+    | |______________________________________________________^
+114 |
+115 |           message = MagicMock()
+    |
+help: Organize imports
+
+F811 [*] Redefinition of unused `AsyncMock` from line 6
+   --> services\telegram-service\tests\test_handlers.py:113:35
+    |
+111 |     async def test_date_to_before_date_from_rejected(self):
+112 |         from aiogram.fsm.context import FSMContext
+113 |         from unittest.mock import AsyncMock, MagicMock
+    |                                   ^^^^^^^^^ `AsyncMock` redefined here
+114 |
+115 |         message = MagicMock()
+    |
+   ::: services\telegram-service\tests\test_handlers.py:6:27
+    |
+  5 | from datetime import date
+  6 | from unittest.mock import AsyncMock, patch
+    |                           --------- previous definition of `AsyncMock` here
+  7 |
+  8 | import pytest
+    |
+help: Remove definition: `AsyncMock`
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\telegram-service\tests\test_ocr.py:3:1
+   |
+ 1 |   """Unit tests for OCR field extraction."""
+ 2 |
+ 3 | / from __future__ import annotations
+ 4 | |
+ 5 | | from unittest.mock import MagicMock, patch
+ 6 | |
+ 7 | | import pytest
+ 8 | | from PIL import Image
+ 9 | |
+10 | | from telegram_service.ocr.extractor import (
+11 | |     _parse_weight,
+12 | |     _PLATE_RE,
+13 | |     _DATE_RE,
+14 | |     _TIME_RE,
+15 | |     _PLAKA_RE,
+16 | |     _TARIH2_RE,
+17 | |     _SLIP_NO_RE,
+18 | |     _DORSE_RE,
+19 | |     extract_slip_fields,
+20 | | )
+   | |_^
+   |
+help: Organize imports
+
+F401 [*] `unittest.mock.MagicMock` imported but unused
+ --> services\telegram-service\tests\test_ocr.py:5:27
+  |
+3 | from __future__ import annotations
+4 |
+5 | from unittest.mock import MagicMock, patch
+  |                           ^^^^^^^^^
+6 |
+7 | import pytest
+  |
+help: Remove unused import: `unittest.mock.MagicMock`
+
+W293 [*] Blank line contains whitespace
+  --> services\trip-service\alembic\versions\h3i4j5k6l7m8_trip_outbox_jsonb_trace_idx.py:24:1
+   |
+22 |     op.add_column("trip_outbox", sa.Column("correlation_id", sa.String(64), nullable=True))
+23 |     op.add_column("trip_outbox", sa.Column("causation_id", sa.String(64), nullable=True))
+24 |     
+   | ^^^^
+25 |     # 3. Add trace indexes
+26 |     op.create_index("ix_trip_outbox_correlation", "trip_outbox", ["correlation_id"])
+   |
+help: Remove whitespace from blank line
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\trip-service\src\trip_service\main.py:3:1
+   |
+ 1 |   """Trip Service FastAPI application entry point ÔÇö standardized with platform-common."""
+ 2 |
+ 3 | / from __future__ import annotations
+ 4 | |
+ 5 | | import logging
+ 6 | | from collections.abc import AsyncGenerator
+ 7 | | from contextlib import asynccontextmanager
+ 8 | |
+ 9 | | from fastapi import FastAPI
+10 | | from fastapi.exceptions import RequestValidationError
+11 | | from fastapi.middleware.cors import CORSMiddleware
+12 | | from platform_common import (
+13 | |     instrument_app,
+14 | |     setup_logging,
+15 | |     setup_tracing,
+16 | |     shutdown_tracing,
+17 | | )
+18 | |
+19 | | from trip_service.broker import create_broker
+20 | | from trip_service.config import settings, validate_prod_settings
+21 | | from trip_service.database import engine
+22 | | from trip_service.errors import (
+23 | |     ProblemDetailError,
+24 | |     problem_detail_handler,
+25 | |     validation_exception_handler,
+26 | | )
+27 | | from trip_service.http_clients import close_http_clients
+28 | | from platform_common import RequestIdMiddleware, PrometheusMiddleware
+29 | | from trip_service.redis_client import close_redis, setup_redis
+30 | | from trip_service.routers import driver_statement, health, removed_endpoints, trips
+   | |___________________________________________________________________________________^
+31 |
+32 |   logger = logging.getLogger("trip_service")
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\trip-service\src\trip_service\middleware.py:7:1
+   |
+ 5 |   """
+ 6 |
+ 7 | / from __future__ import annotations
+ 8 | |
+ 9 | | from trip_service.errors import trip_if_match_required, trip_validation_error
+10 | | from platform_common import RequestIdMiddleware, PrometheusMiddleware
+   | |_____________________________________________________________________^
+11 |
+12 |   __all__ = [
+   |
+help: Organize imports
+
+F401 [*] `typing.Any` imported but unused
+ --> services\trip-service\src\trip_service\models.py:6:20
+  |
+5 | from datetime import datetime
+6 | from typing import Any
+  |                    ^^^
+7 |
+8 | from sqlalchemy import (
+  |
+help: Remove unused import: `typing.Any`
+
+F404 `from __future__` imports must occur at the beginning of the file
+ --> services\trip-service\src\trip_service\routers\trips.py:5:1
+  |
+3 | """Trip endpoints aligned to the locked product contract."""
+4 |
+5 | from __future__ import annotations
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+6 |
+7 | import json
+  |
+
+E402 Module level import not at top of file
+ --> services\trip-service\src\trip_service\routers\trips.py:5:1
+  |
+3 | """Trip endpoints aligned to the locked product contract."""
+4 |
+5 | from __future__ import annotations
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+6 |
+7 | import json
+  |
+
+E402 Module level import not at top of file
+ --> services\trip-service\src\trip_service\routers\trips.py:7:1
+  |
+5 | from __future__ import annotations
+6 |
+7 | import json
+  | ^^^^^^^^^^^
+8 | from datetime import UTC, date
+9 | from typing import TYPE_CHECKING, Any
+  |
+
+E402 Module level import not at top of file
+ --> services\trip-service\src\trip_service\routers\trips.py:8:1
+  |
+7 | import json
+8 | from datetime import UTC, date
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+9 | from typing import TYPE_CHECKING, Any
+  |
+
+E402 Module level import not at top of file
+  --> services\trip-service\src\trip_service\routers\trips.py:9:1
+   |
+ 7 | import json
+ 8 | from datetime import UTC, date
+ 9 | from typing import TYPE_CHECKING, Any
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+10 |
+11 | from fastapi import APIRouter, Depends, Header, Query, Request
+   |
+
+E402 Module level import not at top of file
+  --> services\trip-service\src\trip_service\routers\trips.py:11:1
+   |
+ 9 | from typing import TYPE_CHECKING, Any
+10 |
+11 | from fastapi import APIRouter, Depends, Header, Query, Request
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+12 | from fastapi.responses import JSONResponse, Response
+13 | from sqlalchemy import Select, func, select
+   |
+
+E402 Module level import not at top of file
+  --> services\trip-service\src\trip_service\routers\trips.py:12:1
+   |
+11 | from fastapi import APIRouter, Depends, Header, Query, Request
+12 | from fastapi.responses import JSONResponse, Response
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+13 | from sqlalchemy import Select, func, select
+14 | from sqlalchemy.exc import IntegrityError
+   |
+
+E402 Module level import not at top of file
+  --> services\trip-service\src\trip_service\routers\trips.py:13:1
+   |
+11 | from fastapi import APIRouter, Depends, Header, Query, Request
+12 | from fastapi.responses import JSONResponse, Response
+13 | from sqlalchemy import Select, func, select
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+14 | from sqlalchemy.exc import IntegrityError
+15 | from sqlalchemy.ext.asyncio import AsyncSession
+   |
+
+E402 Module level import not at top of file
+  --> services\trip-service\src\trip_service\routers\trips.py:14:1
+   |
+12 | from fastapi.responses import JSONResponse, Response
+13 | from sqlalchemy import Select, func, select
+14 | from sqlalchemy.exc import IntegrityError
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+15 | from sqlalchemy.ext.asyncio import AsyncSession
+16 | from sqlalchemy.orm import selectinload
+   |
+
+E402 Module level import not at top of file
+  --> services\trip-service\src\trip_service\routers\trips.py:15:1
+   |
+13 | from sqlalchemy import Select, func, select
+14 | from sqlalchemy.exc import IntegrityError
+15 | from sqlalchemy.ext.asyncio import AsyncSession
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+16 | from sqlalchemy.orm import selectinload
+   |
+
+E402 Module level import not at top of file
+  --> services\trip-service\src\trip_service\routers\trips.py:16:1
+   |
+14 | from sqlalchemy.exc import IntegrityError
+15 | from sqlalchemy.ext.asyncio import AsyncSession
+16 | from sqlalchemy.orm import selectinload
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+17 |
+18 | from trip_service.auth import (
+   |
+
+E402 Module level import not at top of file
+  --> services\trip-service\src\trip_service\routers\trips.py:18:1
+   |
+16 |   from sqlalchemy.orm import selectinload
+17 |
+18 | / from trip_service.auth import (
+19 | |     AuthContext,
+20 | |     excel_service_auth_dependency,
+21 | |     reference_service_auth_dependency,
+22 | |     telegram_service_auth_dependency,
+23 | |     user_auth_dependency,
+24 | | )
+   | |_^
+25 |   from trip_service.database import get_session
+26 |   from trip_service.dependencies import (
+   |
+
+E402 Module level import not at top of file
+  --> services\trip-service\src\trip_service\routers\trips.py:25:1
+   |
+23 |     user_auth_dependency,
+24 | )
+25 | from trip_service.database import get_session
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+26 | from trip_service.dependencies import (
+27 |     ensure_trip_references_valid,
+   |
+
+E402 Module level import not at top of file
+  --> services\trip-service\src\trip_service\routers\trips.py:26:1
+   |
+24 |   )
+25 |   from trip_service.database import get_session
+26 | / from trip_service.dependencies import (
+27 | |     ensure_trip_references_valid,
+28 | |     fetch_trip_context,
+29 | |     get_trip_service,
+30 | |     resolve_route_by_names,
+31 | | )
+   | |_^
+32 |   from trip_service.enums import (
+33 |       DataQualityFlag,
+   |
+
+E402 Module level import not at top of file
+  --> services\trip-service\src\trip_service\routers\trips.py:32:1
+   |
+30 |       resolve_route_by_names,
+31 |   )
+32 | / from trip_service.enums import (
+33 | |     DataQualityFlag,
+34 | |     EnrichmentStatus,
+35 | |     EvidenceKind,
+36 | |     EvidenceSource,
+37 | |     PlatformActorType,
+38 | |     PlatformRole,
+39 | |     ReviewReasonCode,
+40 | |     RouteStatus,
+41 | |     SourceType,
+42 | |     TripStatus,
+43 | | )
+   | |_^
+44 |   from trip_service.errors import (
+45 |       enrichment_already_running,
+   |
+
+F811 Redefinition of unused `PlatformActorType` from line 1
+  --> services\trip-service\src\trip_service\routers\trips.py:37:5
+   |
+35 |     EvidenceKind,
+36 |     EvidenceSource,
+37 |     PlatformActorType,
+   |     ^^^^^^^^^^^^^^^^^ `PlatformActorType` redefined here
+38 |     PlatformRole,
+39 |     ReviewReasonCode,
+   |
+  ::: services\trip-service\src\trip_service\routers\trips.py:1:27
+   |
+ 1 | from platform_auth import PlatformActorType, PlatformRole
+   |                           ----------------- previous definition of `PlatformActorType` here
+ 2 |
+ 3 | """Trip endpoints aligned to the locked product contract."""
+   |
+help: Remove definition: `PlatformActorType`
+
+F811 Redefinition of unused `PlatformRole` from line 1
+  --> services\trip-service\src\trip_service\routers\trips.py:38:5
+   |
+36 |     EvidenceSource,
+37 |     PlatformActorType,
+38 |     PlatformRole,
+   |     ^^^^^^^^^^^^ `PlatformRole` redefined here
+39 |     ReviewReasonCode,
+40 |     RouteStatus,
+   |
+  ::: services\trip-service\src\trip_service\routers\trips.py:1:46
+   |
+ 1 | from platform_auth import PlatformActorType, PlatformRole
+   |                                              ------------ previous definition of `PlatformRole` here
+ 2 |
+ 3 | """Trip endpoints aligned to the locked product contract."""
+   |
+help: Remove definition: `PlatformRole`
+
+E402 Module level import not at top of file
+  --> services\trip-service\src\trip_service\routers\trips.py:44:1
+   |
+42 |       TripStatus,
+43 |   )
+44 | / from trip_service.errors import (
+45 | |     enrichment_already_running,
+46 | |     enrichment_terminal_state,
+47 | |     hard_delete_requires_soft_deleted,
+48 | |     has_empty_return_child,
+49 | |     idempotency_payload_mismatch,
+50 | |     internal_error,
+51 | |     trip_forbidden,
+52 | |     trip_source_reference_conflict,
+53 | |     trip_version_mismatch,
+54 | | )
+   | |_^
+55 |   from trip_service.middleware import (
+56 |       date_range_to_utc,
+   |
+
+E402 Module level import not at top of file
+  --> services\trip-service\src\trip_service\routers\trips.py:55:1
+   |
+53 |       trip_version_mismatch,
+54 |   )
+55 | / from trip_service.middleware import (
+56 | |     date_range_to_utc,
+57 | |     make_etag,
+58 | |     make_pagination_meta,
+59 | |     parse_pagination,
+60 | |     require_trip_if_match,
+61 | | )
+   | |_^
+62 |   from trip_service.models import (
+63 |       TripTrip,
+   |
+
+E402 Module level import not at top of file
+  --> services\trip-service\src\trip_service\routers\trips.py:62:1
+   |
+60 |       require_trip_if_match,
+61 |   )
+62 | / from trip_service.models import (
+63 | |     TripTrip,
+64 | |     TripTripDeleteAudit,
+65 | |     TripTripEnrichment,
+66 | |     TripTripEvidence,
+67 | |     TripTripTimeline,
+68 | | )
+   | |_^
+69 |   from trip_service.schemas import (
+70 |       ApproveRequest,
+   |
+
+E402 Module level import not at top of file
+  --> services\trip-service\src\trip_service\routers\trips.py:69:1
+   |
+67 |       TripTripTimeline,
+68 |   )
+69 | / from trip_service.schemas import (
+70 | |     ApproveRequest,
+71 | |     AssetReferenceCheckRequest,
+72 | |     AssetReferenceCheckResponse,
+73 | |     EditTripRequest,
+74 | |     EmptyReturnRequest,
+75 | |     ExcelIngestRequest,
+76 | |     HardDeleteRequest,
+77 | |     ManualCreateRequest,
+78 | |     PaginationMeta,
+79 | |     RejectRequest,
+80 | |     RetryEnrichmentResponse,
+81 | |     TelegramFallbackIngestRequest,
+82 | |     TelegramSlipIngestRequest,
+83 | |     TimelineItem,
+84 | |     TimelineResponse,
+85 | |     TripListResponse,
+86 | |     TripResource,
+87 | | )
+   | |_^
+88 |   from trip_service.service import TripService
+89 |   from trip_service.timezones import local_datetime_to_utc
+   |
+
+E402 Module level import not at top of file
+  --> services\trip-service\src\trip_service\routers\trips.py:88:1
+   |
+86 |     TripResource,
+87 | )
+88 | from trip_service.service import TripService
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+89 | from trip_service.timezones import local_datetime_to_utc
+   |
+
+E402 Module level import not at top of file
+  --> services\trip-service\src\trip_service\routers\trips.py:89:1
+   |
+87 | )
+88 | from trip_service.service import TripService
+89 | from trip_service.timezones import local_datetime_to_utc
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+90 |
+91 | if TYPE_CHECKING:
+   |
+
+E402 Module level import not at top of file
+  --> services\trip-service\src\trip_service\routers\trips.py:93:1
+   |
+91 | if TYPE_CHECKING:
+92 |     from trip_service.service import TripService
+93 | from platform_common import compute_data_quality_flag
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+94 |
+95 | from trip_service.observability import (
+   |
+
+E402 Module level import not at top of file
+   --> services\trip-service\src\trip_service\routers\trips.py:95:1
+    |
+ 93 |   from platform_common import compute_data_quality_flag
+ 94 |
+ 95 | / from trip_service.observability import (
+ 96 | |     TRIP_CREATED_TOTAL,
+ 97 | |     TRIP_HARD_DELETED_TOTAL,
+ 98 | |     get_standard_labels,
+ 99 | | )
+    | |_^
+100 |   from trip_service.trip_helpers import (
+101 |       _REFERENCE_EXCLUDED_STATUSES,
+    |
+
+E402 Module level import not at top of file
+   --> services\trip-service\src\trip_service\routers\trips.py:100:1
+    |
+ 98 |       get_standard_labels,
+ 99 |   )
+100 | / from trip_service.trip_helpers import (
+101 | |     _REFERENCE_EXCLUDED_STATUSES,
+102 | |     _check_idempotency_key,
+103 | |     _coerce_actor_type,
+104 | |     _create_outbox_event,
+105 | |     _event_payload,
+106 | |     _generate_id,
+107 | |     _get_trip_or_404,
+108 | |     _map_integrity_error,
+109 | |     _merged_payload_hash,
+110 | |     _save_idempotency_record,
+111 | |     apply_trip_context,
+112 | |     build_delete_audit,
+113 | |     is_deleted_trip_status,
+114 | |     normalize_trip_status,
+115 | |     trip_to_resource,
+116 | |     utc_now,
+117 | | )
+    | |_^
+118 |
+119 |   router = APIRouter(tags=["trips"])
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> services\trip-service\src\trip_service\trip_helpers.py:1:1
+   |
+ 1 | / from __future__ import annotations
+ 2 | |
+ 3 | | import hashlib
+ 4 | | import json
+ 5 | | import logging
+ 6 | | from datetime import UTC, datetime, timedelta
+ 7 | | from typing import Any, cast
+ 8 | |
+ 9 | | from fastapi.responses import JSONResponse
+10 | | from platform_auth import AuthContext, TokenClaims
+11 | | from sqlalchemy import and_, func, select, text
+12 | | from sqlalchemy.dialects.postgresql import INTERVAL
+13 | | from sqlalchemy.dialects.postgresql import insert as pg_insert
+14 | | from sqlalchemy.exc import DBAPIError, IntegrityError, NoResultFound, OperationalError
+15 | | from sqlalchemy.ext.asyncio import AsyncSession
+16 | | from sqlalchemy.orm import selectinload
+17 | | from ulid import ULID
+18 | |
+19 | | from platform_common import OutboxPublishStatus, compute_data_quality_flag
+20 | | from trip_service.config import settings
+21 | | from trip_service.database import get_session
+22 | | from trip_service.dependencies import LocationTripContext
+23 | | from trip_service.enums import (
+24 | |     DataQualityFlag, EnrichmentStatus, EvidenceKind, EvidenceSource,
+25 | |     ReviewReasonCode, RouteStatus, SourceType, TripStatus,
+26 | | )
+27 | | from platform_auth import PlatformRole, PlatformActorType
+28 | | from trip_service.errors import (
+29 | |     idempotency_in_flight,
+30 | |     idempotency_payload_mismatch,
+31 | |     trip_completion_requirements_missing,
+32 | |     trip_driver_overlap,
+33 | |     trip_not_found,
+34 | |     trip_trailer_overlap,
+35 | |     trip_validation_error,
+36 | |     trip_vehicle_overlap,
+37 | | )
+38 | | from trip_service.models import (
+39 | |     TripAuditLogModel,
+40 | |     TripIdempotencyRecord,
+41 | |     TripOutbox,
+42 | |     TripTrip,
+43 | |     TripTripDeleteAudit,
+44 | |     TripTripEnrichment,
+45 | |     TripTripEvidence,
+46 | | )
+47 | | from trip_service.observability import get_standard_labels  # noqa: F401
+48 | | from trip_service.schemas import EditTripRequest, EnrichmentSummary, EvidenceSummary, TripResource
+49 | | from trip_service.state_machine import TripStateMachine
+   | |_______________________________________________________^
+50 |
+51 |   _REFERENCE_EXCLUDED_STATUSES = (
+   |
+help: Organize imports
+
+F401 [*] `trip_service.database.get_session` imported but unused
+  --> services\trip-service\src\trip_service\trip_helpers.py:21:35
+   |
+19 | from platform_common import OutboxPublishStatus, compute_data_quality_flag
+20 | from trip_service.config import settings
+21 | from trip_service.database import get_session
+   |                                   ^^^^^^^^^^^
+22 | from trip_service.dependencies import LocationTripContext
+23 | from trip_service.enums import (
+   |
+help: Remove unused import: `trip_service.database.get_session`
+
+F401 [*] `trip_service.enums.DataQualityFlag` imported but unused
+  --> services\trip-service\src\trip_service\trip_helpers.py:24:5
+   |
+22 | from trip_service.dependencies import LocationTripContext
+23 | from trip_service.enums import (
+24 |     DataQualityFlag, EnrichmentStatus, EvidenceKind, EvidenceSource,
+   |     ^^^^^^^^^^^^^^^
+25 |     ReviewReasonCode, RouteStatus, SourceType, TripStatus,
+26 | )
+   |
+help: Remove unused import
+
+F401 [*] `trip_service.enums.EnrichmentStatus` imported but unused
+  --> services\trip-service\src\trip_service\trip_helpers.py:24:22
+   |
+22 | from trip_service.dependencies import LocationTripContext
+23 | from trip_service.enums import (
+24 |     DataQualityFlag, EnrichmentStatus, EvidenceKind, EvidenceSource,
+   |                      ^^^^^^^^^^^^^^^^
+25 |     ReviewReasonCode, RouteStatus, SourceType, TripStatus,
+26 | )
+   |
+help: Remove unused import
+
+F401 [*] `trip_service.enums.EvidenceKind` imported but unused
+  --> services\trip-service\src\trip_service\trip_helpers.py:24:40
+   |
+22 | from trip_service.dependencies import LocationTripContext
+23 | from trip_service.enums import (
+24 |     DataQualityFlag, EnrichmentStatus, EvidenceKind, EvidenceSource,
+   |                                        ^^^^^^^^^^^^
+25 |     ReviewReasonCode, RouteStatus, SourceType, TripStatus,
+26 | )
+   |
+help: Remove unused import
+
+F401 [*] `trip_service.enums.EvidenceSource` imported but unused
+  --> services\trip-service\src\trip_service\trip_helpers.py:24:54
+   |
+22 | from trip_service.dependencies import LocationTripContext
+23 | from trip_service.enums import (
+24 |     DataQualityFlag, EnrichmentStatus, EvidenceKind, EvidenceSource,
+   |                                                      ^^^^^^^^^^^^^^
+25 |     ReviewReasonCode, RouteStatus, SourceType, TripStatus,
+26 | )
+   |
+help: Remove unused import
+
+F401 [*] `trip_service.enums.RouteStatus` imported but unused
+  --> services\trip-service\src\trip_service\trip_helpers.py:25:23
+   |
+23 | from trip_service.enums import (
+24 |     DataQualityFlag, EnrichmentStatus, EvidenceKind, EvidenceSource,
+25 |     ReviewReasonCode, RouteStatus, SourceType, TripStatus,
+   |                       ^^^^^^^^^^^
+26 | )
+27 | from platform_auth import PlatformRole, PlatformActorType
+   |
+help: Remove unused import
+
+F401 [*] `platform_auth.PlatformActorType` imported but unused
+  --> services\trip-service\src\trip_service\trip_helpers.py:27:41
+   |
+25 |     ReviewReasonCode, RouteStatus, SourceType, TripStatus,
+26 | )
+27 | from platform_auth import PlatformRole, PlatformActorType
+   |                                         ^^^^^^^^^^^^^^^^^
+28 | from trip_service.errors import (
+29 |     idempotency_in_flight,
+   |
+help: Remove unused import: `platform_auth.PlatformActorType`
+
+F811 [*] Redefinition of unused `EnrichmentStatus` from line 24
+   --> services\trip-service\src\trip_service\trip_helpers.py:757:36
+    |
+755 | ) -> None:
+756 |     """Synchronize enrichment fields with the current trip payload completeness."""
+757 |     from trip_service.enums import EnrichmentStatus, RouteStatus
+    |                                    ^^^^^^^^^^^^^^^^ `EnrichmentStatus` redefined here
+758 |
+759 |     enrichment.route_status = RouteStatus.READY if route_ready else RouteStatus.PENDING
+    |
+   ::: services\trip-service\src\trip_service\trip_helpers.py:24:22
+    |
+ 22 | from trip_service.dependencies import LocationTripContext
+ 23 | from trip_service.enums import (
+ 24 |     DataQualityFlag, EnrichmentStatus, EvidenceKind, EvidenceSource,
+    |                      ---------------- previous definition of `EnrichmentStatus` here
+ 25 |     ReviewReasonCode, RouteStatus, SourceType, TripStatus,
+ 26 | )
+    |
+help: Remove definition: `EnrichmentStatus`
+
+F811 [*] Redefinition of unused `RouteStatus` from line 25
+   --> services\trip-service\src\trip_service\trip_helpers.py:757:54
+    |
+755 | ) -> None:
+756 |     """Synchronize enrichment fields with the current trip payload completeness."""
+757 |     from trip_service.enums import EnrichmentStatus, RouteStatus
+    |                                                      ^^^^^^^^^^^ `RouteStatus` redefined here
+758 |
+759 |     enrichment.route_status = RouteStatus.READY if route_ready else RouteStatus.PENDING
+    |
+   ::: services\trip-service\src\trip_service\trip_helpers.py:25:23
+    |
+ 23 | from trip_service.enums import (
+ 24 |     DataQualityFlag, EnrichmentStatus, EvidenceKind, EvidenceSource,
+ 25 |     ReviewReasonCode, RouteStatus, SourceType, TripStatus,
+    |                       ----------- previous definition of `RouteStatus` here
+ 26 | )
+ 27 | from platform_auth import PlatformRole, PlatformActorType
+    |
+help: Remove definition: `RouteStatus`
+
+Found 168 errors.
+[*] 127 fixable with the `--fix` option (1 hidden fix can be enabled with the `--unsafe-fixes` option).

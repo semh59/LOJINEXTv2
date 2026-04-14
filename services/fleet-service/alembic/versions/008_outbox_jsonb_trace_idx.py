@@ -7,9 +7,7 @@ Create Date: 2026-04-13
 
 from __future__ import annotations
 
-import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects import postgresql
 
 revision = "008_outbox_jsonb_trace_idx"
 down_revision = "007_outbox_correlation_id"

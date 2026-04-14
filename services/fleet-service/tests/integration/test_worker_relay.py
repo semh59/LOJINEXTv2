@@ -1,5 +1,5 @@
-import json
 import datetime
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from fleet_service.broker import NoOpBroker
 from fleet_service.config import settings
 from fleet_service.models import FleetOutbox
-from fleet_service.timestamps import to_utc_aware, utc_now_aware, to_utc_aware
+from fleet_service.timestamps import to_utc_aware, utc_now_aware
 from fleet_service.workers.outbox_relay import _relay_batch
 
 

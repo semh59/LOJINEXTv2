@@ -10,11 +10,10 @@ from datetime import UTC, datetime
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
+import httpx
 import pytest
 import pytest_asyncio
-import httpx
 from httpx import ASGITransport, AsyncClient
-import respx
 from platform_auth_testing import build_test_jwks_bundle, install_jwks_urlopen_mock, sign_test_token
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine

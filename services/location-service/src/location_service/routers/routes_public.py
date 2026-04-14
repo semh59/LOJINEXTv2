@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from typing import cast
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from location_service.database import get_db
-from location_service.errors import internal_error, route_version_not_found
-from location_service.models import Route, RoutePair, RouteSegment, RouteVersion
-from location_service.schemas import RouteGeometryResponse, RouteVersionDetailResponse
+from ..database import get_db
+from ..errors import internal_error, route_version_not_found
+from ..models import Route, RoutePair, RouteSegment, RouteVersion
+from ..schemas import RouteGeometryResponse, RouteVersionDetailResponse
 
 router = APIRouter(tags=["routes"])
 
@@ -43,6 +44,20 @@ async def get_route_version_detail(
 ) -> RouteVersionDetailResponse:
     """Return frontend-facing route version detail."""
     version, route, pair = await _get_route_version_row(session, route_id=route_id, version_no=version_no)
+
+    # Parse JSON fields safely for Pydantic
+    try:
+        road_type = json.loads(version.road_type_distribution_json)
+        speed_dist = json.loads(version.speed_limit_distribution_json)
+        urban_dist = json.loads(version.urban_distribution_json)
+        warnings = json.loads(version.warnings_json)
+    except (TypeError, json.JSONDecodeError):
+        # Fallback for corrupted or empty data
+        road_type = {}
+        speed_dist = {}
+        urban_dist = {}
+        warnings = []
+
     return RouteVersionDetailResponse(
         route_id=route.route_id,
         route_code=route.route_code,
@@ -64,10 +79,10 @@ async def get_route_version_detail(
         distance_validation_delta_pct=version.distance_validation_delta_pct,
         duration_validation_delta_pct=version.duration_validation_delta_pct,
         endpoint_validation_delta_m=version.endpoint_validation_delta_m,
-        road_type_distribution_json=version.road_type_distribution_json,
-        speed_limit_distribution_json=version.speed_limit_distribution_json,
-        urban_distribution_json=version.urban_distribution_json,
-        warnings_json=version.warnings_json,
+        road_type_distribution_json=road_type,
+        speed_limit_distribution_json=speed_dist,
+        urban_distribution_json=urban_dist,
+        warnings_json=warnings,
         refresh_reason=version.refresh_reason,
         processing_algorithm_version=version.processing_algorithm_version,
         created_at_utc=version.created_at_utc,

@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from typing import Any, Optional
+from typing import Optional
 
 from sqlalchemy import (
     Boolean,
@@ -15,7 +15,6 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from ulid import ULID
 

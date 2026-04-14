@@ -18,7 +18,7 @@ def debug_outbox():
         payload={"test": "data"},
     )
     print(f"Row partition_key: {row.partition_key}")
-    print(f"Row schema_version: {row.schema_version}")
+    print(f"Row event_version: {row.event_version}")
     print(f"Row aggregate_type: {row.aggregate_type}")
 
 

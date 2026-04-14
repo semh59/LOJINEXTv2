@@ -3,7 +3,7 @@ import asyncio
 import logging
 import uuid
 import time
-from datetime import datetime, UTC, timedelta
+from datetime import datetime, timedelta
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"

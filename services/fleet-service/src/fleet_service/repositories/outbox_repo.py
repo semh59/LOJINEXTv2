@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import datetime
+from typing import cast
 
-from sqlalchemy import update
+from sqlalchemy import CursorResult, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fleet_service.config import settings
@@ -46,4 +47,4 @@ async def dead_letter_by_aggregate(session: AsyncSession, aggregate_type: str, a
         )
     )
     result = await session.execute(stmt)
-    return result.rowcount or 0
+    return cast(CursorResult, result).rowcount or 0

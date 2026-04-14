@@ -108,6 +108,9 @@ async def create_vehicle(
             raise IdempotencyHashMismatchError()
         # Replay: return cached response
         cached = existing.response_body_json
+        if isinstance(cached, str):
+            cached = json.loads(cached)
+
         replay_spec_etag = None
         if cached.get("current_spec_summary") is not None:
             replay_spec_etag = generate_spec_etag("VEHICLE", cached["vehicle_id"], cached["spec_stream_version"])

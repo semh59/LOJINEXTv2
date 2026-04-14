@@ -11,7 +11,22 @@ workspace = { members = ["services/*", "packages/*"] }
 python_version = "3.12"
 strict = true
 ignore_missing_imports = true
+exclude = ["build/", "alembic/", "tests/"]
 
-[tool.ruff]
-line-length = 100
-target-version = "py312"
+[tool.pyright]
+include = ["packages", "services"]
+extraPaths = [
+    "packages/platform-common/src",
+    "packages/platform-auth/src",
+    "services/auth-service/src",
+    "services/identity-service/src",
+    "services/trip-service/src",
+    "services/driver-service/src",
+    "services/fleet-service/src",
+    "services/location-service/src",
+    "services/telegram-service/src"
+]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.12"
+typeCheckingMode = "basic"

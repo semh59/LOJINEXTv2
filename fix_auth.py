@@ -1,5 +1,4 @@
 import pathlib
-import sys
 
 p = pathlib.Path('d:/PROJECT/LOJINEXTv2/services/driver-service/src/driver_service/auth.py')
 content = p.read_text(encoding='utf-8')

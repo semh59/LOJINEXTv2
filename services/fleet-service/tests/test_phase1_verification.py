@@ -15,7 +15,6 @@ from sqlalchemy import inspect, select, text
 
 from fleet_service.models import FleetOutbox
 
-
 # ---------------------------------------------------------------------------
 # HIGH-05: FleetOutbox correlation_id column
 # ---------------------------------------------------------------------------
@@ -106,8 +105,8 @@ class TestFleetOutboxRelayCleanup:
 
     def test_no_broker_close_in_relay(self):
         """HIGH-06: run_outbox_relay must NOT close the broker — entrypoint handles it."""
-        from pathlib import Path
         import ast
+        from pathlib import Path
 
         relay_path = Path(__file__).parents[1] / "src" / "fleet_service" / "workers" / "outbox_relay.py"
         source = relay_path.read_text(encoding="utf-8")
@@ -127,8 +126,8 @@ class TestFleetOutboxRelayCleanup:
 
     def test_no_orphaned_try_blocks(self):
         """Verify removing the finally block didn't leave syntax errors."""
-        from pathlib import Path
         import ast
+        from pathlib import Path
 
         relay_path = Path(__file__).parents[1] / "src" / "fleet_service" / "workers" / "outbox_relay.py"
         source = relay_path.read_text(encoding="utf-8")

@@ -9,12 +9,12 @@ from contextlib import asynccontextmanager
 from aiogram.types import Update
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
+from platform_common import instrument_app, setup_tracing, shutdown_tracing
 
 from telegram_service.bot import build_bot, build_dispatcher
 from telegram_service.config import settings, validate_prod_settings
 from telegram_service.http_clients import http_manager
 from telegram_service.middleware import PrometheusMiddleware, RequestIdMiddleware
-from platform_common import setup_tracing, instrument_app, shutdown_tracing
 
 logger = logging.getLogger("telegram_service")
 

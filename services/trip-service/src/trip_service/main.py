@@ -10,6 +10,8 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from platform_common import (
+    PrometheusMiddleware,
+    RequestIdMiddleware,
     instrument_app,
     setup_logging,
     setup_tracing,
@@ -25,7 +27,6 @@ from trip_service.errors import (
     validation_exception_handler,
 )
 from trip_service.http_clients import close_http_clients
-from trip_service.middleware import PrometheusMiddleware, RequestIdMiddleware
 from trip_service.redis_client import close_redis, setup_redis
 from trip_service.routers import driver_statement, health, removed_endpoints, trips
 
@@ -93,9 +94,15 @@ def create_app() -> FastAPI:
         docs_url=None if settings.environment == "prod" else "/docs",
     )
 
+    from trip_service.observability import HTTP_REQUESTS_TOTAL, REQUEST_DURATION, get_standard_labels
     # Standard Middleware
-    app.add_middleware(PrometheusMiddleware)
     app.add_middleware(RequestIdMiddleware)
+    app.add_middleware(
+        PrometheusMiddleware,
+        requests_counter=HTTP_REQUESTS_TOTAL,
+        duration_histogram=REQUEST_DURATION,
+        label_provider=get_standard_labels,
+    )
 
     app.add_middleware(
         CORSMiddleware,

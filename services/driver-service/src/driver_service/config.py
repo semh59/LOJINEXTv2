@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     # --- Database ---
     database_url: str = DEFAULT_DATABASE_URL
 
+    # --- Redis ---
+    redis_url: str = "redis://localhost:6379/0"
+    redis_max_connections: int = 10
+    redis_socket_timeout: float = 1.0
+    redis_retry_on_timeout: bool = True
+
     # --- Auth ---
     auth_jwt_algorithm: str = "RS256"
     auth_issuer: str = "lojinext-platform"
@@ -82,8 +88,9 @@ class Settings(BaseSettings):
     @property
     def resolved_broker_type(self) -> Literal["kafka", "log", "noop"]:
         """Resolve the effective broker type based on environment defaults."""
-        if self.broker_type is not None:
-            return self.broker_type
+        bt = self.broker_type
+        if bt is not None:
+            return bt
         if self.environment == "prod":
             return "kafka"
         if self.environment == "test":
@@ -134,6 +141,8 @@ def validate_prod_settings(current: Settings) -> None:
         errors.append(
             "DRIVER_KAFKA_SECURITY_PROTOCOL cannot be PLAINTEXT in prod without DRIVER_ALLOW_PLAINTEXT_IN_PROD."
         )
+    if not current.redis_url or "localhost" in current.redis_url:
+        errors.append("DRIVER_REDIS_URL must be set to a production-ready value.")
 
     if errors:
         raise ValueError("Production settings invalid: " + " ".join(errors))

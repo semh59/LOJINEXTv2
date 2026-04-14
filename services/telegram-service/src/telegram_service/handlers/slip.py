@@ -5,19 +5,19 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from aiogram import F, Router
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
+from aiogram import F, Router  # type: ignore
+from aiogram.fsm.context import FSMContext  # type: ignore
+from aiogram.fsm.state import State, StatesGroup  # type: ignore
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
     PhotoSize,
-)
+)  # type: ignore
 
-from telegram_service.clients import driver_client, fleet_client, trip_client
-from telegram_service.config import settings
+from telegram_service.clients import driver_client, fleet_client, trip_client  # type: ignore
+from telegram_service.config import settings  # type: ignore
 from telegram_service.i18n import (
     BTN_BACK,
     BTN_CANCEL,
@@ -35,10 +35,10 @@ from telegram_service.i18n import (
     MSG_SLIP_PROMPT_EDIT,
     MSG_SLIP_READ_SUCCESS,
     MSG_SLIP_READING,
-)
-from telegram_service.observability import BOT_OCR_REQUESTS_TOTAL, get_standard_labels
-from telegram_service.ocr.extractor import extract_slip_fields
-from telegram_service.schemas import SlipFields
+)  # type: ignore
+from telegram_service.observability import BOT_OCR_REQUESTS_TOTAL, get_standard_labels  # type: ignore
+from telegram_service.ocr.extractor import extract_slip_fields  # type: ignore
+from telegram_service.schemas import SlipFields  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +121,9 @@ async def handle_photo(message: Message, state: FSMContext) -> None:
     await message.answer(MSG_SLIP_READING)
 
     # Download highest-resolution photo
+    if not message.photo:
+        logger.error("No photo found in message")
+        return
     photo: PhotoSize = message.photo[-1]
     bot = message.bot
     if bot is None:
@@ -144,11 +147,17 @@ async def handle_photo(message: Message, state: FSMContext) -> None:
     except Exception:
         # Record OCR Failure
         BOT_OCR_REQUESTS_TOTAL.labels(status="failure", **get_standard_labels()).inc()
-        logger.exception("OCR failed for driver %s", driver.driver_id)
+        # Elite Hardening: explicitly guard driver identity for logging
+        d_id = driver.driver_id if driver else "unknown_driver"
+        logger.exception("OCR failed for driver %s", d_id)
         await message.answer(MSG_SLIP_OCR_FAILED)
         return
 
     # Store fields + driver context in FSM state
+    if driver is None:
+        await message.answer(MSG_NOT_REGISTERED)
+        return
+
     await state.set_state(SlipStates.confirming)
     await state.update_data(
         fields=fields.model_dump(),
@@ -265,7 +274,9 @@ async def handle_edit(callback: CallbackQuery, state: FSMContext) -> None:
 async def handle_field_select(callback: CallbackQuery, state: FSMContext) -> None:
     """Driver selected a field to correct — ask for new value."""
     await callback.answer()
-    field_key = callback.data.split("slip:field:")[1]  # type: ignore[union-attr]
+    if not callback.data:
+        return
+    field_key = callback.data.split("slip:field:")[1]
     label = FIELD_LABELS.get(field_key, field_key)
 
     await state.set_state(SlipStates.correcting_field)

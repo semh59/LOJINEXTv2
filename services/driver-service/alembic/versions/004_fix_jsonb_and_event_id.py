@@ -5,9 +5,7 @@ Revises: 003_eda_standardization_v2
 Create Date: 2026-04-12
 """
 
-import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects import postgresql
 
 revision = "004_fix_jsonb_and_event_id"
 down_revision = "003_eda_standardization_v2"

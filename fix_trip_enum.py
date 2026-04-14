@@ -1,5 +1,4 @@
 import pathlib
-import sys
 import re
 
 import_repl = "from platform_auth import PlatformActorType, PlatformRole"

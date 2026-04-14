@@ -5,9 +5,8 @@ Revises: 69d4f8c0b4e6
 Create Date: 2026-04-13
 """
 
+
 from alembic import op
-import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 
 revision = "70e5g9d1c5f7"
 down_revision = "69d4f8c0b4e6"
@@ -30,6 +29,6 @@ def downgrade() -> None:
     op.execute("UPDATE driver_outbox SET payload_jsonb = payload_json::jsonb")
     op.execute("ALTER TABLE driver_outbox DROP COLUMN payload_json")
     op.execute("ALTER TABLE driver_outbox RENAME COLUMN payload_jsonb TO payload_json")
-    
+
     # Reverse rename
     op.alter_column('driver_outbox', 'outbox_id', new_column_name='event_id')

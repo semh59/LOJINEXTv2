@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import inspect, select, text
@@ -181,7 +180,6 @@ class TestIdentityBrokerHeaders:
 
     def test_broker_header_format(self):
         """HIGH-01: Header must be X-Correlation-ID, not x-correlation-id."""
-        import ast
         from pathlib import Path
 
         broker_path = Path(__file__).parents[1] / "src" / "identity_service" / "broker.py"

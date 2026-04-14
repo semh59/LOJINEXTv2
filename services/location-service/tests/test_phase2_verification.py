@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 
-
 SERVICE_SRC = Path(__file__).parents[1] / "src" / "location_service"
 
 

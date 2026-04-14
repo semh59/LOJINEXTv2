@@ -16,18 +16,20 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
+from .context import causation_id as ctx_causation_id, correlation_id as ctx_correlation_id
+
 logger = logging.getLogger("platform_common.broker")
 
 
 class RobustJSONEncoder(json.JSONEncoder):
     """JSON encoder that handles datetime, date, and Decimal types."""
 
-    def default(self, obj: Any) -> Any:
-        if isinstance(obj, (datetime, date)):
-            return obj.isoformat()
-        if isinstance(obj, Decimal):
-            return str(obj)
-        return super().default(obj)
+    def default(self, o: Any) -> Any:
+        if isinstance(o, (datetime, date)):
+            return o.isoformat()
+        if isinstance(o, Decimal):
+            return str(o)
+        return super().default(o)
 
 
 # ---------------------------------------------------------------------------
@@ -170,15 +172,14 @@ class KafkaBroker(MessageBroker):
         headers: list[tuple[str, bytes]] = []
 
         # Correlation ID: from message, or from ContextVar
-        c_id = message.correlation_id
-        if not c_id and self._correlation_id_getter:
-            c_id = self._correlation_id_getter()
+        c_id = message.correlation_id or ctx_correlation_id.get()
         if c_id:
             headers.append(("X-Correlation-ID", c_id.encode("utf-8")))
 
-        # Causation ID
-        if message.causation_id:
-            headers.append(("X-Causation-ID", message.causation_id.encode("utf-8")))
+        # Causation ID: from message, or from ContextVar
+        cau_id = message.causation_id or ctx_causation_id.get()
+        if cau_id:
+            headers.append(("X-Causation-ID", cau_id.encode("utf-8")))
 
         # Extra headers
         for key, value in message.headers.items():
@@ -203,7 +204,7 @@ class KafkaBroker(MessageBroker):
         if self._admin is None:
             raise RuntimeError("AdminClient not available")
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._list_topics)
+        await loop.run_in_executor(None, self._list_topics)  # type: ignore[arg-type]
 
     def _list_topics(self) -> Any:
         return self._admin.list_topics(timeout=5)  # type: ignore[union-attr]

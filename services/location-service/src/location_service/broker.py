@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Literal
 
+from platform_common import KafkaBroker, LogBroker, MessageBroker, NoOpBroker
+
 from location_service.config import settings
 from location_service.observability import correlation_id
-from platform_common import KafkaBroker, LogBroker, NoOpBroker, MessageBroker
 
 
 def _kafka_config() -> dict[str, object]:
@@ -25,15 +26,7 @@ def _kafka_config() -> dict[str, object]:
 
 def create_broker(broker_type: Literal["kafka", "log", "noop"] | str | None = None) -> MessageBroker:
     """Factory function to create a standardized broker."""
-    # Resolve backend
-    if broker_type:
-        resolved = broker_type
-    elif settings.kafka_bootstrap_servers and settings.environment != "dev":
-        resolved = "kafka"
-    elif settings.environment == "dev":
-        resolved = "log"
-    else:
-        resolved = "noop"
+    resolved = broker_type or settings.resolved_broker_type
 
     if resolved == "kafka":
         return KafkaBroker(

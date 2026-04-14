@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -9,7 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 
 from identity_service.config import settings, validate_prod_settings
-from identity_service.database import async_session_factory, engine
+from identity_service.database import engine
 from identity_service.errors import (
     ProblemDetailError,
     problem_detail_handler,
@@ -23,8 +24,7 @@ from identity_service.middleware import (
 )
 from identity_service.routers.admin import router as admin_router
 from identity_service.routers.health import router as health_router
-
-import logging
+from identity_service.observability import HTTP_REQUESTS_TOTAL, REQUEST_DURATION, get_standard_labels
 
 logger = logging.getLogger("identity_service")
 
@@ -78,7 +78,12 @@ app = FastAPI(
 
 # Middleware stack (outermost first — Starlette applies in reverse registration order)
 app.add_middleware(RequestIdMiddleware)
-app.add_middleware(PrometheusMiddleware)
+app.add_middleware(
+    PrometheusMiddleware,
+    requests_counter=HTTP_REQUESTS_TOTAL,
+    duration_histogram=REQUEST_DURATION,
+    label_provider=get_standard_labels,
+)
 
 # RateLimitMiddleware is a raw ASGI middleware (not BaseHTTPMiddleware),
 # so it must be added via add_middleware with the class, not an instance.

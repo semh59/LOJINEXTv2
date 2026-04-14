@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import datetime
+from typing import cast
 
-from sqlalchemy import delete, select
+from sqlalchemy import CursorResult, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fleet_service.models import FleetIdempotencyRecord
@@ -40,4 +41,4 @@ async def cleanup_expired(session: AsyncSession, now: datetime.datetime | None =
         now = to_utc_aware(now)
     stmt = delete(FleetIdempotencyRecord).where(FleetIdempotencyRecord.expires_at_utc < now)
     result = await session.execute(stmt)
-    return result.rowcount or 0
+    return cast(CursorResult, result).rowcount or 0

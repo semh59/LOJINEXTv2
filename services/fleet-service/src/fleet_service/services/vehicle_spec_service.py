@@ -9,6 +9,7 @@ import datetime
 import json
 import logging
 
+from platform_common import OutboxPublishStatus
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
@@ -17,7 +18,6 @@ from fleet_service.auth import AuthContext
 from fleet_service.config import settings
 from fleet_service.constraint_error_mapper import map_integrity_error
 from fleet_service.domain.enums import AggregateType
-from platform_common import OutboxPublishStatus
 from fleet_service.domain.etag import generate_spec_etag, parse_spec_etag
 from fleet_service.errors import (
     AssetInactiveOrDeletedError,

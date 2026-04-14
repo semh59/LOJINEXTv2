@@ -8,96 +8,26 @@ from __future__ import annotations
 
 import hashlib
 import re
-import time
-import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from fastapi import Request, Response
-from starlette.types import ASGIApp, Message, Receive, Scope, Send
+from platform_common import PrometheusMiddleware, RequestIdMiddleware
 
-from location_service.errors import ProblemDetailError, if_match_required, point_version_mismatch
-from location_service.observability import correlation_id
+from location_service.errors import (
+    ProblemDetailError,
+    if_match_required,
+    point_version_mismatch,
+)
 
-
-class RequestIdMiddleware:
-    """Ensure every request has an X-Request-Id and echo it in the response."""
-
-    def __init__(self, app: ASGIApp) -> None:
-        self.app = app
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] not in ("http", "websocket"):
-            await self.app(scope, receive, send)
-            return
-
-        # Extract or generate X-Correlation-ID (case-insensitive extraction)
-        headers = {k.lower(): v for k, v in scope.get("headers", [])}
-        correlation_id_val = (
-            headers.get(b"x-correlation-id", b"").decode()
-            or headers.get(b"x-request-id", b"").decode()
-            or str(uuid.uuid4())
-        )
-
-        if "state" not in scope:
-            scope["state"] = {}
-        scope["state"]["correlation_id"] = correlation_id_val
-        # Legacy support for internal code still using request_id
-        scope["state"]["request_id"] = correlation_id_val
-
-        # Set ContextVar for automated propagation and logging
-        token = correlation_id.set(correlation_id_val)
-
-        async def send_with_correlation_id(message: Message) -> None:
-            if message["type"] == "http.response.start":
-                existing_headers = list(message.get("headers", []))
-                # Inject standard X-Correlation-ID (standard case)
-                existing_headers.append((b"X-Correlation-ID", correlation_id_val.encode()))
-                existing_headers.append((b"X-Request-Id", correlation_id_val.encode()))
-                message["headers"] = existing_headers
-            await send(message)
-
-        try:
-            await self.app(scope, receive, send_with_correlation_id)
-        finally:
-            correlation_id.reset(token)
-
-
-class PrometheusMiddleware:
-    """Pure ASGI middleware that records request counters and latency."""
-
-    def __init__(self, app: ASGIApp) -> None:
-        self.app = app
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-
-        from location_service.observability import REQUEST_DURATION, get_standard_labels
-
-        start_time = time.perf_counter()
-        method = scope["method"]
-        path = scope["path"]
-        status_code = [500]
-
-        async def wrapped_send(message: Message) -> None:
-            if message["type"] == "http.response.start":
-                status_code[0] = message["status"]
-            await send(message)
-
-        try:
-            await self.app(scope, receive, wrapped_send)
-        finally:
-            duration = time.perf_counter() - start_time
-            labels = get_standard_labels()
-            REQUEST_DURATION.labels(
-                method=method,
-                endpoint=path,
-                status_code=status_code[0],
-                **labels,
-            ).observe(duration)
+__all__ = [
+    "RequestIdMiddleware",
+    "PrometheusMiddleware",
+    "ProblemDetailError",
+    "if_match_required",
+    "point_version_mismatch",
+]
 
 
 def make_etag(row_version: int) -> str:

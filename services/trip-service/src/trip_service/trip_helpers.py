@@ -7,7 +7,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from fastapi.responses import JSONResponse
-from platform_auth import AuthContext, TokenClaims
+from platform_auth import AuthContext, PlatformRole, TokenClaims
+from platform_common import OutboxPublishStatus, compute_data_quality_flag
 from sqlalchemy import and_, func, select, text
 from sqlalchemy.dialects.postgresql import INTERVAL
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -16,15 +17,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from ulid import ULID
 
-from platform_common import OutboxPublishStatus, compute_data_quality_flag
 from trip_service.config import settings
-from trip_service.database import get_session
 from trip_service.dependencies import LocationTripContext
 from trip_service.enums import (
-    DataQualityFlag, EnrichmentStatus, EvidenceKind, EvidenceSource,
-    ReviewReasonCode, RouteStatus, SourceType, TripStatus,
+    EnrichmentStatus,
+    ReviewReasonCode,
+    RouteStatus,
+    SourceType,
+    TripStatus,
 )
-from platform_auth import PlatformRole, PlatformActorType
 from trip_service.errors import (
     idempotency_in_flight,
     idempotency_payload_mismatch,
@@ -754,7 +755,6 @@ def _set_enrichment_state(
     ocr_confidence: float | None = None,
 ) -> None:
     """Synchronize enrichment fields with the current trip payload completeness."""
-    from trip_service.enums import EnrichmentStatus, RouteStatus
 
     enrichment.route_status = RouteStatus.READY if route_ready else RouteStatus.PENDING
     enrichment.enrichment_status = EnrichmentStatus.READY if route_ready else EnrichmentStatus.PENDING

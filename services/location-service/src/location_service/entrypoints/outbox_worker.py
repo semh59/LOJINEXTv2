@@ -6,11 +6,12 @@ import asyncio
 import logging
 import signal
 
+from platform_common import setup_tracing, shutdown_tracing
+
 from location_service.broker import create_broker
 from location_service.config import settings, validate_prod_settings
 from location_service.observability import setup_logging
 from location_service.workers.outbox_relay import run_outbox_relay
-from platform_common import setup_tracing, shutdown_tracing
 
 logger = logging.getLogger("location_service.entrypoints.outbox_worker")
 

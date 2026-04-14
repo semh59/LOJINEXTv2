@@ -3,137 +3,22 @@
 from __future__ import annotations
 
 import json
-import re
-import time
+from typing import cast
 from uuid import uuid4
 
-from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from starlette.responses import JSONResponse
-from starlette.types import ASGIApp, Message, Receive, Scope, Send
+from starlette.types import ASGIApp, Receive, Scope, Send
 
-from identity_service.observability import (
-    HTTP_REQUEST_DURATION_SECONDS,
-    HTTP_REQUESTS_TOTAL,
-    correlation_id,
-    get_standard_labels,
-)
+from platform_common import RequestIdMiddleware, PrometheusMiddleware
 
+__all__ = ["RequestIdMiddleware", "PrometheusMiddleware", "RateLimitMiddleware"]
 
-class RequestIdMiddleware:
-    def __init__(self, app: ASGIApp) -> None:
-        self.app = app
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] not in ("http", "websocket"):
-            await self.app(scope, receive, send)
-            return
-
-        headers = {k.lower(): v for k, v in scope.get("headers", [])}
-        correlation_id_val = (
-            headers.get(b"x-correlation-id", b"").decode()
-            or headers.get(b"x-request-id", b"").decode()
-            or str(uuid4())
-        )
-
-        if "state" not in scope:
-            scope["state"] = {}
-        scope["state"]["correlation_id"] = correlation_id_val
-        scope["state"]["request_id"] = correlation_id_val
-
-        token = correlation_id.set(correlation_id_val)
-
-        async def send_with_ids(message: Message) -> None:
-            if message["type"] == "http.response.start":
-                existing_headers = list(message.get("headers", []))
-                existing_headers.append(
-                    (b"X-Correlation-ID", correlation_id_val.encode())
-                )
-                existing_headers.append((b"X-Request-Id", correlation_id_val.encode()))
-                message["headers"] = existing_headers
-            await send(message)
-
-        try:
-            await self.app(scope, receive, send_with_ids)
-        finally:
-            correlation_id.reset(token)
-
-
-class PrometheusMiddleware:
-    def __init__(self, app: ASGIApp) -> None:
-        self.app = app
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-
-        path = scope.get("path", "")
-
-        if path == "/metrics":
-            body = generate_latest()
-            await send(
-                {
-                    "type": "http.response.start",
-                    "status": 200,
-                    "headers": [
-                        [b"content-type", CONTENT_TYPE_LATEST.encode()],
-                        [b"content-length", str(len(body)).encode()],
-                    ],
-                }
-            )
-            await send({"type": "http.response.body", "body": body})
-            return
-
-        method = scope["method"]
-        endpoint = path
-
-        start_time = time.perf_counter()
-        status_code = [500]
-
-        async def wrapped_send(message: Message) -> None:
-            if message["type"] == "http.response.start":
-                status_code[0] = message["status"]
-            await send(message)
-
-        try:
-            await self.app(scope, receive, wrapped_send)
-        except Exception:
-            _record_metrics(
-                method, _normalize_path(endpoint), status_code[0], start_time
-            )
-            raise
-        else:
-            _record_metrics(
-                method, _normalize_path(endpoint), status_code[0], start_time
-            )
-
-
+# Keeping local helpers that might be needed or just removed if unused.
 def _normalize_path(path: str) -> str:
-    """Normalize path by replacing ULID, UUID and common numeric IDs with placeholders."""
-    # Replace ULIDs (26 chars, uppercase/alphanumeric)
-    path = re.sub(r"/[0-9A-HJKMNP-TV-Z]{26}", "/{id}", path)
-    # Replace UUIDs
-    path = re.sub(
-        r"/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
-        "/{uuid}",
-        path,
-    )
-    # Replace numeric IDs
-    path = re.sub(r"/\d+", "/{id}", path)
-    return path
-
-
-def _record_metrics(
-    method: str, endpoint: str, status_code: int, start_time: float
-) -> None:
-    duration = time.perf_counter() - start_time
-    labels = get_standard_labels()
-    HTTP_REQUESTS_TOTAL.labels(
-        method=method, endpoint=endpoint, status_code=status_code, **labels
-    ).inc()
-    HTTP_REQUEST_DURATION_SECONDS.labels(
-        method=method, endpoint=endpoint, **labels
-    ).observe(duration)
+    # Use platform_common version if possible, but keeping local if it has specific logic.
+    # Actually, the platform_common one covers ULID, UUID and numeric.
+    from platform_common.middleware import PrometheusMiddleware as BasePM
+    return BasePM._normalize_path(None, path)
 
 
 def _rate_limit_error(
@@ -188,25 +73,19 @@ class RateLimitMiddleware:
             return
 
         # Buffer the body so both this middleware and the router can read it
-        body_chunks: list[bytes] = []
-
-        async def cached_receive() -> dict:
-            message = await receive()
-            if message["type"] == "http.request":
-                body_chunks.append(message.get("body", b""))
-            return message
-
         # We need to read the body to extract username for login lockout.
         # Consume the receive stream once, then replay it via a closure.
-        raw_body = b""
+        body_chunks: list[bytes] = []
         more_body = True
         messages: list[dict] = []
         while more_body:
             msg = await receive()
             messages.append(msg)
             if msg["type"] == "http.request":
-                raw_body += msg.get("body", b"")
+                body_chunks.append(cast(bytes, msg.get("body", b"")))
                 more_body = msg.get("more_body", False)
+
+        raw_body = b"".join(body_chunks)
 
         # Build a replay receive so the downstream handler gets the same body
         msg_iter = iter(messages)

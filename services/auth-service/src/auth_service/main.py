@@ -26,7 +26,6 @@ from auth_service.routers.health import router as health_router
 from auth_service.token_service import _executor
 
 import logging
-from sqlalchemy import text
 
 logger = logging.getLogger("auth_service")
 
@@ -83,9 +82,15 @@ app = FastAPI(
     redoc_url=None if settings.environment == "prod" else "/redoc",
 )
 
-# Middleware stack (outermost first ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Starlette applies in reverse registration order)
+from auth_service.observability import HTTP_REQUESTS_TOTAL, REQUEST_DURATION, get_standard_labels
+# Middleware stack (outermost first — Starlette applies in reverse registration order)
 app.add_middleware(RequestIdMiddleware)
-app.add_middleware(PrometheusMiddleware)
+app.add_middleware(
+    PrometheusMiddleware,
+    requests_counter=HTTP_REQUESTS_TOTAL,
+    duration_histogram=REQUEST_DURATION,
+    label_provider=get_standard_labels,
+)
 
 # RateLimitMiddleware is a raw ASGI middleware (not BaseHTTPMiddleware),
 # so it must be added via add_middleware with the class, not an instance.

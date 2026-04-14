@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-from fleet_service.config import settings
 from platform_common import (
     RedisConfig,
     init_redis,
-    get_redis,
-    close_redis,
-    check_redis_health,
-    override_redis,
 )
+
+from fleet_service.config import settings
 
 
 async def setup_redis() -> None:

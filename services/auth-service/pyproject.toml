@@ -19,6 +19,7 @@ dependencies = [
     "prometheus-client>=0.21.0",
     "confluent-kafka>=2.5.0",
     "redis[asyncio]>=5.0.0",
+    "starlette>=0.38.0",
     "platform-auth",
     "platform-common",
     "opentelemetry-sdk",
@@ -55,3 +56,7 @@ pythonpath = ["src", "../../packages/platform-auth/src"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
+
+[tool.uv.sources]
+platform-auth = { workspace = true }
+platform-common = { workspace = true }

@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 from typing import Any
 
 from platform_common.consumer import KafkaConsumerBase
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from identity_service.config import settings
 from identity_service.database import async_session_factory

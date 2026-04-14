@@ -6,7 +6,6 @@ Create Date: 2026-04-07
 """
 
 from alembic import op
-import sqlalchemy as sa
 # sa is kept for potential future expansion but currently unused in this specific patch
 
 
