@@ -30,6 +30,7 @@ dependencies = [
 [project.scripts]
 identity-api = "identity_service.entrypoints.api:main"
 identity-outbox-worker = "identity_service.entrypoints.outbox_worker:main"
+identity-registration-worker = "identity_service.workers.registration_consumer:main"
 
 [project.optional-dependencies]
 dev = [

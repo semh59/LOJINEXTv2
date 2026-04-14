@@ -55,8 +55,7 @@ async def probe_broker() -> tuple[bool, str]:
     """Forensic probe to check broker connectivity."""
     broker = create_broker()
     try:
-        ok = await broker.check_health()
-        return ok, "ok" if ok else "health check failed"
+        await broker.check_health()
+        return True, "ok"
     except Exception as e:
-        # We don't want to crash or report unhealthy just because the broker is starting up
-        return True, f"broker_connectivity_pending: {str(e)}"
+        return False, str(e)

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from identity_service.config import settings
-from identity_service.redis_client import get_redis
+from auth_service.config import settings
+from auth_service.redis_client import get_redis
 
 
 async def block_token(jti: str, *, ttl_seconds: int | None = None) -> None:

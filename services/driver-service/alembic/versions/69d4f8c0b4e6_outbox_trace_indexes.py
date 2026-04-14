@@ -14,6 +14,9 @@ depends_on = None
 
 
 def upgrade() -> None:
+    import sqlalchemy as sa
+    op.add_column("driver_outbox", sa.Column("correlation_id", sa.String(length=64), nullable=True))
+    op.add_column("driver_outbox", sa.Column("causation_id", sa.String(length=64), nullable=True))
     op.create_index("ix_driver_outbox_correlation", "driver_outbox", ["correlation_id"])
     op.create_index("ix_driver_outbox_causation", "driver_outbox", ["causation_id"])
 
@@ -21,3 +24,5 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("ix_driver_outbox_causation", table_name="driver_outbox")
     op.drop_index("ix_driver_outbox_correlation", table_name="driver_outbox")
+    op.drop_column("driver_outbox", "correlation_id")
+    op.drop_column("driver_outbox", "causation_id")

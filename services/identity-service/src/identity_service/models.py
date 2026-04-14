@@ -21,7 +21,6 @@ class IdentityUserModel(Base):
     user_id: Mapped[str] = mapped_column(String(26), primary_key=True)
     username: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
-    password_hash: Mapped[str] = mapped_column(Text(), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean(), default=True, nullable=False)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -73,36 +72,6 @@ class IdentityGroupPermissionModel(Base):
         String(128),
         ForeignKey("identity_permissions.permission_key", ondelete="CASCADE"),
         primary_key=True,
-    )
-
-
-class IdentitySigningKeyModel(Base):
-    __tablename__ = "identity_signing_keys"
-
-    kid: Mapped[str] = mapped_column(String(64), primary_key=True)
-    algorithm: Mapped[str] = mapped_column(String(16), nullable=False)
-    public_key_pem: Mapped[str] = mapped_column(Text(), nullable=False)
-    private_key_ciphertext_b64: Mapped[str] = mapped_column(Text(), nullable=False)
-    private_key_kek_version: Mapped[str] = mapped_column(String(32), nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean(), default=True, nullable=False)
-    created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    retired_at_utc: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-
-    __table_args__ = (Index("ix_identity_signing_keys_active", "is_active", "created_at_utc"),)
-
-
-class IdentityServiceClientModel(Base):
-    __tablename__ = "identity_service_clients"
-
-    client_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    service_name: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
-    client_secret_hash: Mapped[str] = mapped_column(Text(), nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean(), default=True, nullable=False)
-    created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    rotated_at_utc: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
     )
 
 
@@ -169,30 +138,6 @@ class IdentityOutboxModel(Base):
             "publish_status",
             "created_at_utc",
         ),
-    )
-
-
-class IdentityRefreshTokenModel(Base):
-    __tablename__ = "identity_refresh_tokens"
-
-    token_id: Mapped[str] = mapped_column(String(26), primary_key=True)
-    user_id: Mapped[str] = mapped_column(
-        String(26),
-        ForeignKey("identity_users.user_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    token_hash: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
-    family_id: Mapped[Optional[str]] = mapped_column(String(26), nullable=True)
-    expires_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    revoked_at_utc: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-    __table_args__ = (
-        Index("ix_identity_refresh_tokens_user", "user_id"),
-        Index("ix_identity_refresh_tokens_expires", "expires_at_utc"),
-        Index("ix_identity_refresh_tokens_family", "family_id"),
     )
 
 

@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "group.id": "trip_service_saga_cg",
             "client.id": "trip_service_saga_consumer",
         },
-        topics=["driver.events.v1", "fleet.events.v1", "location-events"],
+        topics=["driver.events.v1", "fleet.events.v1", "location.events.v1"],
     )
     await saga_consumer.start()
 

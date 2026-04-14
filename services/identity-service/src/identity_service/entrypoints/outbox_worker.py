@@ -28,7 +28,7 @@ async def _run() -> None:
     )
     await setup_redis()
 
-    broker = create_broker(settings.resolved_broker_backend)
+    broker = create_broker(settings.resolved_broker_type)
     shutdown_event = asyncio.Event()
 
     loop = asyncio.get_running_loop()

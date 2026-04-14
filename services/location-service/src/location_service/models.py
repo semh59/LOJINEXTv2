@@ -15,7 +15,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from ulid import ULID
 
@@ -169,12 +169,12 @@ class RouteVersion(Base):
     duration_validation_delta_pct: Mapped[Optional[float]] = mapped_column(Numeric(6, 3), nullable=True)
     endpoint_validation_delta_m: Mapped[Optional[float]] = mapped_column(Numeric(8, 2), nullable=True)
 
-    field_origin_matrix_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    field_origin_matrix_json: Mapped[str] = mapped_column(Text, nullable=False)
     field_origin_matrix_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    road_type_distribution_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    speed_limit_distribution_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    urban_distribution_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    warnings_json: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
+    road_type_distribution_json: Mapped[str] = mapped_column(Text, nullable=False)
+    speed_limit_distribution_json: Mapped[str] = mapped_column(Text, nullable=False)
+    urban_distribution_json: Mapped[str] = mapped_column(Text, nullable=False)
+    warnings_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
 
     refresh_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     processing_algorithm_version: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -318,7 +318,7 @@ class BulkRefreshJob(Base):
     bulk_refresh_job_id: Mapped[str] = mapped_column(String(26), primary_key=True, default=lambda: str(ULID()))
     job_status: Mapped[BulkRefreshStatus] = mapped_column(String(50), nullable=False)
     trigger_type: Mapped[TriggerType] = mapped_column(String(50), nullable=False)
-    selection_scope_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    selection_scope_json: Mapped[str] = mapped_column(Text, nullable=False)
 
     total_pairs: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     processed_pairs: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -374,7 +374,7 @@ class IdempotencyKey(Base):
     locked_at_utc: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     response_status: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    response_headers_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    response_headers_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     response_body: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     response_truncated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
@@ -441,8 +441,8 @@ class LocationAuditLogModel(Base):
     action_type: Mapped[str] = mapped_column(String(32), nullable=False)
     actor_id: Mapped[str] = mapped_column(String(64), nullable=False)
     actor_role: Mapped[str] = mapped_column(String(32), nullable=False)
-    old_snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
-    new_snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    old_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     request_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

@@ -1,4 +1,4 @@
-"""Auth dependencies for identity-service."""
+"""Auth dependencies for auth-service."""
 
 from __future__ import annotations
 
@@ -9,14 +9,14 @@ from platform_auth import PlatformRole
 from platform_auth.dependencies import parse_bearer_token
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from identity_service.database import get_session
-from identity_service.errors import (
-    identity_conflict,
-    identity_forbidden,
-    identity_unauthorized,
+from auth_service.database import get_session
+from auth_service.errors import (
+    auth_conflict,
+    auth_forbidden,
+    auth_unauthorized,
 )
-from identity_service.models import IdentityUserModel
-from identity_service.token_service import (
+from auth_service.models import AuthCredentials
+from auth_service.token_service import (
     InvalidUserRoleAssignmentsError,
     build_user_profile,
     decode_access_token,
@@ -29,20 +29,20 @@ async def current_user(
 ) -> dict[str, object]:
     """Resolve the current authenticated user."""
     if authorization is None:
-        raise identity_unauthorized("Authorization header is required.")
+        raise auth_unauthorized("Authorization header is required.")
     try:
         token = parse_bearer_token(authorization)
         claims = await decode_access_token(session, token)
     except Exception as exc:  # noqa: BLE001
-        raise identity_unauthorized("Invalid or expired token.") from exc
+        raise auth_unauthorized("Invalid or expired token.") from exc
 
-    user = await session.get(IdentityUserModel, claims.sub)
+    user = await session.get(AuthCredentials, claims.sub)
     if user is None or not user.is_active:
-        raise identity_unauthorized("User is inactive or missing.")
+        raise auth_unauthorized("User is inactive or missing.")
     try:
         return await build_user_profile(session, user)
     except InvalidUserRoleAssignmentsError as exc:
-        raise identity_conflict(str(exc)) from exc
+        raise auth_conflict(str(exc)) from exc
 
 
 def require_role(role_name: str) -> Callable:
@@ -54,7 +54,7 @@ def require_role(role_name: str) -> Callable:
         user: dict[str, object] = Depends(current_user),
     ) -> dict[str, object]:
         if user.get("role") != expected_role:
-            raise identity_forbidden(f"{expected_role} role required.")
+            raise auth_forbidden(f"{expected_role} role required.")
         return user
 
     return _require_role

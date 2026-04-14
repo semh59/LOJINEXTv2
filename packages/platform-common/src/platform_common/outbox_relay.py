@@ -279,7 +279,10 @@ class OutboxRelayBase:
     async def _mark_failed(self, session: AsyncSession, row: Any, exc: Exception) -> None:
         """Handle failure, update attempt count and potentially dead-letter."""
         row.attempt_count += 1
-        row.last_error_code = str(exc)[:100]
+        if hasattr(row, "last_error_code"):
+            row.last_error_code = str(exc)[:100]
+        elif hasattr(row, "last_error"):
+            row.last_error = str(exc)[:100]
         row.claim_token = None
         row.claim_expires_at_utc = None
         row.claimed_by_worker = None

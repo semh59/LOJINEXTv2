@@ -214,24 +214,19 @@ class TripService:
             TRIP_COMPLETED_TOTAL.labels(**get_standard_labels()).inc()
 
         try:
+            if effective_key:
+                await _save_idempotency_record(
+                    self.session,
+                    idempotency_key=effective_key,
+                    endpoint_fingerprint=endpoint_fp,
+                    request_hash=request_hash,
+                    response_status=201,
+                    response_body=resource_dict,
+                    response_headers=headers,
+                )
             await self.session.commit()
         except IntegrityError as exc:
             raise _map_integrity_error(exc, trip_no=trip.trip_no) from exc
-
-        resource = trip_to_resource(trip)
-        resource_dict = resource.model_dump(mode="json")
-        headers = self._response_headers(trip)
-
-        if effective_key:
-            await _save_idempotency_record(
-                self.session,
-                idempotency_key=effective_key,
-                endpoint_fingerprint=endpoint_fp,
-                request_hash=request_hash,
-                response_status=201,
-                response_body=resource_dict,
-                response_headers=headers,
-            )
 
         return resource_dict, headers
 
@@ -642,22 +637,21 @@ class TripService:
             await _create_outbox_event(self.session, trip, "trip.completed.v1")
             TRIP_COMPLETED_TOTAL.labels(**get_standard_labels()).inc()
 
-        try:
-            await self.session.commit()
-        except IntegrityError as exc:
-            raise _map_integrity_error(exc, trip_no=trip.trip_no) from exc
-
         resource_dict = trip_to_resource(trip).model_dump(mode="json")
         headers = self._response_headers(trip)
 
-        if effective_key:
-            await _save_idempotency_record(
-                self.session,
-                idempotency_key=effective_key,
-                endpoint_fingerprint=endpoint_fp,
-                request_hash=request_hash,
-                response_status=201,
-                response_body=resource_dict,
-                response_headers=headers,
-            )
+        try:
+            if effective_key:
+                await _save_idempotency_record(
+                    self.session,
+                    idempotency_key=effective_key,
+                    endpoint_fingerprint=endpoint_fp,
+                    request_hash=request_hash,
+                    response_status=201,
+                    response_body=resource_dict,
+                    response_headers=headers,
+                )
+            await self.session.commit()
+        except IntegrityError as exc:
+            raise _map_integrity_error(exc, trip_no=trip.trip_no) from exc
         return resource_dict, headers

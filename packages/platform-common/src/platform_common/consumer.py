@@ -46,6 +46,7 @@ class KafkaConsumerBase(abc.ABC):
         config.setdefault("auto.offset.reset", "earliest")
 
         self.consumer = ConfluentConsumer(config)
+        self._enable_auto_commit = config.get("enable.auto.commit", False)
         self.topics = topics
         self.poll_timeout = poll_timeout
         self._running = False
@@ -103,7 +104,7 @@ class KafkaConsumerBase(abc.ABC):
             # Process the message
             try:
                 await self._process_message(msg)
-                if not self.consumer.config().get('enable.auto.commit'):
+                if not self._enable_auto_commit:
                     # Manually commit the offset internally
                     await loop.run_in_executor(None, self.consumer.commit, msg)
             except asyncio.CancelledError:

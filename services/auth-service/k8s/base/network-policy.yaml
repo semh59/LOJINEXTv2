@@ -1,0 +1,48 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: identity-service-isolation
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: identity-service
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow traffic from Nginx Gateway
+    - from:
+        - podSelector:
+            matchLabels:
+              app: nginx-gateway
+      ports:
+        - protocol: TCP
+          port: 8105
+    # Allow traffic from all internal platform services
+    - from:
+        - podSelector:
+            matchLabels:
+              part-of: lojinext-platform
+      ports:
+        - protocol: TCP
+          port: 8105
+  egress:
+    # Allow egress to external dependencies
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+        - podSelector:
+            matchLabels:
+              app: kafka
+        - podSelector:
+            matchLabels:
+              app: postgres
+    # Allow DNS
+    - to:
+        - ports:
+            - protocol: UDP
+              port: 53
+            - protocol: TCP
+              port: 53

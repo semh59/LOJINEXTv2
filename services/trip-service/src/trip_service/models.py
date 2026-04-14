@@ -18,7 +18,6 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 _COMPLETE_TRIP_SQL = """
@@ -196,7 +195,7 @@ class TripTripEvidence(Base):
     normalized_trailer_plate: Mapped[str | None] = mapped_column(String(50), nullable=True)
     origin_name_raw: Mapped[str | None] = mapped_column(String(200), nullable=True)
     destination_name_raw: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    raw_payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    raw_payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     trip: Mapped["TripTrip"] = relationship(back_populates="evidence")
@@ -275,7 +274,7 @@ class TripTripDeleteAudit(Base):
     actor_id: Mapped[str] = mapped_column(String(26), nullable=False)
     actor_role: Mapped[str] = mapped_column(String(32), nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
-    snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
     deleted_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -293,9 +292,9 @@ class TripAuditLogModel(Base):
     audit_id: Mapped[str] = mapped_column(String(26), primary_key=True)
     trip_id: Mapped[str] = mapped_column(String(26), nullable=False)
     action_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    changed_fields_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
-    old_snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
-    new_snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    changed_fields_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    old_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     actor_id: Mapped[str] = mapped_column(String(26), nullable=False)
     actor_role: Mapped[str] = mapped_column(String(32), nullable=False)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -348,34 +347,15 @@ class TripIdempotencyRecord(Base):
     endpoint_fingerprint: Mapped[str] = mapped_column(Text, primary_key=True)
     request_hash: Mapped[str] = mapped_column(Text, nullable=False)
     response_status: Mapped[int] = mapped_column(Integer, nullable=False)
-    response_headers_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    response_body_json: Mapped[dict[str, Any] | str] = mapped_column(JSONB, nullable=False)
+    response_headers_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    response_body_json: Mapped[str] = mapped_column(Text, nullable=False)
     created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     __table_args__ = (Index("ix_trip_idempotency_expires", "expires_at_utc"),)
 
 
-class TripSagaRecord(Base):
-    """SAGA Orchestrator state tracking for Trip Booking transactions."""
 
-    __tablename__ = "trip_saga_states"
-
-    id: Mapped[str] = mapped_column(String(26), primary_key=True)
-    trip_id: Mapped[str] = mapped_column(String(26), ForeignKey("trip_trips.id"), unique=True, nullable=False)
-    saga_status: Mapped[str] = mapped_column(String(50), nullable=False)
-    current_step: Mapped[str] = mapped_column(String(100), nullable=False)
-    failures_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at_utc: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=text("timezone('utc', now())"),
-        nullable=False,
-    )
-    updated_at_utc: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=text("timezone('utc', now())"),
-        nullable=False,
-    )
 
 
 class WorkerHeartbeat(Base):

@@ -20,8 +20,11 @@ from platform_common import OutboxPublishStatus, compute_data_quality_flag
 from trip_service.config import settings
 from trip_service.database import get_session
 from trip_service.dependencies import LocationTripContext
-from trip_service.enums import  
-from platform_auth import PlatformRole, PlatformActorType ReviewReasonCode, SourceType, TripStatus
+from trip_service.enums import (
+    DataQualityFlag, EnrichmentStatus, EvidenceKind, EvidenceSource,
+    ReviewReasonCode, RouteStatus, SourceType, TripStatus,
+)
+from platform_auth import PlatformRole, PlatformActorType
 from trip_service.errors import (
     idempotency_in_flight,
     idempotency_payload_mismatch,

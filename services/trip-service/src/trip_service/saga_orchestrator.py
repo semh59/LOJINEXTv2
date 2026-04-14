@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from trip_service.models import TripSagaRecord, TripTrip
+from trip_service.trip_helpers import _write_outbox
 
 logger = logging.getLogger("trip_service.saga")
 
@@ -28,7 +29,13 @@ class TripSagaCoordinator:
             updated_at_utc=utc_now(),
         )
         self.session.add(record)
-        # Assuming Event Outboxing to Driver Service is handled here or by trip_helpers
+        # Event Outboxing to Driver Service
+        await _write_outbox(
+            self.session,
+            trip_id=trip_id,
+            event_name="driver.reserve.command",
+            payload={"trip_id": trip_id, "command": "reserve_driver"}
+        )
         logger.info(f"SAGA started for trip {trip_id}, step: RESERVING_DRIVER")
 
     async def handle_event(self, event_name: str, payload: dict[str, Any]) -> None:
@@ -49,6 +56,12 @@ class TripSagaCoordinator:
                 record.current_step = "RESERVING_FLEET"
                 record.updated_at_utc = utc_now()
                 # Trigger Fleet Reservation
+                await _write_outbox(
+                    self.session,
+                    trip_id=trip_id,
+                    event_name="fleet.reserve.command",
+                    payload={"trip_id": trip_id, "command": "reserve_fleet"}
+                )
                 logger.info(f"SAGA {trip_id}: Driver reserved, moving to RESERVING_FLEET")
 
         elif event_name == "fleet.vehicle.reserved":
@@ -63,6 +76,12 @@ class TripSagaCoordinator:
                 trip = trip_res.scalar_one_or_none()
                 if trip:
                     trip.status = "ASSIGNED"
+                await _write_outbox(
+                    self.session,
+                    trip_id=trip_id,
+                    event_name="trip.assigned.v1",
+                    payload={"trip_id": trip_id, "status": "ASSIGNED"}
+                )
 
         elif event_name == "fleet.vehicle.failed":
             if record.current_step in ["RESERVING_FLEET", "RESERVING_DRIVER"]:
@@ -79,10 +98,22 @@ class TripSagaCoordinator:
         record.failures_json = json.dumps({"reason": reason})
         record.updated_at_utc = utc_now()
 
-        # E.g., issue driver.reservation.cancel command
+        # Issue driver.reservation.cancel command
+        await _write_outbox(
+            self.session,
+            trip_id=trip_id,
+            event_name="driver.cancel.command",
+            payload={"trip_id": trip_id, "reason": reason}
+        )
         logger.warning(f"SAGA {trip_id} COMPENSATING due to {reason}")
 
         trip_res = await self.session.execute(select(TripTrip).where(TripTrip.id == trip_id))
         trip = trip_res.scalar_one_or_none()
         if trip:
             trip.status = "CANCELLED"
+            await _write_outbox(
+                self.session,
+                trip_id=trip_id,
+                event_name="trip.cancelled.v1",
+                payload={"trip_id": trip_id, "status": "CANCELLED", "reason": reason}
+            )

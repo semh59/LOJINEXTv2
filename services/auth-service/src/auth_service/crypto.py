@@ -15,22 +15,22 @@ def _decode_base64(value: str) -> bytes:
 
 def require_kek_bytes() -> bytes:
     """Return the configured key-encryption key bytes."""
-    raw = os.getenv("IDENTITY_KEY_ENCRYPTION_KEY_B64", "").strip()
+    raw = os.getenv("AUTH_KEY_ENCRYPTION_KEY_B64", "").strip()
     if not raw:
-        raise ValueError("IDENTITY_KEY_ENCRYPTION_KEY_B64 is required.")
+        raise ValueError("AUTH_KEY_ENCRYPTION_KEY_B64 is required.")
     key = _decode_base64(raw)
     if len(key) != 32:
         raise ValueError(
-            "IDENTITY_KEY_ENCRYPTION_KEY_B64 must decode to exactly 32 bytes."
+            "AUTH_KEY_ENCRYPTION_KEY_B64 must decode to exactly 32 bytes."
         )
     return key
 
 
 def require_kek_version() -> str:
     """Return the configured KEK version string."""
-    version = os.getenv("IDENTITY_KEY_ENCRYPTION_KEY_VERSION", "").strip()
+    version = os.getenv("AUTH_KEY_ENCRYPTION_KEY_VERSION", "").strip()
     if not version:
-        raise ValueError("IDENTITY_KEY_ENCRYPTION_KEY_VERSION is required.")
+        raise ValueError("AUTH_KEY_ENCRYPTION_KEY_VERSION is required.")
     return version
 
 

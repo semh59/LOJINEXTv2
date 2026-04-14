@@ -3,18 +3,15 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, Request
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from identity_service.auth import require_role
 from identity_service.database import get_session
-from identity_service.errors import identity_conflict, identity_not_found
 from identity_service.models import (
     IdentityAuditLogModel,
-    IdentityRefreshTokenModel,
     IdentityUserModel,
 )
-from identity_service.password import hash_secret
 from identity_service.schemas import (
     AdminCreateUserRequest,
     AdminUpdateUserRequest,
@@ -23,7 +20,7 @@ from identity_service.schemas import (
     UserListResponse,
     UserResponse,
 )
-from identity_service.token_service import (
+from identity_service.utils import (
     _write_outbox,
     assign_groups,
     build_user_profile,
@@ -87,19 +84,20 @@ async def create_user(
         select(IdentityUserModel).where(IdentityUserModel.username == body.username)
     )
     if existing.scalar_one_or_none():
+        from identity_service.errors import identity_conflict
         raise identity_conflict("Username already exists.")
 
     existing_email = await session.execute(
         select(IdentityUserModel).where(IdentityUserModel.email == body.email)
     )
     if existing_email.scalar_one_or_none():
+        from identity_service.errors import identity_conflict
         raise identity_conflict("Email already exists.")
 
     user = IdentityUserModel(
         user_id=new_ulid(),
         username=body.username,
         email=body.email,
-        password_hash=hash_secret(body.password),
         is_active=body.is_active,
         created_at_utc=now_utc(),
         updated_at_utc=now_utc(),
@@ -139,7 +137,6 @@ async def create_user(
     return UserResponse(**profile)
 
 
-@router.patch("/api/v1/users/{user_id}", response_model=UserResponse)
 async def update_user(
     user_id: str,
     request: Request,
@@ -150,6 +147,7 @@ async def update_user(
     """Update user attributes and group memberships."""
     user = await session.get(IdentityUserModel, user_id)
     if not user:
+        from identity_service.errors import identity_not_found
         raise identity_not_found("User not found.")
 
     old_profile = await build_user_profile(session, user)
@@ -162,21 +160,12 @@ async def update_user(
 
     if body.email:
         user.email = body.email
-    if body.password:
-        user.password_hash = hash_secret(body.password)
 
     if body.is_active is not None:
         if body.is_active is False and user.is_active:
-            # Deactivation: stamp timestamp and revoke all active refresh tokens
+            # Deactivation: stamp timestamp
             user.deactivated_at_utc = now_utc()
-            await session.execute(
-                update(IdentityRefreshTokenModel)
-                .where(
-                    IdentityRefreshTokenModel.user_id == user.user_id,
-                    IdentityRefreshTokenModel.revoked_at_utc.is_(None),
-                )
-                .values(revoked_at_utc=now_utc())
-            )
+            # Note: Refresh token revocation handled by auth-service session management
         user.is_active = body.is_active
 
     user.updated_at_utc = now_utc()

@@ -22,16 +22,9 @@ from identity_service.middleware import (
     RequestIdMiddleware,
 )
 from identity_service.routers.admin import router as admin_router
-from identity_service.routers.auth import router as auth_router
 from identity_service.routers.health import router as health_router
-from identity_service.token_service import (
-    _executor,
-    seed_bootstrap_state,
-    validate_bootstrap_state,
-)
 
 import logging
-from sqlalchemy import text
 
 logger = logging.getLogger("identity_service")
 
@@ -60,20 +53,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     instrument_app(app)
     await setup_redis()
 
-    async with async_session_factory() as session:
-        try:
-            if engine.dialect.name == "postgresql":
-                await session.execute(text("SELECT pg_advisory_xact_lock(78216)"))
-                logger.info("Acquired bootstrap advisory lock")
-
-            await seed_bootstrap_state(session)
-            await validate_bootstrap_state(session)
-            await session.commit()
-            logger.info("Bootstrap complete")
-        except Exception as exc:
-            await session.rollback()
-            logger.error(f"Failed to bootstrap Identity Service: {exc}")
-            raise RuntimeError(f"Failed to bootstrap Identity Service: {exc}") from exc
+    # Identity Service now acts as a Profile/RBAC provider.
+    # Bootstrap logic (credentials, signing keys) moved to auth-service.
+    logger.info("Identity Service started (Profile/RBAC provider)")
 
     yield
 
@@ -82,7 +64,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await close_redis()
     shutdown_tracing()
     await engine.dispose()
-    _executor.shutdown(wait=True)
     logger.info("Identity Service shutdown complete")
 
 
@@ -128,7 +109,6 @@ async def unexpected_exception_handler(request: Request, exc: Exception):
 
 
 app.include_router(health_router)
-app.include_router(auth_router)
 app.include_router(admin_router)
 
 

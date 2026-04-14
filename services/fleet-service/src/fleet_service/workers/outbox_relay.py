@@ -1,13 +1,12 @@
 """Hardened outbox relay worker for Fleet Service — standardized to platform-common."""
 
-from __future__ import annotations
-
+import json
 import logging
 from typing import Any
 
+from platform_common import MessageBroker, OutboxMessage, OutboxRelayBase, RobustJSONEncoder
 from fleet_service.database import async_session_factory
 from fleet_service.models import FleetOutbox
-from platform_common import OutboxRelayBase, MessageBroker, OutboxMessage
 
 logger = logging.getLogger("fleet_service.outbox_relay")
 
@@ -29,16 +28,14 @@ class FleetOutboxRelay(OutboxRelayBase):
 
     def map_row_to_message(self, row: FleetOutbox) -> OutboxMessage:
         """Map FleetOutbox row to the canonical OutboxMessage."""
-        import json
-
         # fleet-service stores payload as Text (JSON string).
-        # Guard against JSONB fallback returning a dict on older DB schemas.
+        # Guard against JSONB legacy data returning a dict.
         raw = row.payload_json
         if isinstance(raw, dict):
-            payload_str = json.dumps(raw, default=str)
+            payload_str = json.dumps(raw, cls=RobustJSONEncoder)
         else:
             # Validate it is parseable JSON so we surface corruption early.
-            json.loads(raw)  # raises ValueError if malformed
+            json.loads(raw)
             payload_str = raw
 
         return OutboxMessage(

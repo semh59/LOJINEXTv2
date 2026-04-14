@@ -8,26 +8,26 @@ import jwt
 from fastapi import APIRouter, Depends, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from identity_service.auth import current_user
-from identity_service.blocklist import block_token
-from identity_service.database import get_session
-from identity_service.errors import (
-    identity_conflict,
-    identity_unauthorized,
-    identity_validation_error,
+from auth_service.auth import current_user
+from auth_service.blocklist import block_token
+from auth_service.database import get_session
+from auth_service.errors import (
+    auth_conflict,
+    auth_unauthorized,
+    auth_validation_error,
 )
-from identity_service.schemas import (
+from auth_service.schemas import (
     JWKSResponse,
     LoginRequest,
     LogoutRequest,
     MeResponse,
     RefreshRequest,
+    RegisterRequest,
     ServiceTokenRequest,
     ServiceTokenResponse,
     TokenPairResponse,
 )
-from identity_service.token_service import (
-    InvalidUserRoleAssignmentsError,
+from auth_service.token_service import (
     authenticate_user,
     issue_service_token,
     issue_token_pair,
@@ -39,19 +39,32 @@ from identity_service.token_service import (
 router = APIRouter(tags=["identity-auth"])
 
 
+@router.post("/auth/v1/register", response_model=TokenPairResponse)
+async def register(
+    body: RegisterRequest,
+    session: AsyncSession = Depends(get_session),
+    x_request_id: str | None = Header(None, alias="X-Request-ID"),
+) -> TokenPairResponse:
+    from sqlalchemy.exc import IntegrityError
+    from auth_service.token_service import register_user
+    try:
+        cred = await register_user(session, body.email, body.password, request_id=x_request_id)
+        token_pair = await issue_token_pair(session, cred)
+        await session.commit()
+        return TokenPairResponse(**token_pair)
+    except IntegrityError as exc:
+        await session.rollback()
+        raise auth_conflict("Email already registered.") from exc
+
 @router.post("/auth/v1/login", response_model=TokenPairResponse)
 async def login(
     body: LoginRequest, session: AsyncSession = Depends(get_session)
 ) -> TokenPairResponse:
     """Authenticate a user and issue access/refresh tokens."""
-    user = await authenticate_user(session, body.username, body.password)
-    if user is None:
-        raise identity_unauthorized("Invalid username or password.")
-    try:
-        token_pair = await issue_token_pair(session, user)
-    except InvalidUserRoleAssignmentsError as exc:
-        await session.rollback()
-        raise identity_conflict(str(exc)) from exc
+    cred = await authenticate_user(session, body.email, body.password)
+    if cred is None:
+        raise auth_unauthorized("Invalid username or password.")
+    token_pair = await issue_token_pair(session, cred)
     await session.commit()
     return TokenPairResponse(**token_pair)
 
@@ -89,12 +102,9 @@ async def refresh(
     """Rotate a refresh token into a fresh token pair."""
     try:
         token_pair = await rotate_refresh_token(session, body.refresh_token)
-    except InvalidUserRoleAssignmentsError as exc:
-        await session.rollback()
-        raise identity_conflict(str(exc)) from exc
     except ValueError as exc:
         await session.rollback()
-        raise identity_unauthorized(str(exc)) from exc
+        raise auth_unauthorized(str(exc)) from exc
     await session.commit()
     return TokenPairResponse(**token_pair)
 
@@ -117,8 +127,8 @@ async def service_token(
         )
     except ValueError as exc:
         if "audience" in str(exc).lower():
-            raise identity_validation_error(str(exc)) from exc
-        raise identity_unauthorized(str(exc)) from exc
+            raise auth_validation_error(str(exc)) from exc
+        raise auth_unauthorized(str(exc)) from exc
     await session.commit()
     return ServiceTokenResponse(**result)
 
