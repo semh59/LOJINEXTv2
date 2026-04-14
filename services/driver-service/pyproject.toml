@@ -40,6 +40,8 @@ dev = [
     "testcontainers[postgres]>=4.0.0",
     "ruff>=0.5.0",
     "mypy>=1.10.0",
+    "respx>=0.21.0",
+    "polyfactory>=2.16.0",
 ]
 
 [build-system]
